@@ -2,10 +2,11 @@
 
 Pixel-native Minecraft asset toolchain (V0.1).
 
-Entry point: `bun src/cli/index.ts` — distribution packaging is out of scope
-for V0.1. The frozen CLI surface (flags, envelopes, exit codes) lives in
-`docs/cli-surface.md`; this README only shows commands that were run
-verbatim, with their real outputs.
+Entry point for development: `bun src/cli/index.ts`. For installation,
+`mc-asset` ships through Homebrew — see `docs/homebrew.md` and
+`docs/release-playbook.md`. The frozen CLI surface (flags, envelopes, exit
+codes) lives in `docs/cli-surface.md`; this README only shows commands that
+were run verbatim, with their real outputs.
 
 V0.1 commands (five — `stub` in `--help` is a skeleton-test mount probe,
 not product surface):

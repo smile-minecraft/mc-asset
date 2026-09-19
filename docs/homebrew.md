@@ -1,5 +1,9 @@
 # Homebrew distribution (mc-asset)
 
+The full release/upgrade/rollback playbook with per-version checklists
+lives in `docs/release-playbook.md`; this page stays focused on the
+formula itself.
+
 Public-source strategy (decided): `mc-asset` ships as a public GitHub
 repository (`https://github.com/smile-minecraft/mc-asset`), and the
 Homebrew formula downloads the versioned tag tarball from the public
