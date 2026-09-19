@@ -20,6 +20,11 @@ jobs:
       - run: bun run build
       # The bundle targets node; prove it loads outside Bun.
       - run: node -e "import('./dist/index.js').then((m) => { if (typeof m.VERSION !== 'string' || m.VERSION.length === 0) process.exit(1); console.log('dist VERSION:', m.VERSION); })"
+      # Cross-runtime equivalence: fixed fixtures produce byte-identical
+      # PNG / .mcpx / canonical JSON from the Bun source CLI and the Node
+      # bundle. Any difference fails this step (and the job).
+      - name: runtime equivalence (Bun source vs Node bundle)
+        run: node scripts/compare-runtime.mjs
       # §101.1 dependency gate: sharp / libvips / Skia must not appear.
       - name: dependency gate (§101.1)
         run: |
@@ -60,6 +65,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Bun is a build tool here only: it bundles, Node executes everything.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
       - run: npm install --no-audit --no-fund
       - run: npx tsc --noEmit
       - run: npx @biomejs/biome check .
@@ -69,6 +78,11 @@ jobs:
           for entry in $(find tests -name '*.node.ts' | sort); do
             node --test "$entry" || exit 1
           done
+      # Bundle under Node (Bun acts only as the bundler inside
+      # scripts/build.mjs), then prove Bun source CLI and Node bundle agree.
+      - run: node scripts/build.mjs
+      - name: runtime equivalence (Bun source vs Node bundle)
+        run: node scripts/compare-runtime.mjs
       - name: dependency gate (§101.1)
         run: |
           if grep -rEi 'sharp|libvips|skia' package.json package-lock.json 2>/dev/null; then
@@ -87,3 +101,25 @@ jobs:
             exit 1
           fi
           echo 'determinism guard passed'
+
+  # macOS smoke: install from a clean checkout, build, and run the
+  # render → analyze → validate main chain on fixed fixtures.
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: release smoke (render, analyze, validate)
+        run: |
+          smoke="$RUNNER_TEMP/mc-asset-smoke"
+          mkdir -p "$smoke"
+          node dist/mc-asset.js render tests/cli/fixtures/tiny.grid --output "$smoke/tiny.png"
+          node dist/mc-asset.js analyze "$smoke/tiny.png"
+          node dist/mc-asset.js validate "$smoke/tiny.png"
