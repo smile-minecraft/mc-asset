@@ -2,6 +2,10 @@ export type {
 	AnalyzeAlphaSection,
 	AnalyzeDominantColor,
 	AnalyzeOptions,
+	AnalyzePaletteCharacteristics,
+	AnalyzePaletteRoleCount,
+	AnalyzePixelArtCharacteristics,
+	AnalyzeRecommended,
 	AnalyzeReport,
 	AnalyzeWarning,
 } from "./metrics.ts";

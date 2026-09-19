@@ -262,6 +262,26 @@ export const VALIDATE_CASES: ValidateCase[] = [
 					predictedDescription:
 						"predicted profile minecraft:item prefers the items atlas without mipmaps.",
 				},
+				paletteCharacteristics: {
+					colorCount: 1,
+					alphaLevels: 1,
+					roles: [],
+					transparentPixels: 0,
+					partialAlphaPixels: 0,
+				},
+				pixelArtCharacteristics: {
+					resolution: { width: 2, height: 2 },
+					aspect: "1:1",
+					isolatedPixels: 0,
+					semiTransparentPixels: 0,
+					paletteSize: 1,
+					tileFriendly: true,
+				},
+				recommended: {
+					quantize: { colors: 1 },
+					cleanup: { classes: [] },
+					resize: { mode: "nearest" },
+				},
 				warnings: [],
 			};
 			const ok = validateReport(base, { filename: "sword.png" });

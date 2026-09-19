@@ -1,7 +1,6 @@
-import { readFile } from "node:fs/promises";
 import { type AnalyzeReport, analyzeCanvas } from "../analyze/metrics.ts";
 import { McAssetError } from "../core/errors.ts";
-import { decodePng } from "../io/png.ts";
+import { loadRasterCanvas } from "./canvas-input.ts";
 import {
 	emitEnvelope,
 	emitLog,
@@ -34,12 +33,22 @@ export interface AnalyzeResult extends AnalyzeReport {
 
 /** Minimal human report: the JSON envelope is the primary output. */
 export function formatHumanReport(report: AnalyzeReport): string {
+	const pixelArt = report.pixelArtCharacteristics;
+	const palette = report.paletteCharacteristics;
+	const recommended = report.recommended;
+	const cleanup =
+		recommended.cleanup.classes.length > 0
+			? recommended.cleanup.classes.join(",")
+			: "none";
 	const lines = [
 		`dimensions: ${report.dimensions.width}x${report.dimensions.height}`,
 		`colors: ${report.colorCount}`,
 		`alpha: predicted ${report.alpha.predictedClassification} (opaque=${report.alpha.opaquePixels} transparent=${report.alpha.transparentPixels} partial=${report.alpha.partialAlphaPixels})`,
 		`dominant: ${report.dominantColors.map((entry) => `${entry.hex} x${entry.count} (${entry.ratio})`).join(", ")}`,
 		`profile: ${report.profile.predictedDescription}`,
+		`palette: colorCount=${palette.colorCount} alphaLevels=${palette.alphaLevels} transparent=${palette.transparentPixels} partial=${palette.partialAlphaPixels}`,
+		`pixel-art: ${pixelArt.resolution.width}x${pixelArt.resolution.height} aspect=${pixelArt.aspect} isolated=${pixelArt.isolatedPixels} semiTransparent=${pixelArt.semiTransparentPixels} tileFriendly=${pixelArt.tileFriendly}`,
+		`recommended: quantize.colors=${recommended.quantize.colors} cleanup=${cleanup} resize=${recommended.resize.mode}`,
 	];
 	if (report.warnings.length > 0) {
 		for (const warning of report.warnings) {
@@ -51,7 +60,9 @@ export function formatHumanReport(report: AnalyzeReport): string {
 
 /**
  * Read-only report command: reads the input file, runs the pure engine,
- * prints the report. The input file is only read, never written.
+ * prints the report. The input file is only read, never written. Raster
+ * intake accepts PNG, JPEG, and WebP; .mcpx sources are rejected as
+ * UNSUPPORTED_IMAGE_FORMAT.
  */
 export async function runAnalyze(
 	image: string | undefined,
@@ -72,20 +83,11 @@ export async function runAnalyze(
 			minecraftVersion: options.minecraftVersion,
 			resourcePackVersion: options.resourcePackVersion,
 		});
-		let input: Uint8Array;
-		try {
-			input = new Uint8Array(await readFile(image));
-		} catch {
-			throw new McAssetError(
-				"FILESYSTEM_ERROR",
-				`Cannot read input: ${image}.`,
-			);
-		}
-		const decoded = decodePng(input);
-		const report = analyzeCanvas(decoded.canvas, {
+		const loaded = await loadRasterCanvas(image);
+		const report = analyzeCanvas(loaded.canvas, {
 			profile,
 			packFormat: target.packFormat,
-			sourceWarnings: decoded.warnings,
+			sourceWarnings: loaded.warnings,
 		});
 		const version = versionReportShape(target);
 		const targetSummary = formatVersionTarget(target);

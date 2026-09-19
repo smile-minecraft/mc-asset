@@ -779,23 +779,27 @@ describe("conformance: --json shapes and determinism", () => {
 		}
 	}, 60_000);
 
-	test("D5 gap: analyze claims no isolated-pixel or anti-aliasing detection", async () => {
+	test("D5 retired in V0.2: analyze reports measured isolatedPixels, still no anti-aliasing claim", async () => {
 		// §63 names cleanup detections (isolated pixel, anti-aliasing, …)
-		// without giving algorithms. V0.1 records the gap here and MUST NOT
-		// invent detections: the analyze report stays silent on them.
+		// without giving algorithms. V0.1 recorded that gap here and kept
+		// the analyze report silent on them. V0.2 retires the isolated half:
+		// pixelArtCharacteristics.isolatedPixels is a measured field with a
+		// fixed, golden-locked rule (opaque pixel whose existing 4-neighbors
+		// are all fully transparent), not an invented detection. The
+		// anti-aliasing half stays silent: V0.2 adds no AA detection.
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
 		try {
 			const png = await writeVectorPng(dir);
 			const jsoned = await runCli(["analyze", png, "--json"]);
 			expect(jsoned.code).toBe(0);
 			const body = stdoutText(jsoned).toLowerCase();
-			expect(body.includes("isolat")).toBe(false);
+			expect(body.includes("isolatedpixels")).toBe(true);
 			expect(body.includes("anti-alias") || body.includes("antialias")).toBe(
 				false,
 			);
 			const human = await runCli(["analyze", png]);
 			const humanBody = (stdoutText(human) + human.stderr).toLowerCase();
-			expect(humanBody.includes("isolat")).toBe(false);
+			expect(humanBody.includes("isolated=")).toBe(true);
 			expect(
 				humanBody.includes("anti-alias") || humanBody.includes("antialias"),
 			).toBe(false);
