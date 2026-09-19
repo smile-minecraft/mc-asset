@@ -16,7 +16,11 @@ class McAsset < Formula
     # to ../dist/mc-asset.js, so installing the launcher file on its own
     # would break the relative import.
     libexec.install "bin", "dist", "LICENSE", "THIRD_PARTY_NOTICES.md"
-    bin.write_exec_script libexec/"bin/mc-asset.js"
+    # write_exec_script derives the wrapper name from the source basename, so
+    # it would install bin/mc-asset.js instead of the documented bin/mc-asset
+    # command. Symlink with a rename instead: the launcher keeps its Node
+    # shebang and stays executable, and ../dist keeps resolving from libexec.
+    bin.install_symlink libexec/"bin/mc-asset.js" => "mc-asset"
   end
 
   test do

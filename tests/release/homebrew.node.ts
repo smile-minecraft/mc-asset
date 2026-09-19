@@ -94,6 +94,22 @@ describe("homebrew formula (static contract, no build required)", () => {
 		}
 	});
 
+	it("formula installs the command under the exact name mc-asset", () => {
+		const text = readFormula();
+		// write_exec_script names the wrapper after the source basename, so
+		// passing libexec/"bin/mc-asset.js" alone would install bin/mc-asset.js
+		// instead of the documented bin/mc-asset command. The install step
+		// must therefore rename the entry to exactly "mc-asset".
+		assert.ok(
+			text.includes('=> "mc-asset"'),
+			'formula install must rename the entry to exactly "mc-asset"',
+		);
+		assert.ok(
+			text.includes('bin/"mc-asset"'),
+			"formula test must exercise bin/mc-asset, not a .js filename",
+		);
+	});
+
 	it("formula test exercises the render-analyze-validate chain", () => {
 		const text = readFormula();
 		assert.ok(text.includes("test do"), "formula must define a test block");

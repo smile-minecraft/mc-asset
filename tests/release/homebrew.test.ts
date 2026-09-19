@@ -65,6 +65,16 @@ describe("homebrew formula (static)", () => {
 		expect(text).toMatch(/bin\.write_exec_script|bin\.install_symlink/);
 	});
 
+	test("formula installs the command under the exact name mc-asset", () => {
+		const text = readFormula();
+		// write_exec_script names the wrapper after the source basename, so
+		// passing libexec/"bin/mc-asset.js" alone would install bin/mc-asset.js
+		// instead of the documented bin/mc-asset command. The install step
+		// must therefore rename the entry to exactly "mc-asset".
+		expect(text).toMatch(/=>\s*"mc-asset"/);
+		expect(text).toContain('bin/"mc-asset"');
+	});
+
 	test("formula test block runs render, analyze and validate", () => {
 		const text = readFormula();
 		expect(text).toContain("test do");
