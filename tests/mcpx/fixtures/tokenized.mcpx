@@ -1,0 +1,18 @@
+mcpx 1
+
+[canvas]
+width = 3
+height = 2
+
+[palette]
+. = transparent
+C01 = #213548FF
+C02 = #A2D1E8FF role=light
+
+[layer base]
+visible = true
+opacity = 0.500
+
+[grid tokens]
+C01 C02 .
+. C02 C01
