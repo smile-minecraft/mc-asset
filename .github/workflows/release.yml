@@ -1,0 +1,58 @@
+name: release
+
+# Tag-triggered release only. No branch builds, no scheduled runs:
+# a GitHub Release is created exactly from the pushed v* tag.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      # Pin the source to the tag ref itself, never a moving branch.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Locked dependencies only; no unresolved ranges at release time.
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      # The tag name must equal v<package.json version>; anything else
+      # makes the script exit non-zero and fail the job.
+      - run: node scripts/release-artifacts.mjs --tag "${GITHUB_REF_NAME}" --out dist/release
+      # Recompute every manifest hash; a mismatch fails the release.
+      - run: >
+          node -e "const m = require('./dist/release/mc-asset-' +
+          require('./package.json').version + '/manifest.json');
+          const c = require('node:crypto');
+          const f = require('node:fs');
+          const p = require('node:path');
+          const dir = './dist/release/mc-asset-' + m.version;
+          for (const e of m.files) {
+            const d = f.readFileSync(p.join(dir, e.path));
+            if (c.createHash('sha256').update(d).digest('hex') !== e.sha256 ||
+              d.length !== e.size) { throw new Error('manifest mismatch: ' + e.path); }
+          }
+          console.log('manifest recomputes OK for tag ' + m.tag);"
+      - run: ls -la dist/release && cat dist/release/*.sha256
+      # Publish the tag release with the staged artifacts.
+      # Auth uses the ephemeral job token only; no hardcoded secrets.
+      - run: >
+          gh release create "${GITHUB_REF_NAME}"
+          --title "mc-asset ${GITHUB_REF_NAME}"
+          --notes "See docs/release-contract.md for the deterministic artifact contract."
+          "dist/release/mc-asset-${GITHUB_REF_NAME#v}.tar.gz"
+          "dist/release/mc-asset-${GITHUB_REF_NAME#v}.tar.gz.sha256"
+        env:
+          GH_TOKEN: ${{ github.token }}

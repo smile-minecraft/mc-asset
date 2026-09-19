@@ -15,7 +15,8 @@
 		"test": "bun test",
 		"test:typecheck": "tsc --noEmit",
 		"lint": "biome check .",
-		"build": "node scripts/build.mjs"
+		"build": "node scripts/build.mjs",
+		"release": "node scripts/release-artifacts.mjs"
 	},
 	"dependencies": {
 		"commander": "15.0.0",
