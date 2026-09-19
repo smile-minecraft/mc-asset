@@ -58,7 +58,115 @@ Deferred (names reserved, not V0.1): `pixelize`, `quantize`, `cleanup`,
   relevant command's input payload (t08 wires the flag).
 - `.pixel` MUST NOT appear anywhere as an extension.
 
-## Framework helpers for t08
+## Write commands (V0.1 production paths)
+
+```text
+import <image> [--output png] [--source mcpx] [--stdout] [--operations ops.json]
+render <grid>  [--output png] [--source mcpx] [--stdout] [--operations ops.json]
+build [source] [--stdin] [--output png] [--source mcpx] [--stdout] [--operations ops.json]
+```
+
+Common file flags per command: `--output`, `--stdout`, `--source`,
+`--force`, `--mkdir`, `--in-place`, `--input`, `--profile`, plus
+`--operations` below. `build` additionally accepts `--stdin` to read the
+`.mcpx` source from stdin instead of a path argument.
+
+- `--output <path>` carries PNG bytes; `--source <path>` carries the
+  editable `.mcpx` text (assigned before serialize, existing symbols kept).
+  Either artifact alone is a complete invocation: `--source` without
+  `--output` only saves the source (§58), `--output` without `--source`
+  only renders PNG.
+- `--in-place` rewrites the file input and implies force for that target
+  only: PNG back to the input for `import`/`render`, re-serialized `.mcpx`
+  back to the input for `build`. It needs a file input; with stdin input
+  it is INVALID_ARGUMENT. `--force` with `--in-place` is ARGUMENT_CONFLICT.
+- `--input <path>` backs `--in-place` when the input does not come from
+  the positional argument; disagreeing with the positional is
+  ARGUMENT_CONFLICT.
+- Missing `--output`/`--stdout`/`--source`/`--in-place` is OUTPUT_REQUIRED
+  and creates zero files. Every file target is existence-checked before
+  the first byte lands anywhere, so an OUTPUT_EXISTS refusal writes
+  nothing.
+- Minecraft profiles (`minecraft:item`, `minecraft:block`) export PNG
+  only (§34): an explicit `--output` path with any other extension is
+  UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT.
+
+## Batch operations (`--operations`)
+
+Pixel/rect/line/fill manipulation travels through `--operations <path>`
+on all three write commands, not through separate commands. The JSON body
+is the §29/§103 Pixel Spec: a bare array or an `{"operations": [...]}`.
+envelope; `id` is optional and unique when present; an empty array is a
+valid no-op. Use `--operations -` to read the body from stdin (stdin is
+consumed as bytes, never staged in a temp file). `build --stdin` together
+with `--operations -` is ARGUMENT_CONFLICT: one stdin stream cannot feed
+both.
+
+Supported `type` values mirror the typed core vocabulary: `setPixel`,
+`clearPixel`, `drawLine`, `drawRect`, `fillRect`, `floodFill`.
+
+- `color`: `transparent`, `#RRGGBB` (opaque), or `#RRGGBBAA`,
+  case-insensitive. Anything else is INVALID_ARGUMENT at
+  `operations[i].color`.
+- Coordinates (`x`/`y`, `from`/`to` pairs, `rect` objects) must be
+  integers; `from`/`to` are `[x, y]` pairs for `drawLine`, `rect` is
+  `{x, y, width, height}` with width/height at least 1 for
+  `drawRect`/`fillRect`. Violations are INVALID_ARGUMENT with the field
+  path (`operations[i].x`, `operations[i].from`, `operations[i].rect`,
+  ...). Out-of-canvas values pass this seam and fail in the core as
+  OUT_OF_BOUNDS with `operationIndex`/`operationId` in details.
+- `layerId` may be omitted only when the canvas has exactly one layer
+  (always true for `import`/`render`); otherwise the omission is
+  INVALID_ARGUMENT at `operations[i].layerId`.
+- Unknown `type` values are INVALID_ARGUMENT at `operations[i].type`;
+  every failure carries its field path in `details.path` so agents never
+  parse human text.
+- The batch runs atomically: the first failure rolls the canvas back and
+  the envelope reports the original error code with
+  `{applied: 0, rolledBack: true}` as `result` (§103).
+
+## Authoring text inputs
+
+- ASCII Grid: extension `.grid`; `[grid]` compact vs `[grid tokens]`
+  tokenized per §96.8. Example input: `sword.grid`. A `.grid` file holds
+  exactly `[palette]` then `[grid]`/`[grid tokens]`; dimensions come from
+  the rows and pixels land on a single layer named `base`. Regions,
+  metadata, and multi-layer canvases stay in `.mcpx` with `build`.
+- Pixel Spec: the batch-operations JSON body (§29/§103, `id` optional,
+  unique when present). It has **no** standalone file extension and MUST NOT
+  be called `.pixel`; it travels via `--operations <path>` (or `-` for
+  stdin).
+- `.pixel` MUST NOT appear anywhere as an extension.
+
+## Success envelope for write commands
+
+```json
+{
+  "success": true,
+  "result": {
+    "command": "build",
+    "profile": "generic",
+    "output": "sword.png",
+    "applied": 1,
+    "operations": [{ "index": 0, "id": "tip", "status": "applied" }],
+    "warnings": []
+  }
+}
+```
+
+`output`/`source` carry the written file paths, `stdout: true` marks the
+stdout artifact, `warnings` surfaces PNG normalization notes and the
+`MCPX_LARGE_CANVAS` practical-size notice. Batch failures attach
+`{applied: 0, rolledBack: true}` as `result` on the error envelope.
+
+## Version flags (known gap)
+
+V0.1 adds no `--minecraft-version`, `--pack-format`, or `--preset`
+flags: the frozen surface defines `--profile` only, and pack-format
+behavior follows the engine defaults. Version-aware switching (§73) is
+future work; agents needing a different target must say so explicitly.
+
+## Framework helpers (frozen, t07)
 
 ```text
 src/cli/envelope.ts      successEnvelope / errorEnvelope (§60/§103 shapes)
@@ -71,5 +179,4 @@ src/cli/program.ts       buildProgram / runStub (commander skeleton + mount prob
 src/cli/index.ts         entry, commander error mapping (invalid usage -> exit 2)
 ```
 
-`stub` is skeleton-only and proves the mount; t08 replaces it with the real
-commands above reusing these helpers unchanged.
+`import`, `render`, and `build` reuse these helpers unchanged.

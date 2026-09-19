@@ -1,0 +1,3 @@
+{
+	"operations": [{ "type": "setPixel", "x": 0, "y": 0, "color": "not-a-color" }]
+}

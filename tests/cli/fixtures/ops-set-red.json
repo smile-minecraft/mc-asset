@@ -1,0 +1,5 @@
+{
+	"operations": [
+		{ "id": "tip", "type": "setPixel", "x": 0, "y": 0, "color": "#FF0000FF" }
+	]
+}

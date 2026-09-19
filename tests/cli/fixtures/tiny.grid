@@ -1,0 +1,10 @@
+; Hand-authored ASCII grid: 4x4 mark.
+[palette]
+. = transparent
+S = #ADB7C0FF
+
+[grid]
+.SS.
+SSSS
+SSSS
+.SS.

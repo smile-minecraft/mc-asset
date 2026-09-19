@@ -10,6 +10,9 @@ import {
 	type OutputStreams,
 	routeStreams,
 } from "./channels.ts";
+import { type BuildOptions, runBuild } from "./cmd-build.ts";
+import { type ImportOptions, runImport } from "./cmd-import.ts";
+import { type RenderOptions, runRender } from "./cmd-render.ts";
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
 import { exitCodeForMcAssetError } from "./exit.ts";
 import { atomicWriteFile } from "./filesystem.ts";
@@ -122,7 +125,7 @@ export async function runStub(
 	}
 }
 
-/** Program skeleton: global --json plus the stub mount point for t08. */
+/** Program skeleton: global --json plus the write commands and analyze. */
 export function buildProgram(): Command {
 	const program = new Command();
 	program
@@ -175,6 +178,111 @@ export function buildProgram(): Command {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
 				const code = await runAnalyze(
 					image,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("import <image>")
+		.description("Decode a raster image into PNG and/or editable .mcpx.")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--source <path>", "Write the editable .mcpx source file.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--in-place",
+			"Write the PNG back to the input path (implies force for that target).",
+		)
+		.option("--input <path>", "Input path used with --in-place.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.option(
+			"--operations <path>",
+			'Batch operations JSON file ("-" reads stdin).',
+		)
+		.action(async (image: string, options: ImportOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runImport(
+				image,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+
+	program
+		.command("render <grid>")
+		.description(
+			"Render a hand-authored ASCII Grid file into PNG and/or .mcpx.",
+		)
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--source <path>", "Write the editable .mcpx source file.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--in-place",
+			"Write the PNG back to the input path (implies force for that target).",
+		)
+		.option("--input <path>", "Input path used with --in-place.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.option(
+			"--operations <path>",
+			'Batch operations JSON file ("-" reads stdin).',
+		)
+		.action(async (grid: string, options: RenderOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runRender(
+				grid,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+
+	program
+		.command("build [source]")
+		.description("Build a .mcpx source file (or stdin) into PNG and/or .mcpx.")
+		.option("--stdin", "Read the .mcpx source from stdin.")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--source <path>", "Write the re-serialized .mcpx source file.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--in-place",
+			"Rewrite the input .mcpx with the new source (implies force for that target).",
+		)
+		.option("--input <path>", "Input path used with --in-place.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.option(
+			"--operations <path>",
+			'Batch operations JSON file ("-" reads stdin).',
+		)
+		.action(
+			async (
+				source: string | undefined,
+				options: BuildOptions,
+				command: Command,
+			) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runBuild(
+					source,
 					options,
 					globals.json === true,
 					realStreams(),
