@@ -3157,6 +3157,17 @@ Parser MUST 接受並忽略註解；Serializer MUST NOT 輸出註解。也就是
 
 這是預期行為。§19 的「Round-trip safe」指的是 **像素與語意**的 round-trip，不是註解與排版的保留。
 
+## 96.10 指派與 serializer 接縫釐清
+
+- Serializer 永不重排既有 palette：輸出順序即 canvas 既有順序；新符號依字元集順序取號後附加在後。單一像素改動只產生單像素 diff。
+- `.` 永不發給非 transparent；transparent 在任何模式一律拿 `.`；無 transparent 時 `.` 不出現在 palette 中。
+- 容量：不含 transparent 的 compact 上限 62（含 transparent 總量 63）；tokenized 上限 4096 色不變（`.` 不佔 `T0001`… 命名空間）。自動指派超過 compact 範圍時，新符號為 tokenized 形 `T0001` 起（4 位零填充，跳過已佔用）。
+- Serializer 較 parser 嚴格（parser 維持寬容，文法凍結）：檢查 palette 符號（空白、`=`、`#`、`[`、`]`、`;`、單字元字集外、`.` 保留、重複）、palette role／metadata、metadata key、layer／region id——非法 canvas 明確報錯，不輸出壞檔。
+- opacity：serializer 僅接受可精確表為 3 位小數的值，否則 `MCPX_SCHEMA_ERROR`（拒絕靜默正規化：`0.9999` 報錯，不輸出 `1.000`）；二進位浮點 dust 容差 `1e-9`。
+- `MCPX_PALETTE_OVERFLOW` 的 details 為 `{ colorCount, limit, suggestion }`；計數對象為像素實際使用的相異色數。
+- `width > 512 || height > 512` 的 canvas 存成 mcpx 時發出 `MCPX_LARGE_CANVAS`（不阻擋輸出）。
+- 文法裁決索引（決策背景見計畫文件，只列程式對應）：寬容解析／嚴格序列化→`parseMcpx`／`serializeMcpx`；§96.7 取值→`validatePalette` role 檢查；id 字集→`OBJECT_ID`／`assertObjectId`；順序嚴格→`parseDocument` phase 順序；永不輸出 transparent→`hexOf`；保序優先→`assignSymbols` 既有保留；`[...]` 歧義指引→`tokenize` `SECTION_INNER`。
+
 ---
 
 # 97. `.mcpx` 的表達範圍
@@ -3172,6 +3183,8 @@ tokenized grid  ≤ 4096 色
 ```
 
 `MCPX_PALETTE_OVERFLOW` 的 error details MUST 包含實際色數，並建議改存 PNG。
+
+compact 的 63 個符號含保留的 `.`：不含 transparent 時可用上限為 62（含 transparent 總量 63），見 §96.10。
 
 這對 §17 的流程有一個限定：
 

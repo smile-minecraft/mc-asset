@@ -1,11 +1,23 @@
 import type { PixelCanvas } from "../core/types.ts";
+import type { AssignMode, AssignOptions, McpxWarning } from "./assign.ts";
+import {
+	assignSymbols,
+	COMPACT_LIMIT,
+	COMPACT_SYMBOLS,
+	collectCanvasColors,
+	colorKey32,
+	colorKeyOf,
+	isLargeCanvasForMcpx,
+	MCPX_WARN_EDGE,
+	TOKENIZED_LIMIT,
+} from "./assign.ts";
 import { buildCanvas } from "./builder.ts";
 import type { McpxErrorCode, McpxErrorDetails } from "./errors.ts";
 import { mcpxError } from "./errors.ts";
 import type { McpxDocument } from "./parser.ts";
 import { parseDocument } from "./parser.ts";
-import type { SymbolMapping } from "./serializer.ts";
-import { buildSymbolMap, colorKeyOf, serializeMcpx } from "./serializer.ts";
+import type { SerializeOptions, SymbolMapping } from "./serializer.ts";
+import { buildSymbolMap, serializeMcpx } from "./serializer.ts";
 import { tokenize } from "./tokenizer.ts";
 import type {
 	ValidDocument,
@@ -30,14 +42,31 @@ export function parseMcpx(text: string): PixelCanvas {
 }
 
 export type {
+	AssignMode,
+	AssignOptions,
 	McpxDocument,
 	McpxErrorCode,
 	McpxErrorDetails,
+	McpxWarning,
 	PixelCanvas,
+	SerializeOptions,
 	SymbolMapping,
 	ValidDocument,
 	ValidLayer,
 	ValidPaletteEntry,
 	ValidRegion,
 };
-export { buildSymbolMap, colorKeyOf, mcpxError, serializeMcpx };
+export {
+	assignSymbols,
+	buildSymbolMap,
+	COMPACT_LIMIT,
+	COMPACT_SYMBOLS,
+	collectCanvasColors,
+	colorKey32,
+	colorKeyOf,
+	isLargeCanvasForMcpx,
+	MCPX_WARN_EDGE,
+	mcpxError,
+	serializeMcpx,
+	TOKENIZED_LIMIT,
+};

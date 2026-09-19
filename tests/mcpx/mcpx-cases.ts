@@ -4,10 +4,19 @@ import {
 	createCanvas,
 	getPixel,
 	getRegionValue,
+	replaceLayerPixels,
 	setPixel,
 } from "../../src/core/canvas.ts";
 import { McAssetError } from "../../src/core/errors.ts";
-import type { PixelCanvas, RGBA } from "../../src/core/types.ts";
+import type { PaletteRole, PixelCanvas, RGBA } from "../../src/core/types.ts";
+import type { McpxWarning } from "../../src/mcpx/assign.ts";
+import {
+	assignSymbols,
+	COMPACT_LIMIT,
+	collectCanvasColors,
+	colorKey32,
+	TOKENIZED_LIMIT,
+} from "../../src/mcpx/assign.ts";
 import { parseMcpx, serializeMcpx } from "../../src/mcpx/index.ts";
 
 /** Runner-agnostic assertion surface: bun:test and node:test entries adapt to this. */
@@ -56,6 +65,86 @@ function pixelOf(
 	y: number,
 ): RGBA {
 	return getPixel(canvas, layer, x, y);
+}
+
+/** Deterministic distinct opaque colors: index i maps to one RGBA. */
+function distinctColor(i: number): RGBA {
+	return {
+		r: i & 0xff,
+		g: (i >> 8) & 0xff,
+		b: (i >> 16) & 0x0f,
+		a: 255,
+	};
+}
+
+function manyColors(count: number): RGBA[] {
+	const out: RGBA[] = [];
+	for (let i = 0; i < count; i += 1) {
+		out.push(distinctColor(i));
+	}
+	return out;
+}
+
+function expectOverflow(
+	check: CaseCheck,
+	fn: () => unknown,
+	expectedCount: number,
+	expectedLimit: number,
+): McAssetError {
+	try {
+		fn();
+	} catch (error) {
+		if (
+			error instanceof McAssetError &&
+			error.code === "MCPX_PALETTE_OVERFLOW"
+		) {
+			const details = error.details as
+				| { colorCount?: unknown; limit?: unknown }
+				| undefined;
+			check.equal(details?.colorCount, expectedCount, "overflow colorCount");
+			check.equal(details?.limit, expectedLimit, "overflow limit");
+			check.ok(/PNG/.test(error.message), "overflow message suggests PNG");
+			return error;
+		}
+		check.fail(
+			`expected McAssetError(MCPX_PALETTE_OVERFLOW) but got ${error instanceof McAssetError ? `${error.code} ${error.message}` : String(error)}`,
+		);
+	}
+	return check.fail("expected McAssetError(MCPX_PALETTE_OVERFLOW)");
+}
+
+/** Bypass the canvas API guards to simulate a hand-built illegal canvas. */
+function canvasWithRawPalette(
+	width: number,
+	height: number,
+	entries: Array<{
+		id: string;
+		color: RGBA;
+		role?: unknown;
+		metadata?: Record<string, unknown>;
+	}>,
+	pixels: RGBA[],
+): PixelCanvas {
+	const canvas = createCanvas(width, height);
+	canvas.palette = {
+		entries: entries.map((entry) => ({
+			id: entry.id,
+			color: { ...entry.color },
+			...(entry.role !== undefined ? { role: entry.role as PaletteRole } : {}),
+			...(entry.metadata !== undefined ? { metadata: entry.metadata } : {}),
+		})),
+	};
+	const layer = addLayer(canvas, { id: "base" });
+	const buf = new Uint8Array(width * height * 4);
+	for (let i = 0; i < pixels.length; i += 1) {
+		const color = pixels[i] as RGBA;
+		buf[i * 4] = color.r;
+		buf[i * 4 + 1] = color.g;
+		buf[i * 4 + 2] = color.b;
+		buf[i * 4 + 3] = color.a;
+	}
+	replaceLayerPixels(canvas, layer.id, buf);
+	return canvas;
 }
 
 function tinyCanvas(): string {
@@ -901,6 +990,453 @@ export const MCPX_CASES: McpxCase[] = [
 			);
 			check.ok(out.includes("name = Paint"), "layer name kept");
 			check.equal(serializeMcpx(parseMcpx(out)), out, "stable");
+		},
+	},
+	{
+		name: "assign keeps existing symbols and orders new ones by RGBA key",
+		run: (check) => {
+			check.equal(COMPACT_LIMIT, 63, "compact limit");
+			check.equal(TOKENIZED_LIMIT, 4096, "tokenized limit");
+			check.equal(colorKey32({ r: 0, g: 0, b: 0, a: 0 }), 0, "zero key");
+			check.equal(
+				colorKey32({ r: 255, g: 255, b: 255, a: 255 }),
+				4294967295,
+				"max key",
+			);
+			const red: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const blue: RGBA = { r: 0, g: 0, b: 255, a: 255 };
+			const green: RGBA = { r: 0, g: 255, b: 0, a: 255 };
+			const transparent: RGBA = { r: 0, g: 0, b: 0, a: 0 };
+			check.ok(
+				colorKey32(blue) < colorKey32(green) &&
+					colorKey32(green) < colorKey32(red),
+				"blue < green < red by 32-bit key",
+			);
+			const assigned = assignSymbols(
+				[{ id: "W", color: red }],
+				[red, blue, green, transparent],
+			);
+			check.deepEqual(
+				assigned.map((entry) => entry.id),
+				["W", ".", "0", "1"],
+				"existing kept, transparent takes dot, rest in charset order",
+			);
+			check.deepEqual(assigned[0]?.color, red, "existing color untouched");
+			check.deepEqual(
+				assigned[2]?.color,
+				blue,
+				"smallest new key takes the first free symbol",
+			);
+			check.deepEqual(
+				assigned[3]?.color,
+				green,
+				"next key takes the next free symbol",
+			);
+		},
+	},
+	{
+		name: "changing one pixel only changes one pixel of output",
+		run: (check) => {
+			const transparent: RGBA = { r: 0, g: 0, b: 0, a: 0 };
+			const red: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const blue: RGBA = { r: 0, g: 0, b: 255, a: 255 };
+			const first = assignSymbols([], [transparent, red]);
+			check.deepEqual(
+				first.map((entry) => entry.id),
+				[".", "0"],
+				"transparent dot, red zero",
+			);
+			const before = canvasWithRawPalette(2, 1, first, [red, transparent]);
+			const textBefore = serializeMcpx(before);
+			check.ok(textBefore.includes("0 = #FF0000FF"), "red keeps zero");
+			const second = assignSymbols(first, [transparent, red, blue]);
+			check.deepEqual(
+				second.map((entry) => entry.id),
+				[".", "0", "1"],
+				"red keeps zero even though blue sorts smaller",
+			);
+			const after = canvasWithRawPalette(2, 1, second, [blue, transparent]);
+			const textAfter = serializeMcpx(after);
+			check.ok(textAfter.includes("0 = #FF0000FF"), "red still zero");
+			check.ok(textAfter.includes("1 = #0000FFFF"), "blue appended as one");
+			const gridBefore = textBefore.split("\n").filter((line) => line === "0.");
+			const gridAfter = textAfter.split("\n").filter((line) => line === "1.");
+			check.equal(gridBefore.length, 1, "one grid row before");
+			check.equal(gridAfter.length, 1, "one grid row after");
+			check.equal(
+				collectCanvasColors(after).length,
+				2,
+				"two distinct colors in use",
+			);
+		},
+	},
+	{
+		name: "opaque-only assignment never emits dot and serializes",
+		run: (check) => {
+			const red: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const assigned = assignSymbols([], [red]);
+			check.deepEqual(
+				assigned.map((entry) => entry.id),
+				["0"],
+				"first opaque color takes zero, dot stays empty",
+			);
+			const out = serializeMcpx(canvasWithRawPalette(1, 1, assigned, [red]));
+			check.ok(out.includes("0 = #FF0000FF"), "red emitted as zero");
+			check.ok(
+				!out.split("\n").some((line) => line.startsWith(". =")),
+				"no dot entry without transparent",
+			);
+			check.equal(serializeMcpx(parseMcpx(out)), out, "stable");
+		},
+	},
+	{
+		name: "tokenized assignment still gives transparent the dot",
+		run: (check) => {
+			const transparent: RGBA = { r: 0, g: 0, b: 0, a: 0 };
+			const red: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const blue: RGBA = { r: 0, g: 0, b: 255, a: 255 };
+			const assigned = assignSymbols([], [transparent, red, blue], {
+				mode: "tokenized",
+			});
+			check.equal(assigned[0]?.id, ".", "transparent takes dot in any mode");
+			check.deepEqual(
+				assigned[0]?.color,
+				transparent,
+				"dot maps to transparent",
+			);
+			check.ok(
+				assigned
+					.slice(1)
+					.every((entry) => entry.id.length > 1 && entry.id !== "."),
+				"other colors take tokenized symbols",
+			);
+			const out = serializeMcpx(
+				canvasWithRawPalette(3, 1, assigned, [transparent, red, blue]),
+			);
+			check.ok(out.includes("[grid tokens]"), "tokenized grid emitted");
+			check.equal(serializeMcpx(parseMcpx(out)), out, "stable");
+		},
+	},
+	{
+		name: "reassignment keeps existing roles and metadata",
+		run: (check) => {
+			const canvas = parseMcpx(fixture("canonical.mcpx"));
+			const entries = canvas.palette?.entries ?? [];
+			const reassigned = assignSymbols(entries, collectCanvasColors(canvas));
+			check.equal(
+				reassigned.length,
+				entries.length,
+				"no new colors means no new entries",
+			);
+			check.equal(
+				reassigned.find((entry) => entry.id === "O")?.role,
+				"outline",
+				"outline role survives reassignment",
+			);
+			canvas.palette = { entries: reassigned };
+			const out = serializeMcpx(canvas);
+			check.ok(out.includes("role=outline"), "role still serialized");
+		},
+	},
+	{
+		name: "illegal canvas metadata keys fail serialize",
+		run: (check) => {
+			for (const key of ["a b", "Name", "9lives"]) {
+				const canvas = createCanvas(1, 1, { metadata: { [key]: "1" } });
+				const layer = addLayer(canvas, { id: "base" });
+				setPixel(canvas, layer.id, 0, 0, { r: 0, g: 0, b: 0, a: 0 });
+				canvas.palette = {
+					entries: [{ id: ".", color: { r: 0, g: 0, b: 0, a: 0 } }],
+				};
+				check.throwsCode(
+					() => serializeMcpx(canvas),
+					"MCPX_SCHEMA_ERROR",
+					`metadata key ${JSON.stringify(key)} rejected`,
+				);
+			}
+		},
+	},
+	{
+		name: "palette entry metadata fails serialize instead of vanishing",
+		run: (check) => {
+			const red: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const canvas = canvasWithRawPalette(
+				1,
+				1,
+				[{ id: "X", color: red }],
+				[red],
+			);
+			const palette = canvas.palette;
+			if (palette !== undefined) {
+				palette.entries[0].metadata = { note: "kept?" };
+				check.throwsCode(
+					() => serializeMcpx(canvas),
+					"MCPX_SCHEMA_ERROR",
+					"palette metadata rejected like layer metadata",
+				);
+				return;
+			}
+			check.fail("expected one palette entry");
+		},
+	},
+	{
+		name: "illegal palette roles fail serialize",
+		run: (check) => {
+			const red: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			for (const role of ["wood", "a b"]) {
+				const canvas = canvasWithRawPalette(
+					1,
+					1,
+					[{ id: "X", color: red, role }],
+					[red],
+				);
+				check.throwsCode(
+					() => serializeMcpx(canvas),
+					"MCPX_SCHEMA_ERROR",
+					`role ${JSON.stringify(role)} rejected`,
+				);
+			}
+		},
+	},
+	{
+		name: "illegal layer and region ids fail serialize",
+		run: (check) => {
+			const red: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const badLayer = canvasWithRawPalette(
+				1,
+				1,
+				[{ id: "X", color: red }],
+				[red],
+			);
+			badLayer.layers[0].id = "a]b";
+			check.throwsCode(
+				() => serializeMcpx(badLayer),
+				"MCPX_SCHEMA_ERROR",
+				"bracketed layer id rejected",
+			);
+			const badRegion = canvasWithRawPalette(
+				1,
+				1,
+				[{ id: "X", color: red }],
+				[red],
+			);
+			badRegion.regions.push({
+				id: "no spaces",
+				mask: new Uint8Array([1]),
+			});
+			check.throwsCode(
+				() => serializeMcpx(badRegion),
+				"MCPX_SCHEMA_ERROR",
+				"spaced region id rejected",
+			);
+		},
+	},
+	{
+		name: "compact assignment holds 62 opaque colors and overflows on the 63rd",
+		run: (check) => {
+			const ok = assignSymbols([], manyColors(62), { mode: "compact" });
+			check.equal(ok.length, 62, "62 opaque colors fit compact");
+			check.ok(
+				ok.every((entry) => entry.id.length === 1),
+				"compact symbols stay single characters",
+			);
+			check.ok(
+				ok.every((entry) => entry.id !== "."),
+				"dot stays empty without transparent",
+			);
+			expectOverflow(
+				check,
+				() => assignSymbols([], manyColors(63), { mode: "compact" }),
+				63,
+				62,
+			);
+			const withGlass = assignSymbols(
+				[],
+				[{ r: 0, g: 0, b: 0, a: 0 }, ...manyColors(62)],
+				{ mode: "compact" },
+			);
+			check.equal(withGlass.length, 63, "transparent plus 62 fits");
+			check.equal(withGlass[0]?.id, ".", "transparent takes dot");
+		},
+	},
+	{
+		name: "tokenized assignment holds 4096 colors and overflows after",
+		run: (check) => {
+			const ok = assignSymbols([], manyColors(4096));
+			check.equal(ok.length, 4096, "4096 colors fit tokenized");
+			const symbols = new Set(ok.map((entry) => entry.id));
+			check.equal(symbols.size, 4096, "assigned symbols stay unique");
+			expectOverflow(
+				check,
+				() => assignSymbols([], manyColors(4097)),
+				4097,
+				4096,
+			);
+		},
+	},
+	{
+		name: "serialize refuses a tokenized canvas past 4096 colors",
+		run: (check) => {
+			const colors = manyColors(4096);
+			const full = canvasWithRawPalette(
+				64,
+				64,
+				colors.map((color, index) => ({
+					id: `T${String(index + 1).padStart(4, "0")}`,
+					color,
+				})),
+				colors,
+			);
+			const out = serializeMcpx(full);
+			check.ok(out.includes("[grid tokens]"), "4096 colors stay tokenized");
+			check.equal(
+				serializeMcpx(parseMcpx(out)),
+				out,
+				"4096-color file round-trips",
+			);
+			const tooMany = manyColors(4160);
+			const overflowing = canvasWithRawPalette(
+				65,
+				64,
+				tooMany.map((color, index) => ({
+					id: `T${String(index + 1).padStart(4, "0")}`,
+					color,
+				})),
+				tooMany,
+			);
+			expectOverflow(check, () => serializeMcpx(overflowing), 4160, 4096);
+		},
+	},
+	{
+		name: "serialize rejects illegally-symboled palettes outright",
+		run: (check) => {
+			const red: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const blue: RGBA = { r: 0, g: 0, b: 255, a: 255 };
+			const transparent: RGBA = { r: 0, g: 0, b: 0, a: 0 };
+			const badIds = ["A B", "A=B", "A#B", "[A]", "A;B", ";X", "!", "X#"];
+			for (const id of badIds) {
+				try {
+					serializeMcpx(
+						canvasWithRawPalette(1, 1, [{ id, color: red }], [red]),
+					);
+				} catch (error) {
+					check.ok(
+						error instanceof McAssetError && error.code === "MCPX_SCHEMA_ERROR",
+						`symbol ${JSON.stringify(id)} rejected as schema error`,
+					);
+					continue;
+				}
+				check.fail(`symbol ${JSON.stringify(id)} must not serialize`);
+			}
+			for (const entries of [
+				[{ id: ".", color: red }],
+				[{ id: "X", color: transparent }],
+				[
+					{ id: "A", color: red },
+					{ id: "A", color: blue },
+				],
+			] as Array<Array<{ id: string; color: RGBA }>>) {
+				try {
+					serializeMcpx(
+						canvasWithRawPalette(
+							1,
+							1,
+							entries,
+							entries.map((entry) => entry.color),
+						),
+					);
+				} catch (error) {
+					check.ok(
+						error instanceof McAssetError && error.code === "MCPX_SCHEMA_ERROR",
+						"dot reservation and duplicate symbols rejected",
+					);
+					continue;
+				}
+				check.fail("reserved-dot and duplicate cases must not serialize");
+			}
+		},
+	},
+	{
+		name: "serializer rejects opacity past 3 decimals instead of rounding",
+		run: (check) => {
+			const red: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const canvas = canvasWithRawPalette(
+				1,
+				1,
+				[{ id: "X", color: red }],
+				[red],
+			);
+			const layer = canvas.layers[0];
+			if (layer === undefined) {
+				check.fail("expected one layer");
+			}
+			layer.opacity = 0.9999;
+			try {
+				serializeMcpx(canvas);
+			} catch (error) {
+				check.ok(
+					error instanceof McAssetError && error.code === "MCPX_SCHEMA_ERROR",
+					"0.9999 rejected as schema error",
+				);
+				const details = (error as McAssetError).details as
+					| { opacity?: unknown }
+					| undefined;
+				check.equal(details?.opacity, 0.9999, "offending value reported");
+				layer.opacity = 0.5;
+				const out = serializeMcpx(canvas);
+				check.ok(out.includes("opacity = 0.500"), "halves print padded");
+				const quarter = serializeMcpx(
+					parseMcpx(tinyCanvas().replace("opacity = 1.000", "opacity = 0.25")),
+				);
+				check.ok(quarter.includes("opacity = 0.250"), "quarters stay exact");
+				return;
+			}
+			check.fail("opacity 0.9999 must not silently round to 1.000");
+		},
+	},
+	{
+		name: "canvases past 512 on any edge warn when saving mcpx",
+		run: (check) => {
+			const red: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const paint = (width: number, height: number): PixelCanvas => {
+				const canvas = createCanvas(width, height);
+				canvas.palette = { entries: [{ id: "X", color: { ...red } }] };
+				const layer = addLayer(canvas, { id: "base" });
+				const buf = new Uint8Array(width * height * 4);
+				for (let i = 0; i < width * height; i += 1) {
+					buf[i * 4] = 255;
+					buf[i * 4 + 3] = 255;
+				}
+				replaceLayerPixels(canvas, layer.id, buf);
+				return canvas;
+			};
+			const seen: McpxWarning[] = [];
+			const wide = serializeMcpx(paint(513, 1), {
+				onWarning: (warning) => {
+					seen.push(warning);
+				},
+			});
+			check.equal(seen.length, 1, "513-wide canvas warns once");
+			check.equal(seen[0]?.code, "MCPX_LARGE_CANVAS", "warning code");
+			check.ok(wide.includes("[grid]"), "wide canvas still serializes");
+			const tallSeen: McpxWarning[] = [];
+			serializeMcpx(paint(1, 513), {
+				onWarning: (warning) => {
+					tallSeen.push(warning);
+				},
+			});
+			check.equal(tallSeen.length, 1, "513-tall canvas warns once");
+			const quiet: McpxWarning[] = [];
+			serializeMcpx(paint(512, 512), {
+				onWarning: (warning) => {
+					quiet.push(warning);
+				},
+			});
+			check.equal(quiet.length, 0, "512 square stays quiet");
+			check.ok(
+				serializeMcpx(paint(513, 1)).includes("[grid]"),
+				"warning never blocks without a listener",
+			);
 		},
 	},
 ];

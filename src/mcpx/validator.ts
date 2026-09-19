@@ -44,7 +44,7 @@ export interface ValidDocument {
 	regions: ValidRegion[];
 }
 
-const KEY = /^[a-z][a-z0-9_]*$/;
+export const KEY = /^[a-z][a-z0-9_]*$/;
 const UINT = /^(0|[1-9][0-9]*)$/;
 const OPACITY = /^(?:0(?:\.[0-9]+)?|1(?:\.0+)?)$/;
 const SYMBOL_CHAR = /^[.0-9A-Za-z]$/;
@@ -53,7 +53,7 @@ const OBJECT_ID = /^[A-Za-z0-9_.-]+$/;
 const HEX6 = /^#([0-9a-fA-F]{6})$/;
 const HEX8 = /^#([0-9a-fA-F]{8})$/;
 
-const ROLES: ReadonlySet<string> = new Set([
+export const ROLES: ReadonlySet<string> = new Set([
 	"outline",
 	"shadow",
 	"dark",
