@@ -3527,8 +3527,187 @@ canvas > 512×512 存成 mcpx
 
 ## 104.3 Processing Preset 與 Asset Profile（已凍結，V0.1）
 
-V0.1 只實作 `--profile`，合法值為 `generic` / `minecraft:item` / `minecraft:block`。不設 `--preset` flag；其是否作為獨立 flag 存在延至 V0.2（Pixelizer 進場時）決定。
+V0.1 只實作 `--profile`，合法值為 `generic` / `minecraft:item` / `minecraft:block`。不設 `--preset` flag；其是否作為獨立 flag 存在延至 V0.2（Pixelizer 進場時）決定。V0.2 的決議見 §105：`pixelize` 加入 `--preset`，值為 `item` / `block` / `generic`。
 
 ## 104.4 授權（已凍結）
 
 `mc-asset` 授權為 MIT（`LICENSE` 已建立）。第三方依賴為 `commander` / `pngjs`（`package.json` 已宣告）。開始閱讀任何第三方原始碼之前，MUST 先完成授權相容性評估；本任務未閱讀第三方原始碼。
+
+---
+
+# 105. V0.2 語意與介面凍結
+
+V0.2 的範圍見 §85。命令表面（名稱、旗標、輸入輸出、exit code）以 `docs/cli-surface.md` 為準；語意、演算法與取捨理由的細節以 `docs/v02-design.md` 為準。本節記錄規範性結論，三者衝突時以本節為準。
+
+`--preset` 的存在與否在 §104.3 延至 V0.2 決定：V0.2 在 `pixelize` 上加入 `--preset`，值為 `item` / `block` / `generic`；`gui` / `particle` 隨其 profile 留待 V0.4（§87）。
+
+## 105.1 命令表面
+
+V0.2 新增九個命令：
+
+| 命令 | 輸入 | 輸出 | exit code |
+|---|---|---|---|
+| `transform <input>` | PNG/JPEG/WebP/`.mcpx` | PNG 和/或 `.mcpx` | 0/2/4/5 |
+| `quantize <input>` | PNG/JPEG/WebP/`.mcpx` | PNG 和/或 `.mcpx` | 0/2/4/5 |
+| `cleanup <input>` | PNG/JPEG/WebP/`.mcpx` | PNG 和/或 `.mcpx` | 0/2/4/5 |
+| `pixelize <image>` | PNG/JPEG/WebP | PNG 和/或 `.mcpx`；Minecraft profile 僅 PNG | 0/2/4/5 |
+| `palette extract` / `palette inspect` | PNG/JPEG/WebP/`.mcpx` | 唯讀報告 | 0/2/4/5 |
+| `material list` / `material show` | — | 唯讀報告 | 0/2 |
+| `recolor <source>` | `.mcpx` | PNG 和/或 `.mcpx` | 0/2/4/5 |
+| `variant <source>` | `.mcpx` | `--output-dir` 下的多個 PNG 和/或 `.mcpx` | 0/2/4/5 |
+| `analyze <image>`（擴充） | PNG/JPEG/WebP | 唯讀報告 | 0/2/5 |
+
+`pixelize` / `quantize` / `cleanup` / `recolor` / `variant` / `transform` 的名稱在 §104.1 保留給 V0.2，本節正式啟用（§104.1 的「留待 V0.2」即指此）。所有新命令 MUST 遵守 §57、§98：顯式輸出、預設 `OUTPUT_EXISTS`、`--mkdir` 才建父目錄、同目錄暫存加 rename、不得推導檔名或建立預設目錄。
+
+`resize` 與 `crop` 不設為獨立命令，由 `transform` 承載。§48 明言 command tree 可在 CLI 設計階段簡化，此為該簡化的一部分。
+
+## 105.2 Selection
+
+Selection MUST 以矩形或 region mask 表示（§13、§14）。實作 MUST 遵守：
+
+```text
+未給 selection            作用範圍為整個 canvas
+selection 外像素          操作後 MUST byte-identical，含 A = 0 的 hidden RGB（§7）
+selection                  MUST NOT 改變 canvas 尺寸
+selection 解析             在第一次改動像素之前完成，單次呼叫共用一個 selection
+selection                  MUST NOT 序列化進 .mcpx；跨檔語意一律用 Region
+region:<id>                來源需具備 region；id 不存在為 REGION_NOT_FOUND
+rect 超出 canvas           OUT_OF_BOUNDS，不得靜默裁切（§31）
+```
+
+`--selection` 與 `transform` 的幾何旗標同時出現 MUST 以 `ARGUMENT_CONFLICT` 拒絕，因為幾何操作會改變尺寸。
+
+## 105.3 Transform
+
+`transform` 涵蓋 §28 與 §38 的 `flipHorizontal` / `flipVertical` / `rotate90` / `rotate180` / `rotate270` / `crop` / `pad` / `resize` / `translate`。
+
+```text
+一次呼叫         MUST 只帶一個幾何操作；兩個以上為 ARGUMENT_CONFLICT
+座標與尺寸       MUST 為整數（§10）；浮點為 INVALID_COORDINATE，不得自動取整
+越界             OUT_OF_BOUNDS（§31）
+resize 預設      nearest；MUST NOT 預設產生 anti-aliasing（§38）
+resize 模式      MUST 為整數運算，不得依賴平台圖形 API（§32）
+rotate90 ×4      MUST 回到原圖且 byte-identical
+rotate90/270     互為反操作；rotate180 自反
+pad 填充         預設 transparent（#00000000，§8）
+```
+
+`pixel-aware` 是 §38 列出的名稱，但規格未定義其演算法；V0.2 MUST NOT 讓它以預設身分執行，也 MUST NOT 以其他模式冒充（§100.4、§105.11）。
+
+## 105.4 Quantizer
+
+V0.2 只實作整數 median-cut，切割、比較與平均皆以整數完成。理由與 §100.1 一致，並避免 §100.2 所禁的超越函式依賴。
+
+```text
+--colors        必填；整數 1–4096；缺為 INVALID_ARGUMENT
+tie-break       MUST 為全序，不得依賴不穩定排序或物件鍵序（§100.3）
+色數 >= 實際色數 MUST NOT 改變任何像素
+.mcpx 目標      量化後色數超出 §97 容量為 MCPX_PALETTE_OVERFLOW
+```
+
+若將來加入 OKLab、色差或 k-means 方法，MUST 以自備固定實作、定點數或整數 LUT 提供，MUST NOT 直接呼叫 `Math.cbrt` / `pow` / `exp`（§100.2），並以 golden test 鎖定。
+
+## 105.5 Cleanup
+
+Cleanup 處理 §35、§63 的七類：`isolated` / `noise` / `cluster` / `fringe` / `outlier` / `hole` / `aa`。
+
+```text
+未帶 --fix             只偵測與報告，像素零變動
+未帶 --allow-render-pass-change
+                       任何會改變 alpha 語意的類別 MUST NOT 套用，且 MUST NOT 寫入任何位元組
+outlier                只改 RGB 不動 alpha，不需額外授權
+--json                 MUST 回報實際修改統計（§35）
+分析結果               MUST 確定性；無時間戳（§100.3）
+```
+
+依 §63，所有可能改變 Minecraft rendering semantics 的操作不得預設執行。依 §40，block 的 render pass 由 fully／partially transparent 像素決定，因此動到 alpha 的類別一律需要顯式授權。
+
+## 105.6 Pixelize
+
+管線順序 MUST 固定為下列十一階段，MUST NOT 由旗標改變：
+
+```text
+Decode → Crop → Background → Subject → Resize → Edge
+→ Quantize → Cluster → Cleanup → Preset → Output
+```
+
+```text
+--size                   16 / 32 / 64 / 128 或 WxH（§28）
+非標準尺寸               MAY 為 NON_STANDARD_RESOLUTION warning，不得為 INVALID_DIMENSION（§45）
+--preset                 Processing Preset，決定怎麼處理圖片（§37）
+--profile                Asset Profile，決定素材用途；兩者不得互相取代
+preset                    MUST 是顯式、具名、可列印的參數組，不得是隱藏啟發式
+Minecraft profile 輸出   僅 PNG；其他副檔名為 UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT（§34）
+三種輸出模式             PNG / PNG+mcpx / 僅 mcpx（§29）；缺輸出為 OUTPUT_REQUIRED（§57）
+```
+
+## 105.7 解碼器選型
+
+V0.2 起接受 §33 的 PNG / JPEG / WebP 輸入。選型 MUST 遵守：
+
+```text
+1  支援 PNG / JPEG / WebP 解碼
+2  MUST NOT premultiply alpha（§101.1）；A = 0 的 RGB 必須保留（§7、§75）
+3  MUST NOT 使用 sharp / libvips / Skia 系（§101.1）
+4  MUST 在 Bun 與 Node 皆可執行（§100.5）
+5  同輸入在兩 runtime 解出相同 RGBA（§100.4）
+6  授權 MUST 與 MIT 相容；評估 MUST 早於閱讀其原始碼（§104.4）
+7  輸出 MUST NOT 含時間戳（§100.3、§101.3）
+```
+
+`pngjs` 的 PNG 路徑維持不變（§101.1）。JPEG / WebP 的候選名單與評估軸記於 `docs/v02-design.md`；在實證完成前，這兩個輸入 MUST NOT 被宣告可用。
+
+## 105.8 Material 與 Recolor
+
+Material 是 Palette 之上的語意層（§67），MUST NOT 與 Minecraft Palette Texture API 混為一談。
+
+首批內建材料 MUST 為同時出現在 §67 與產品規格書 §32 的七項：`iron` / `copper` / `oxidized_copper` / `gold` / `wood` / `stone` / `crystal`。Palette role 沿用 §15 的字集。
+
+Recolor MUST 支援 Region-aware、Palette Role-aware、Luminance-aware（§68）：
+
+```text
+role shadow / dark       → 目標材料 shadow
+role base                → 目標材料 base
+role light / highlight   → 目標材料 highlight
+無 role                  → 以整數 luminance 分三帶映射
+outline / accent / custom 保持原樣
+```
+
+Luminance MUST 以整數計算（`(299r + 587g + 114b) / 1000` 取整），不得使用浮點或超越函式（§100.1、§100.2）。Recolor MUST NOT 改寫 Region 的 mask（§14），且 region 外的像素 MUST byte-identical。
+
+## 105.9 Analyze 擴充
+
+`analyze` 不修改檔案（§62）。V0.2 在既有欄位上新增 `paletteCharacteristics` / `pixelArtCharacteristics` / `recommended`，舊欄位 MUST NOT 改名或移除。完整 JSON 形狀以 `docs/v02-design.md` 為準。
+
+```text
+recommended    MUST 由確定性規則導出，不得來自機器學習或外部服務
+數字           整數；比率以固定小數位字串表示（§100.3）
+classification MUST 維持 predicted，不得宣稱 effective（§40）
+```
+
+## 105.10 接線權責
+
+`src/cli/program.ts`、`src/cli/operations-json.ts` 與 core 的 batch 詞彙是共用接縫，同時修改會互相覆蓋。因此：
+
+```text
+純引擎模組   MUST NOT 觸碰上述接縫；各自在模組與單元測試中完成
+命令與批次詞彙整合   集中於單一階段，不分散
+pixelize → variant → analyze
+             共用 program.ts，MUST 依序執行，MUST NOT 並行
+```
+
+V0.1 已凍結的行為（`docs/cli-surface.md`）MUST NOT 因 V0.2 接線而改變；新命令沿用既有 CLI helper，不另建一套。
+
+## 105.11 Variant
+
+```text
+--output-dir    MUST 顯式；缺為 OUTPUT_REQUIRED，且零檔案（§34、§57、§98）
+--output        在 variant 上為 ARGUMENT_CONFLICT
+命名規則        <basename>_<material>.<ext>，固定不變
+重跑            同材料與同參數 MUST byte-identical
+每個檔案        個別套用 OUTPUT_EXISTS、--mkdir 與原子寫入（§98）
+```
+
+## 105.12 待決項目
+
+規格無法推定、且會影響對外行為的細節，列於 `docs/v02-design.md` 的待決清單，不在此自行補齊。其中直接影響命令表面或預設行為的有：`resize` / `crop` 是否保留 top-level 別名、`pixel-aware` resize 的演算法、Pixelize preset 的具體數值、`tileFriendly` 的判斷規則、`moveLayer` 的語意、`outline` / `accent` / `custom` 的 recolor 映射、`--colors` 上限、目標材料不存在的 error code，以及 geometry 是否進 `--operations` 批次詞彙。

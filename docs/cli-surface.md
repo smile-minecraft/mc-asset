@@ -2,7 +2,7 @@
 
 Entry point: `bun src/cli/index.ts` (distribution packaging is out of scope for V0.1).
 
-Global behavior follows `project-detail.md` §98 (channels, OUTPUT_EXISTS/--force/--mkdir, atomic write, --force/--in-place mutex) and §99 (exit codes via the `core/errors` registry; no local table). V0.1 implements `--profile` everywhere plus `--minecraft-version`/`--resource-pack-version` on `analyze`/`validate` only; there is no `--preset` flag.
+Global behavior follows `project-detail.md` §98 (channels, OUTPUT_EXISTS/--force/--mkdir, atomic write, --force/--in-place mutex) and §99 (exit codes via the `core/errors` registry; no local table). V0.1 implements `--profile` everywhere plus `--minecraft-version`/`--resource-pack-version` on `analyze`/`validate` only. V0.1 has no `--preset` flag; V0.2 adds `--preset` on `pixelize` only, resolving `project-detail.md` §104.3 (see "V0.2 commands (frozen)" below).
 
 ## Global flags
 
@@ -44,9 +44,10 @@ operations could be stated, so per §104.1 it is merged away rather than kept
 as a synonym. Layer/region/pixel manipulation travels through batch
 operations, not a separate compose entry.
 
-Deferred (names reserved, not V0.1): `pixelize`, `quantize`, `cleanup`,
-`recolor`, `variant`, `transform`, `tile`, `preview`, `animate`,
-`validate-pack` (V0.5), `mcp` (V0.6).
+Deferred (names reserved, not V0.1): `tile`, `preview`, `animate`,
+`validate-pack` (V0.5), `mcp` (V0.6). `pixelize`, `quantize`, `cleanup`,
+`recolor`, `variant`, `transform`, `palette`, and `material` were reserved
+here in V0.1 and are now frozen for V0.2 (see below).
 
 ## Authoring text inputs
 
@@ -255,3 +256,92 @@ src/cli/index.ts         entry, commander error mapping (invalid usage -> exit 2
 ```
 
 `import`, `render`, and `build` reuse these helpers unchanged.
+
+## V0.2 commands (frozen)
+
+Semantics, algorithm choices, and rationale live in `docs/v02-design.md`
+and `project-detail.md` §105; the flag/IO/exit table is here. Every V0.2
+command reuses the V0.1 file rules above unchanged: explicit
+`--output`/`--stdout`/`--source` (OUTPUT_REQUIRED), OUTPUT_EXISTS unless
+`--force`, `--mkdir`, `--in-place`, per-file atomic writes, and no default
+filenames or directories (§57, §98).
+
+| Command | Input | Output | Exit |
+|---|---|---|---|
+| `transform <input>` | PNG/JPEG/WebP/`.mcpx` | PNG and/or `.mcpx` | 0/2/4/5 |
+| `quantize <input>` | PNG/JPEG/WebP/`.mcpx` | PNG and/or `.mcpx` | 0/2/4/5 |
+| `cleanup <input>` | PNG/JPEG/WebP/`.mcpx` | PNG and/or `.mcpx` | 0/2/4/5 |
+| `pixelize <image>` | PNG/JPEG/WebP | PNG and/or `.mcpx`; Minecraft profiles PNG only | 0/2/4/5 |
+| `palette extract` / `palette inspect <image>` | PNG/JPEG/WebP/`.mcpx` | report only | 0/2/4/5 |
+| `material list` / `material show <name>` | — | report only | 0/2 |
+| `recolor <source>` | `.mcpx` | PNG and/or `.mcpx` | 0/2/4/5 |
+| `variant <source>` | `.mcpx` | several PNG and/or `.mcpx` under `--output-dir` | 0/2/4/5 |
+| `analyze <image>` (extended) | PNG/JPEG/WebP | report only | 0/2/5 |
+
+Exit 3 stays reserved for `validate`. Exit 5 covers
+`UNSUPPORTED_IMAGE_FORMAT` and `RESOURCE_LIMIT_EXCEEDED`; a `.mcpx`
+palette overflow is exit 2 per §99.
+
+### Flags added in V0.2
+
+```text
+--selection rect:<x>,<y>,<width>,<height> | region:<id>
+                          Scope pixel-writing operations. Omitted = whole
+                          canvas. Geometry plus --selection is
+                          ARGUMENT_CONFLICT (exit 2).
+--colors <N>              quantize only; required; integer 1-4096.
+--fix <classes>           cleanup only; comma list of isolated|noise|
+                          cluster|fringe|outlier|hole|aa. Omitted = detect
+                          and report only.
+--allow-render-pass-change
+                          cleanup only; required before any alpha-affecting
+                          class may be applied.
+--size <N|WxH>            pixelize only; 16|32|64|128 or custom WxH.
+--preset <name>           pixelize only; item|block|generic.
+--material <name>         recolor only.
+--materials <a,b,c>       variant only.
+--output-dir <path>       variant only; required; --output is
+                          ARGUMENT_CONFLICT.
+--pad-color <color>       transform --pad fill; default transparent.
+--resize-mode <nearest|box|pixel-aware>
+                          transform --resize; default nearest.
+```
+
+### Per-command surfaces
+
+```text
+transform <input> [--flip h|v] [--rotate 90|180|270] [--crop x,y,w,h]
+                  [--pad l,t,r,b] [--pad-color c] [--resize WxH]
+                  [--resize-mode m] [--translate dx,dy] <file flags>
+quantize  <input> --colors N <file flags>
+cleanup   <input> [--fix classes] [--allow-render-pass-change] <file flags>
+pixelize  <image> --size N|WxH [--preset p] <file flags>
+recolor   <source> --material name [--region id] <file flags>
+variant   <source> --materials a,b,c --output-dir <dir> <file flags>
+palette   extract <image> | palette inspect <image>
+material  list | material show <name>
+```
+
+`<file flags>` = `--output`, `--stdout`, `--source`, `--force`,
+`--mkdir`, `--in-place`, `--input`, `--profile`, `--json`, plus
+`--selection` on commands that write pixels.
+
+- `transform` takes exactly one geometry flag per invocation; two or more
+  is ARGUMENT_CONFLICT (exit 2). `resize` and `crop` are not separate
+  top-level commands (§48 allows the tree to be simplified; see the open
+  questions in `docs/v02-design.md`).
+- `quantize` without `--colors` is INVALID_ARGUMENT: a missing required
+  argument, not OUTPUT_REQUIRED.
+- `cleanup` without `--fix` still writes the requested artifact, pixels
+  unchanged. An alpha-affecting class without
+  `--allow-render-pass-change` is INVALID_ARGUMENT and writes nothing.
+- `variant` without `--output-dir` is OUTPUT_REQUIRED and creates zero
+  files. Names are `<basename>_<material>.<ext>`; a repeat run is
+  byte-identical. Each file target follows the V0.1 union preflight and
+  OUTPUT_EXISTS contract individually.
+- `palette` and `material` produce reports only: any file flag is
+  INVALID_ARGUMENT.
+- `analyze` keeps its V0.1 fields and flags, and adds
+  `paletteCharacteristics`, `pixelArtCharacteristics`, and `recommended`;
+  the frozen JSON shape is in `docs/v02-design.md`. Its output remains
+  predicted, never effective (§40).
