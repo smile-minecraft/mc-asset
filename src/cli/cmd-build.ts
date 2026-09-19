@@ -16,7 +16,7 @@ import {
 	resolveArtifactTargets,
 	resolveInputPath,
 	type WarningNote,
-	writeFileTargets,
+	writeArtifactPayloads,
 } from "./artifacts.ts";
 import { emitArtifact, type OutputStreams, routeStreams } from "./channels.ts";
 import { parseProfile } from "./profiles.ts";
@@ -120,12 +120,17 @@ export async function runBuild(
 		if (pngBytes !== undefined && targets.pngStdout) {
 			emitArtifact(pngBytes, streams, route);
 		}
-		if (pngBytes !== undefined) {
-			await writeFileTargets(targets.pngFiles, pngBytes, options.mkdir);
-		}
-		if (mcpxText !== undefined) {
-			await writeFileTargets(targets.mcpxFiles, mcpxText, options.mkdir);
-		}
+		await writeArtifactPayloads(
+			[
+				...(targets.pngFiles.length > 0 && pngBytes !== undefined
+					? [{ targets: targets.pngFiles, data: pngBytes }]
+					: []),
+				...(targets.mcpxFiles.length > 0 && mcpxText !== undefined
+					? [{ targets: targets.mcpxFiles, data: mcpxText }]
+					: []),
+			],
+			options.mkdir,
+		);
 		emitCommandSuccess(streams, route, globalJson, {
 			command: "build",
 			profile,

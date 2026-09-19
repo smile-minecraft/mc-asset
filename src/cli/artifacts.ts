@@ -278,6 +278,11 @@ async function targetExists(path: string): Promise<boolean> {
 	}
 }
 
+export interface ArtifactPayload {
+	targets: FileTarget[];
+	data: Uint8Array | string;
+}
+
 /**
  * Guarded writes: every non-force target is existence-checked before the
  * first byte lands anywhere, so an OUTPUT_EXISTS refusal writes nothing.
@@ -288,22 +293,39 @@ export async function writeFileTargets(
 	data: Uint8Array | string,
 	mkdir: boolean | undefined,
 ): Promise<void> {
-	for (const target of targets) {
-		if (target.path === "") {
-			throw new McAssetError("INVALID_ARGUMENT", "Output path is empty.");
-		}
-		if (!target.force && (await targetExists(target.path))) {
-			throw new McAssetError(
-				"OUTPUT_EXISTS",
-				`Output exists: ${target.path}. Pass --force to overwrite.`,
-			);
+	await writeArtifactPayloads([{ targets, data }], mkdir);
+}
+
+/**
+ * Guarded multi-artifact writes (§98.2/§98.4): targets across PNG and .mcpx
+ * are existence-checked as one union before the first byte lands anywhere,
+ * so refusing one artifact never leaves the other behind. Callers MUST pass
+ * every file target of the command through this single call.
+ */
+export async function writeArtifactPayloads(
+	payloads: ArtifactPayload[],
+	mkdir: boolean | undefined,
+): Promise<void> {
+	for (const payload of payloads) {
+		for (const target of payload.targets) {
+			if (target.path === "") {
+				throw new McAssetError("INVALID_ARGUMENT", "Output path is empty.");
+			}
+			if (!target.force && (await targetExists(target.path))) {
+				throw new McAssetError(
+					"OUTPUT_EXISTS",
+					`Output exists: ${target.path}. Pass --force to overwrite.`,
+				);
+			}
 		}
 	}
-	for (const target of targets) {
-		await atomicWriteFile(target.path, data, {
-			force: target.force,
-			mkdir,
-		});
+	for (const payload of payloads) {
+		for (const target of payload.targets) {
+			await atomicWriteFile(target.path, payload.data, {
+				force: target.force,
+				mkdir,
+			});
+		}
 	}
 }
 

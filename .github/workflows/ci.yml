@@ -51,8 +51,8 @@ jobs:
 
   # Portable runtime: same static checks under Node, no Bun required.
   # bun:test needs the Bun runner, so the Node job covers typecheck,
-  # lint, dependency gates, determinism guards, plus the node:test entry
-  # that runs the same shared assertions as the Bun entry (§100.5).
+  # lint, dependency gates, determinism guards, plus the node:test entries
+  # that run the same shared assertions as the Bun entries (§100.5).
   node:
     runs-on: ubuntu-latest
     steps:
@@ -63,8 +63,12 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npx tsc --noEmit
       - run: npx @biomejs/biome check .
-      # §100.5: shared model assertions executed outside Bun.
-      - run: node --test tests/core/model.node.ts
+      # §100.5 / §100.4: every shared dual entry runs outside Bun.
+      # find-form so new .node.ts entries join automatically; no globstar.
+      - run: |
+          for entry in $(find tests -name '*.node.ts' | sort); do
+            node --test "$entry" || exit 1
+          done
       - name: dependency gate (§101.1)
         run: |
           if grep -rEi 'sharp|libvips|skia' package.json package-lock.json 2>/dev/null; then
