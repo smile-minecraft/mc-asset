@@ -1,0 +1,22 @@
+{
+	"name": "mc-asset",
+	"version": "0.1.0",
+	"description": "Pixel-native Minecraft asset toolchain (scaffold)",
+	"license": "MIT",
+	"type": "module",
+	"scripts": {
+		"test": "bun test",
+		"test:typecheck": "tsc --noEmit",
+		"lint": "biome check .",
+		"build": "bun build src/index.ts --outdir dist --target node --format esm"
+	},
+	"dependencies": {
+		"commander": "15.0.0",
+		"pngjs": "7.0.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.14",
+		"bun-types": "1.4.2",
+		"typescript": "7.0.2"
+	}
+}

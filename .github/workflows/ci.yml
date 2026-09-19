@@ -1,0 +1,83 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  # Primary runtime: full pipeline (test + typecheck + lint + build).
+  bun:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun run test:typecheck
+      - run: bun run lint
+      - run: bun run build
+      # The bundle targets node; prove it loads outside Bun.
+      - run: node -e "import('./dist/index.js').then((m) => { if (typeof m.VERSION !== 'string' || m.VERSION.length === 0) process.exit(1); console.log('dist VERSION:', m.VERSION); })"
+      # §101.1 dependency gate: sharp / libvips / Skia must not appear.
+      - name: dependency gate (§101.1)
+        run: |
+          if grep -rEi 'sharp|libvips|skia' package.json bun.lock; then
+            echo 'FORBIDDEN dependency (sharp/libvips/Skia) detected' >&2
+            exit 1
+          fi
+          echo 'dependency gate passed'
+      # §100.2 / §100.3: no Math.random, no transcendental float funcs in src.
+      - name: determinism guard (§100.2, §100.3)
+        run: |
+          if grep -rEn 'Math\.random' src tests; then
+            echo 'Math.random is forbidden' >&2
+            exit 1
+          fi
+          if grep -rEn 'Math\.(cbrt|pow|exp|sin|cos|tan|asin|acos|atan|atan2|log|sqrt|sinh|cosh|tanh)' src; then
+            echo 'transcendental Math function in src/ is forbidden' >&2
+            exit 1
+          fi
+          echo 'determinism guard passed'
+      # src must stay portable: no Bun-only APIs (§100.5).
+      - name: portability guard (§100.5)
+        run: |
+          if grep -rEn 'Bun\.|Bun\.file|Bun\.serve|from ["'"'"']bun' src; then
+            echo 'Bun-only API in src/ breaks Node portability' >&2
+            exit 1
+          fi
+          echo 'portability guard passed'
+
+  # Portable runtime: same static checks under Node, no Bun required.
+  # bun:test needs the Bun runner, so the Node job covers typecheck,
+  # lint, dependency gates, and determinism guards instead of unit tests.
+  # (§100.5 cross-runtime golden comparison lands with real pixel tests.)
+  node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --no-audit --no-fund
+      - run: npx tsc --noEmit
+      - run: npx @biomejs/biome check .
+      - name: dependency gate (§101.1)
+        run: |
+          if grep -rEi 'sharp|libvips|skia' package.json package-lock.json 2>/dev/null; then
+            echo 'FORBIDDEN dependency (sharp/libvips/Skia) detected' >&2
+            exit 1
+          fi
+          echo 'dependency gate passed'
+      - name: determinism guard (§100.2, §100.3)
+        run: |
+          if grep -rEn 'Math\.random' src tests; then
+            echo 'Math.random is forbidden' >&2
+            exit 1
+          fi
+          if grep -rEn 'Math\.(cbrt|pow|exp|sin|cos|tan|asin|acos|atan|atan2|log|sqrt|sinh|cosh|tanh)' src; then
+            echo 'transcendental Math function in src/ is forbidden' >&2
+            exit 1
+          fi
+          echo 'determinism guard passed'
