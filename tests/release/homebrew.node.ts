@@ -1,0 +1,102 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const ROOT = join(HERE, "..", "..");
+const FORMULA = join(ROOT, "homebrew", "Formula", "mc-asset.rb");
+const DOC = join(ROOT, "docs", "homebrew.md");
+
+function readFormula(): string {
+	return readFileSync(FORMULA, "utf-8");
+}
+
+describe("homebrew formula (static contract, no build required)", () => {
+	it("formula lives at the tap layout path", () => {
+		assert.ok(existsSync(FORMULA), "homebrew/Formula/mc-asset.rb is missing");
+	});
+
+	it("formula pins a public tag tarball with a non-empty SHA-256", () => {
+		const text = readFormula();
+		assert.ok(
+			text.includes("class McAsset < Formula"),
+			"formula must declare class McAsset < Formula",
+		);
+		assert.ok(
+			text.includes(
+				"https://github.com/smile-minecraft/mc-asset/releases/download/v0.1.0/mc-asset-0.1.0.tar.gz",
+			),
+			"formula url must pin the v0.1.0 tag tarball",
+		);
+		assert.match(
+			text,
+			/sha256\s+"[0-9a-f]{64}"/,
+			"formula must carry a 64-hex SHA-256",
+		);
+		assert.ok(
+			!text.includes("main.tar.gz") && !text.includes("master.tar.gz"),
+			"formula must not track a moving branch",
+		);
+		assert.ok(
+			!text.includes("PRIVATE") && !text.includes("token"),
+			"formula must not use private URLs or secrets",
+		);
+	});
+
+	it("formula runs on Node and installs the release layout", () => {
+		const text = readFormula();
+		assert.match(text, /depends_on\s+"node"/, "formula needs a node runtime");
+		assert.doesNotMatch(
+			text,
+			/depends_on\s+"bun"/i,
+			"formula must not depend on Bun",
+		);
+		assert.doesNotMatch(
+			text,
+			/system\s+["']bun/i,
+			"formula install/test must not shell out to Bun",
+		);
+		assert.match(
+			text,
+			/license\s+"MIT"/,
+			"formula must declare the MIT license",
+		);
+		for (const token of [
+			"libexec.install",
+			'"bin"',
+			'"dist"',
+			"LICENSE",
+			"THIRD_PARTY_NOTICES",
+		]) {
+			assert.ok(text.includes(token), `formula install must mention ${token}`);
+		}
+	});
+
+	it("formula test exercises the render-analyze-validate chain", () => {
+		const text = readFormula();
+		assert.ok(text.includes("test do"), "formula must define a test block");
+		for (const command of ["render", "analyze", "validate"]) {
+			assert.ok(
+				text.includes(command),
+				`formula test must run ${command}, not only --version`,
+			);
+		}
+	});
+
+	it("homebrew doc records the public tap workflow", () => {
+		assert.ok(existsSync(DOC), "docs/homebrew.md is missing");
+		const doc = readFileSync(DOC, "utf-8");
+		for (const token of [
+			"smile-minecraft/tap/mc-asset",
+			"upgrade",
+			"reinstall",
+			"rollback",
+			"sha256",
+			"public",
+		]) {
+			assert.ok(doc.includes(token), `homebrew doc must mention ${token}`);
+		}
+	});
+});
