@@ -1,0 +1,62 @@
+export type {
+	AddLayerOptions,
+	AddRegionOptions,
+	CreateCanvasOptions,
+} from "./canvas.ts";
+export {
+	addLayer,
+	addRegion,
+	createAuthoringPalette,
+	createCanvas,
+	getLayer,
+	getPixel,
+	getRegion,
+	getRegionValue,
+	replaceLayerPixels,
+	replaceRegionMask,
+	setPixel,
+	setRegionValue,
+} from "./canvas.ts";
+export type { ErrorCode, ExitCode, FixedErrorCode } from "./errors.ts";
+export {
+	ERROR_EXIT_CODE,
+	exitCodeForError,
+	isErrorCode,
+	McAssetError,
+	resolveExitCode,
+} from "./errors.ts";
+export type {
+	AuthoringPalette,
+	AuthoringPaletteEntry,
+	BlendMode,
+	CanvasMetadata,
+	PaletteRole,
+	PixelCanvas,
+	PixelLayer,
+	PixelRegion,
+	Rect,
+	RGBA,
+} from "./types.ts";
+export {
+	assertPixelInBounds,
+	assertRectInBounds,
+	assertValidCanvas,
+	BYTES_PER_PIXEL,
+	CANVAS_MAX_EDGE,
+	CANVAS_MIN_EDGE,
+	CANVAS_VERSION,
+	checkResourceLimits,
+	estimateMemoryBytes,
+	MASK_BYTES_PER_PIXEL,
+	MAX_LAYER_COUNT,
+	MAX_REGION_COUNT,
+	MEMORY_BUDGET_BYTES,
+	validateColor,
+	validateCoordinate,
+	validateDimension,
+	validateLayerPixelsSize,
+	validateMaskValue,
+	validateOpacity,
+	validateRect,
+	validateRegionMaskSize,
+} from "./validate.ts";

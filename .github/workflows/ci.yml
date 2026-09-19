@@ -51,8 +51,8 @@ jobs:
 
   # Portable runtime: same static checks under Node, no Bun required.
   # bun:test needs the Bun runner, so the Node job covers typecheck,
-  # lint, dependency gates, and determinism guards instead of unit tests.
-  # (§100.5 cross-runtime golden comparison lands with real pixel tests.)
+  # lint, dependency gates, determinism guards, plus the node:test entry
+  # that runs the same shared assertions as the Bun entry (§100.5).
   node:
     runs-on: ubuntu-latest
     steps:
@@ -63,6 +63,8 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npx tsc --noEmit
       - run: npx @biomejs/biome check .
+      # §100.5: shared model assertions executed outside Bun.
+      - run: node --test tests/core/model.node.ts
       - name: dependency gate (§101.1)
         run: |
           if grep -rEi 'sharp|libvips|skia' package.json package-lock.json 2>/dev/null; then

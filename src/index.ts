@@ -4,3 +4,5 @@ export const VERSION = "0.1.0";
 export function main(): void {
 	// Intentionally empty: later tasks add PixelCanvas / mcpx / PNG / CLI.
 }
+
+export * from "./core/index.ts";
