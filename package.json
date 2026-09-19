@@ -4,11 +4,18 @@
 	"description": "Pixel-native Minecraft asset toolchain (scaffold)",
 	"license": "MIT",
 	"type": "module",
+	"bin": {
+		"mc-asset": "./bin/mc-asset.js"
+	},
+	"files": [
+		"bin/",
+		"dist/"
+	],
 	"scripts": {
 		"test": "bun test",
 		"test:typecheck": "tsc --noEmit",
 		"lint": "biome check .",
-		"build": "bun build src/index.ts --outdir dist --target node --format esm"
+		"build": "node scripts/build.mjs"
 	},
 	"dependencies": {
 		"commander": "15.0.0",
