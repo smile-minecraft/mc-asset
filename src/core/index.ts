@@ -79,6 +79,23 @@ export {
 	inspectPalette,
 	mapPixelsToPalette,
 } from "./palette.ts";
+export type {
+	PixelizeOptions,
+	PixelizePresetName,
+	PixelizePresetParams,
+	PixelizeReport,
+	PixelizeSize,
+	PixelizeStage,
+} from "./pixelize.ts";
+export {
+	describePixelizePreset,
+	isStandardPixelizeSize,
+	PIXELIZE_PRESETS,
+	PIXELIZE_STAGES,
+	parsePixelizePreset,
+	parsePixelizeSize,
+	runPixelize,
+} from "./pixelize.ts";
 export type { QuantizeResult } from "./quantizer.ts";
 export {
 	assertMcpxPaletteCapacity,

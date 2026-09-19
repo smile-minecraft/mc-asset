@@ -15,6 +15,10 @@ import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
 import { type ImportOptions, runImport } from "./cmd-import.ts";
 import { type MaterialOptions, runMaterial } from "./cmd-material.ts";
 import { type PaletteOptions, runPalette } from "./cmd-palette.ts";
+import {
+	type PixelizeCommandOptions,
+	runPixelizeCommand,
+} from "./cmd-pixelize.ts";
 import { type QuantizeOptions, runQuantize } from "./cmd-quantize.ts";
 import { type RecolorOptions, runRecolor } from "./cmd-recolor.ts";
 import { type RenderOptions, runRender } from "./cmd-render.ts";
@@ -631,6 +635,46 @@ export function buildProgram(): Command {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
 				const code = await runBuild(
 					source,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("pixelize <image>")
+		.description("Run a reference image through the pixelize pipeline.")
+		.option("--size <size>", "Output size: 16, 32, 64, 128, or WxH.")
+		.option("--preset <name>", "Processing preset: item, block, generic.")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--source <path>", "Write the editable .mcpx source file.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--in-place",
+			"Write the PNG back to the input path (implies force for that target).",
+		)
+		.option("--input <path>", "Input path used with --in-place.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.option(
+			"--selection <scope>",
+			"Rejected with pixelize (ARGUMENT_CONFLICT).",
+		)
+		.action(
+			async (
+				image: string,
+				options: PixelizeCommandOptions,
+				command: Command,
+			) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runPixelizeCommand(
+					image,
 					options,
 					globals.json === true,
 					realStreams(),

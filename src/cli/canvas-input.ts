@@ -1,3 +1,4 @@
+import { addLayer, createCanvas, replaceLayerPixels } from "../core/canvas.ts";
 import { McAssetError } from "../core/errors.ts";
 import {
 	isPixelSelected,
@@ -5,6 +6,7 @@ import {
 	resolveSelection,
 } from "../core/selection.ts";
 import type { PixelCanvas } from "../core/types.ts";
+import { decodeImage } from "../io/decode.ts";
 import { decodePng } from "../io/png.ts";
 import { parseMcpx } from "../mcpx/index.ts";
 import { readInputFile, readInputText, type WarningNote } from "./artifacts.ts";
@@ -35,6 +37,35 @@ export async function loadEditableCanvas(
 	const decoded = decodePng(await readInputFile(inputPath, "image"));
 	return {
 		canvas: decoded.canvas,
+		warnings: decoded.warnings.map((warning) => ({
+			code: warning.code,
+			message: warning.message,
+		})),
+	};
+}
+
+/**
+ * Raster intake for pixelize: PNG, JPEG, and WebP all decode through the
+ * shared multi-format entry. The .mcpx source format is rejected here so
+ * the raster-only contract lives in one place. Existing loadEditableCanvas
+ * behavior above is unchanged.
+ */
+export async function loadRasterCanvas(
+	inputPath: string,
+): Promise<LoadedCanvas> {
+	if (inputPath.toLowerCase().endsWith(".mcpx")) {
+		throw new McAssetError(
+			"UNSUPPORTED_IMAGE_FORMAT",
+			"Raster input required: .mcpx sources cannot enter here.",
+			{ inputPath },
+		);
+	}
+	const decoded = await decodeImage(await readInputFile(inputPath, "image"));
+	const canvas = createCanvas(decoded.width, decoded.height);
+	const layer = addLayer(canvas, { id: "base" });
+	replaceLayerPixels(canvas, layer.id, decoded.pixels);
+	return {
+		canvas,
 		warnings: decoded.warnings.map((warning) => ({
 			code: warning.code,
 			message: warning.message,
