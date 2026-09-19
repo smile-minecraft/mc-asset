@@ -484,6 +484,134 @@ Pixelize → Variant → Analyze
 
 應測點：引擎模組的 diff 不含 CLI 接線檔；同一命令的前後兩次接線改動不互相覆蓋；V0.1 既有測試在整合後仍綠。
 
+## 實作補充（引擎波）
+
+這一節把引擎波實作時確認、但前面章節未寫定的判讀補上。標 `（本凍結）` 的是在此正式固定的語意，附理由與應測點；標 `（實作判讀）` 的是實作實況，權威來源是每項列出的程式與測試，本節只記錄、不重新凍結。多數 `（本凍結）` 項目是把前面章節已有的凍結具體化，關係寫在該項後面。
+
+### 平移的內容判定（本凍結）
+
+`translate` 與 `moveLayer` 共用同一個「cell 是否算內容」的判定：一個 cell 只在 RGBA 四個 byte 全為 0 時才算空。`A = 0` 但 RGB 不全為 0 的隱藏值依 §7 仍是內容，不能離開 canvas。
+
+```text
+非全空 cell 被移出 canvas   OUT_OF_BOUNDS，丟出前不寫入任何 byte
+全空 cell 被移出 canvas     允許離開，不報錯
+留下的 cell                 #00000000
+未離開的像素                原樣搬移，不插值
+```
+
+理由：§7 把 `A = 0` 的 hidden RGB 當資料，判定因此以整個 cell 的 byte 為準，而不是只看 alpha，也不是看位移量是否為零。
+
+這條把「進階 Layer／Region 操作」對 `moveLayer` 的 `OUT_OF_BOUNDS` 敘述具體化：移出即拒絕的判準是 cell 的內容；也因此 `translate(canvas, 0, 0)` 與 `moveLayer(canvas, id, 0, 0)` 都是 no-op（後者早退）。
+
+出處：`src/core/transform.ts` 的 `translate`（`isClear` 逐 cell 檢查）、`src/core/layers.ts` 的 `moveLayer`。
+
+應測點：`translate that would move content out is OUT_OF_BOUNDS without writes`、`translate shifts content, keeps values, fills vacated with transparent`、`translate by zero is the identity`、`moveLayer rejects content leaving the canvas without partial writes`、`moveLayer rejects hidden RGB leaving the canvas without partial writes`、`moveLayer carries hidden RGB verbatim within bounds`、`moveLayer lets empty margins leave freely`、`moveLayer zero shift is a no-op`。
+
+### 旋轉方向（本凍結）
+
+`rotate90` 是順時針，`rotate270` 是逆時針。前面「旋轉與鏡射」只寫了可逆、對合與維度交換，沒有寫方向；方向會改變輸出的 bytes，不能留給實作各自決定。
+
+出處：`src/core/transform.ts` 的 `rotate90`（"Quarter turn clockwise"）、`rotate270`（"Quarter turn counter-clockwise"）。
+
+應測點：`rotate90 golden pins clockwise direction and swaps dimensions`、`rotate270 golden pins counter-clockwise direction`、`rotate90 four times is byte-identical`、`rotate90 twice equals rotate180`、`rotate90 then rotate270 restores the original`。
+
+### resize 的 box 餘數與 mask（本凍結）
+
+`box` 的來源區塊以固定規則切：
+
+```text
+base  = floor(oldSize / newSize)
+extra = oldSize - base * newSize
+前 extra 個輸出 cell 各覆蓋 base + 1 個來源像素，其餘覆蓋 base 個
+```
+
+x 與 y 方向各自套同一規則；每個 cell 的 r／g／b／a 各自整數累加後 `floor(sum / count)`，`count = (x1 - x0) * (y1 - y0)`，不做進位或通道混合。
+
+region mask 不平均：改用 nearest 映射（`floor(x * oldWidth / newWidth)`、`floor(y * oldHeight / newHeight)`，即 `nearestSource`）取來源 mask 值，維持 binary。
+
+理由：整數平均搭配固定的餘數分配，才能讓 box 的結果在跨 runtime 時 byte-identical；mask 必須維持 binary，平均會產生非 0／1 的值，所以走 nearest。
+
+這條把 Transform「Resize」對 `box` 的「以整數累加後整除，餘數依固定像素順序分配」具體化為「前 remainder 個 cell 各多一個來源像素」，並補上 region mask 走 nearest。
+
+出處：`src/core/transform.ts` 的 `blockEdges`、`resizeBox`、`nearestSource`。
+
+應測點：`resize box averages even blocks with integer division`、`resize box distributes remainder columns in fixed order`、`region masks follow crop, pad, translate, and resize`。
+
+### pixel-aware 的拒絕語意（本凍結）
+
+`pixel-aware` 以名稱接受，但一被選用就丟 `INVALID_ARGUMENT`，訊息為 "pixel-aware resize is not implemented; use nearest or box."，且在丟出前不寫入任何 byte；未知的模式字串同樣是 `INVALID_ARGUMENT`。
+
+理由：Transform「Resize」要求 V0.2 接受這個名稱並可回報尚未實作的明確錯誤，這裡把「明確錯誤」釘成具體的錯誤碼，避免呼叫端把 `pixel-aware` 當成可用的模式。
+
+出處：`src/core/transform.ts` 的 `resize` 與 `resolveResizeMode`。
+
+應測點：`resize pixel-aware is accepted by name but explicitly refused`、`resize rejects unknown mode without writes`。
+
+### Recolor 的透明像素（本凍結）
+
+`A = 0` 的像素一律保留 byte-identical，包含 hidden RGB：不走 role 映射，也不走 luminance 分帶。`recolorColor` 直接回傳原值，`recolorLayer` 在該 cell 直接跳過，`report.pixelsChanged` 不計入。`A ≠ 0` 的像素仍照「Recolor 的映射（本凍結）」輸出。
+
+理由：與 §7 及 Selection「套用時機與不變條件」對 hidden RGB 的處理一致；重上色不應該把透明背景或剪影的隱藏值改成目標 palette 的顏色。
+
+出處：`src/core/recolor.ts` 的 `recolorColor`（`color.a === 0` 早退）、`recolorLayer`（`a === 0` 時 `continue`）。
+
+應測點：`fully transparent pixels stay byte-identical on full-layer recolor`、`transparent pixels inside a region are skipped too`、`pure helper keeps fully transparent colors unchanged`。
+
+### Cleanup 的七類判定與修正（實作判讀）
+
+偵測永不寫入；修正只寫被請求的類別，且從輸入快照導出，套用順序固定為 `CLEANUP_CLASSES` 的順序，因此重疊類別的結果具確定性。`ALPHA_AFFECTING_CLASSES` 是除 `outlier` 以外的六類，缺少 `--allow-render-pass-change` 時在寫入任何 byte 前以 `INVALID_ARGUMENT` 拒絕，未知的類別名同樣拒絕。
+
+| 類別 | 偵測（符號） | 修正 |
+|---|---|---|
+| `isolated` | `findIsolated`：不透明像素，4-neighbor 全為 fully transparent | 設為 `#00000000` |
+| `noise` | `findNoise`：內部不透明像素，8-neighborhood 全為同一種與自身不同的顏色；邊界像素不算 | 複製北側 neighbor 的 RGBA |
+| `cluster` | `findCluster`：2–4 個 4-connected 前景（`A ≠ 0`）像素，界內邊界全為背景；單像素歸 `isolated`、大片保留 | 全部設為 `#00000000` |
+| `fringe` | `findFringe`：partial（`0 < A < 255`）像素，4-neighbor 全為不透明 | 保留 RGB、alpha 設 255 |
+| `outlier` | `findOutlier`：`A ≠ 0` 像素，RGB 不在參考 palette；alpha 不參與判定 | 以 squared RGB 距離取最近 palette 顏色，alpha 不變 |
+| `hole` | `findHole`：fully transparent 像素，四個 neighbor 都在界內且不透明 | 四鄰居 RGB 各取整數平均（整數除法，不進位）、alpha 設 255 |
+| `aa` | `findAA`：partial 像素，4-neighbor 至少一個不透明、至少一個 fully transparent | 四鄰居中 opaque ≥ clear 則 alpha 設 255，否則設 0；RGB 不變 |
+
+`fringe` 與 `aa` 互斥：partial 像素若 4-neighbor 全為不透明是 `fringe`，只要有一個 fully transparent 就是 `aa`，兩者不會同時成立。`outlier` 的參考 palette 由 `options.palette` 決定，未給時回退 canvas palette，兩者都沒有時 `outlier` 偵測為空。
+
+出處：`src/core/cleanup.ts` 的 `CLEANUP_CLASSES`、`ALPHA_AFFECTING_CLASSES`、`findIsolated`、`findNoise`、`findCluster`、`findFringe`、`findOutlier`、`findHole`、`findAA`、`replacementFor`、`fixCleanup`。
+
+測試：`class identifiers are frozen for flags and JSON`、`isolated golden: lone opaque pixel is flagged`、`noise golden: single spike in a uniform field is flagged`、`cluster golden: 2x2 speckle on transparency is flagged`、`fringe golden: partial pixel inside solid fill is flagged`、`fringe negative: boundary partial is aa, not fringe`、`outlier golden: color outside the palette is flagged`、`outlier falls back to the canvas palette`、`hole golden: enclosed transparent pixel is flagged`、`aa golden: partial pixel between opaque and clear is flagged`、`aa fix snaps to the majority side, ties favor opaque`、`detect-only leaves every byte untouched`、`alpha classes without authorization are rejected with zero writes`、`mixed outlier plus alpha class is rejected atomically`、`unknown class is INVALID_ARGUMENT with the bad name in details`、`same input twice gives identical bytes and stats`。
+
+### median-cut 的取整細節（實作判讀）
+
+```text
+切割平面    對 bucket 內每個 channel 取整數值域 hi - lo，最大的當切割平面；
+            掃描順序 r, g, b, a，只有嚴格更大才換（同寬時先掃到的勝）
+切點        目標索引 target = (bucket.pixelCount - 1) >> 1；
+            把 bin 依所選 channel 排序後累加像素數，
+            第一個讓累加值 > target 的 bin 歸左側，
+            但至少留一個 bin 給右側（切到最後一個 bin 時改切在它前面）
+代表色      averageChannel：base = floor(sum / count)，
+            remainder = sum - base * count；
+            2 * remainder >= count 時回 base + 1，否則回 base
+零變化      distinct 色數 <= --colors 時短路：palette 依 first-appearance 順序原樣輸出，
+            像素 byte 不變
+A = 0       hidden RGB 參與平均；零變化路徑原樣保留
+```
+
+bucket 與 palette 的排序共用同一個全序：像素數多者先，再比代表色 r、g、b（升），最後比 bucket 內最小像素索引（升）；切點排序在 channel 同值時用 `compareColorFull` 補完全序。兩者都不依賴排序穩定性或物件鍵序。
+
+出處：`src/core/quantizer.ts` 的 `splitBucket`、`averageChannel`、`compareBuckets`、`compareColorFull`、`quantizePixels`。
+
+測試：`colors 1 averages to a single integer color, remainder rounds half up`、`remainder below half rounds down`、`even-count median split takes the smaller side`、`widest channel wins the split plane`、`equal-count buckets order by r, g, b, then min pixel index`、`colors at or above the distinct count changes zero pixels`、`hidden RGB under A=0 is data, never silently zeroed`、`same input quantizes byte-identical on rerun`。
+
+### 七材料 starter palette 待複核（實作判讀）
+
+「首批內建材料（本凍結）」的七個 material 在 `src/core/material.ts` 落地，id 順序為 `iron`、`copper`、`oxidized_copper`、`gold`、`wood`、`stone`、`crystal`（`BUILTIN_MATERIAL_IDS` 與 `listMaterialIds()`）。每個 material 的 palette 是模組內的 hex 常數，並各自帶 characteristics（整數 `contrast`、整數 `noise`、`cluster` 與 `highlightBehavior` 字串）。
+
+這些色值與特性是專案自訂的明示假設，不是規格推導的結果：`material.ts` 的檔頭註解寫明它們 pending art-direction review，且不引用任何官方 Minecraft 素材。art-direction 複核後若要調整，只需改 `src/core/material.ts` 的常數；現有測試鎖的是 id 集合、`shadow`／`base`／`highlight` role 齊備、base 顏色彼此相異與 byte 範圍，沒有鎖定特定 hex。
+
+出處：`src/core/material.ts` 的 `BUILTIN_MATERIAL_IDS`、`MATERIALS`、`getMaterial`。
+
+測試：`builtin material ids match the frozen seven`、`each material palette has shadow, base, and highlight roles`、`starter base colors are distinct per material`、`palette entries have unique ids, valid roles, and byte colors`。
+
+以上各項都有對應測試（見各段列出的測試名）；這些測試就是本節的迴歸鎖。
+
 ## 待決清單
 
 以下無法從規格推定，列出但不自行填補。其中前四項會直接影響對外行為，需要決策後才適合定案。
