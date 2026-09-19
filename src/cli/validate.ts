@@ -11,9 +11,25 @@ import {
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
 import { exitCodeForMcAssetError } from "./exit.ts";
 import { parseProfile } from "./profiles.ts";
+import {
+	formatVersionTarget,
+	resolveVersionTarget,
+	versionReportShape,
+} from "./version-options.ts";
 
 export interface ValidateCommandOptions {
 	profile?: string | undefined;
+	minecraftVersion?: string | undefined;
+	resourcePackVersion?: string | undefined;
+}
+
+export interface ValidateResult extends ValidateReport {
+	version: {
+		minecraftVersion?: string | undefined;
+		resourcePackVersion?: string | undefined;
+		packFormat?: number | undefined;
+	};
+	target: string;
 }
 
 /** Minimal human verdict: the JSON envelope is the primary output. */
@@ -66,6 +82,10 @@ export async function runValidate(
 			);
 		}
 		const profile = parseProfile(options.profile);
+		const target = resolveVersionTarget({
+			minecraftVersion: options.minecraftVersion,
+			resourcePackVersion: options.resourcePackVersion,
+		});
 		let input: Uint8Array;
 		try {
 			input = new Uint8Array(await readFile(asset));
@@ -76,19 +96,31 @@ export async function runValidate(
 			);
 		}
 		const decoded = decodePng(input);
-		const report = validateCanvas(decoded.canvas, {
+		const version = versionReportShape(target);
+		const targetSummary = formatVersionTarget(target);
+		const report: ValidateReport = validateCanvas(decoded.canvas, {
 			profile,
+			packFormat: target.packFormat,
 			sourceWarnings: decoded.warnings,
 			filename: asset,
 		});
+		const result: ValidateResult = {
+			...report,
+			version,
+			target: targetSummary,
+		};
 		if (report.verdict === "fail") {
-			failed = report;
+			failed = result;
 			throw new McAssetError("VALIDATION_FAILED", summarize(report));
 		}
 		if (globalJson) {
-			emitEnvelope(successEnvelope(report), streams, route);
+			emitEnvelope(successEnvelope(result), streams, route);
 		} else {
-			emitLog(formatHumanReport(report), streams, route);
+			emitLog(
+				`${formatHumanReport(report)}\ntarget: ${targetSummary}`,
+				streams,
+				route,
+			);
 		}
 		return 0;
 	} catch (error) {
@@ -104,8 +136,12 @@ export async function runValidate(
 				);
 			} else {
 				if (error.code === "VALIDATION_FAILED" && failed !== undefined) {
+					const targetLine =
+						"target" in failed && typeof failed.target === "string"
+							? `\ntarget: ${failed.target}`
+							: "";
 					emitLog(
-						`${formatHumanReport(failed)}\nerror [VALIDATION_FAILED] ${message}`,
+						`${formatHumanReport(failed)}${targetLine}\nerror [VALIDATION_FAILED] ${message}`,
 						streams,
 						route,
 					);

@@ -2,7 +2,7 @@
 
 Entry point: `bun src/cli/index.ts` (distribution packaging is out of scope for V0.1).
 
-Global behavior follows `project-detail.md` §98 (channels, OUTPUT_EXISTS/--force/--mkdir, atomic write, --force/--in-place mutex) and §99 (exit codes via the `core/errors` registry; no local table). V0.1 implements `--profile` only; there is no `--preset` flag.
+Global behavior follows `project-detail.md` §98 (channels, OUTPUT_EXISTS/--force/--mkdir, atomic write, --force/--in-place mutex) and §99 (exit codes via the `core/errors` registry; no local table). V0.1 implements `--profile` everywhere plus `--minecraft-version`/`--resource-pack-version` on `analyze`/`validate` only; there is no `--preset` flag.
 
 ## Global flags
 
@@ -159,12 +159,43 @@ stdout artifact, `warnings` surfaces PNG normalization notes and the
 `MCPX_LARGE_CANVAS` practical-size notice. Batch failures attach
 `{applied: 0, rolledBack: true}` as `result` on the error envelope.
 
-## Version flags (known gap)
+## Version flags (analyze / validate only)
 
-V0.1 adds no `--minecraft-version`, `--pack-format`, or `--preset`
-flags: the frozen surface defines `--profile` only, and pack-format
-behavior follows the engine defaults. Version-aware switching (§73) is
-future work; agents needing a different target must say so explicitly.
+```text
+--minecraft-version <version>      Target Minecraft version (V0.1: 26.3 only)
+--resource-pack-version <version>  Target packFormat as a positive integer (V0.1: 75)
+```
+
+- `--minecraft-version 26.3` resolves to packFormat 75 with the §95
+  display echo `resource-pack 97.1` (Resource Pack Format 97.1 ↔ Java
+  Edition 26.3, source `Minecraft Wiki Template:Resource pack format`).
+  The integer 75 is the engine's sole version group (the §95
+  `{ fact, since: { packFormat }, value }` example); finer per-version
+  splits arrive with the full version-fact layer.
+- `--resource-pack-version` takes a positive integer packFormat only
+  (validated by the existing `validatePackFormat` check). Dotted
+  versions such as `97.1` are INVALID_ARGUMENT in V0.1: target 26.3 via
+  `--minecraft-version` instead.
+- At most one of the two flags per invocation; both together,
+  an unknown `--minecraft-version`, a non-integer
+  `--resource-pack-version`, or a repeated flag is INVALID_ARGUMENT
+  (exit 2 via the existing registry, no local table).
+- The JSON result carries `version: { minecraftVersion?,
+  resourcePackVersion?, packFormat? }` (default `{}`) plus a human
+  `target:` summary line. Existing report fields are unchanged, and
+  `PENDING_SOURCE_PNG_ONLY` stays warning-only under either flag.
+
+## V0.1 gaps and where they go
+
+- Layer/region/pixel manipulation: no separate `compose` command; use
+  `--operations` batch on `import`/`render`/`build` (frozen).
+- Cross-runtime behavior: Bun runs the full suite (including spawn);
+  the `*.node.ts` entries run the pure cases only, so both runtimes
+  stay green without subprocesses on the Node side.
+- Full version-fact layer (dotted `97.x` handling, multi-group
+  `since` splits, atlas/pack validators, `pack.mcmeta`
+  auto-detection): deferred to the V0.5 track (`validate-pack`,
+  `v05-t05` owns the profiles-engine fact work).
 
 ## Framework helpers (frozen, t07)
 

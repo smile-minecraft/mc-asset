@@ -11,9 +11,25 @@ import {
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
 import { exitCodeForMcAssetError } from "./exit.ts";
 import { parseProfile } from "./profiles.ts";
+import {
+	formatVersionTarget,
+	resolveVersionTarget,
+	versionReportShape,
+} from "./version-options.ts";
 
 export interface AnalyzeCommandOptions {
 	profile?: string | undefined;
+	minecraftVersion?: string | undefined;
+	resourcePackVersion?: string | undefined;
+}
+
+export interface AnalyzeResult extends AnalyzeReport {
+	version: {
+		minecraftVersion?: string | undefined;
+		resourcePackVersion?: string | undefined;
+		packFormat?: number | undefined;
+	};
+	target: string;
 }
 
 /** Minimal human report: the JSON envelope is the primary output. */
@@ -52,6 +68,10 @@ export async function runAnalyze(
 			);
 		}
 		const profile = parseProfile(options.profile);
+		const target = resolveVersionTarget({
+			minecraftVersion: options.minecraftVersion,
+			resourcePackVersion: options.resourcePackVersion,
+		});
 		let input: Uint8Array;
 		try {
 			input = new Uint8Array(await readFile(image));
@@ -64,12 +84,24 @@ export async function runAnalyze(
 		const decoded = decodePng(input);
 		const report = analyzeCanvas(decoded.canvas, {
 			profile,
+			packFormat: target.packFormat,
 			sourceWarnings: decoded.warnings,
 		});
+		const version = versionReportShape(target);
+		const targetSummary = formatVersionTarget(target);
+		const result: AnalyzeResult = {
+			...report,
+			version,
+			target: targetSummary,
+		};
 		if (globalJson) {
-			emitEnvelope(successEnvelope(report), streams, route);
+			emitEnvelope(successEnvelope(result), streams, route);
 		} else {
-			emitLog(formatHumanReport(report), streams, route);
+			emitLog(
+				`${formatHumanReport(report)}\ntarget: ${targetSummary}`,
+				streams,
+				route,
+			);
 		}
 		return 0;
 	} catch (error) {

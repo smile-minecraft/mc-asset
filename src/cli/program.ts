@@ -32,6 +32,25 @@ export interface StubOptions {
 
 const STUB_ARTIFACT_PREFIX = "stub-ok";
 
+/**
+ * Reject a repeated version flag at parse time: commander keeps the last
+ * value silently, but the version contract treats repetition as
+ * INVALID_ARGUMENT, so each flag may appear at most once per invocation.
+ */
+function singleUseOption(flag: string): (value: string) => string {
+	let seen = false;
+	return (value: string): string => {
+		if (seen) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				`Duplicate ${flag}: specify it at most once.`,
+			);
+		}
+		seen = true;
+		return value;
+	};
+}
+
 function realStreams(): OutputStreams {
 	return { stdout: process.stdout, stderr: process.stderr };
 }
@@ -170,6 +189,16 @@ export function buildProgram(): Command {
 			"--profile <name>",
 			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
 		)
+		.option(
+			"--minecraft-version <version>",
+			"Target Minecraft version (V0.1: 26.3 only).",
+			singleUseOption("--minecraft-version"),
+		)
+		.option(
+			"--resource-pack-version <version>",
+			"Target resource packFormat as a positive integer (V0.1: 75).",
+			singleUseOption("--resource-pack-version"),
+		)
 		.action(
 			async (
 				image: string,
@@ -195,6 +224,16 @@ export function buildProgram(): Command {
 		.option(
 			"--profile <name>",
 			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.option(
+			"--minecraft-version <version>",
+			"Target Minecraft version (V0.1: 26.3 only).",
+			singleUseOption("--minecraft-version"),
+		)
+		.option(
+			"--resource-pack-version <version>",
+			"Target resource packFormat as a positive integer (V0.1: 75).",
+			singleUseOption("--resource-pack-version"),
 		)
 		.action(
 			async (
