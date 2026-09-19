@@ -10,6 +10,7 @@ import {
 	emitCommandFailure,
 	emitCommandSuccess,
 	ensureMcpxText,
+	preflightArtifactTargets,
 	readInputText,
 	readOperationsText,
 	readStdinBytes,
@@ -117,6 +118,15 @@ export async function runBuild(
 				warnings.push({ code: warning.code, message: warning.message });
 			});
 		}
+		// File-target preflight (alias, duplicate, existence, parents) runs
+		// before any stdout artifact byte, so a conflict keeps stdout empty.
+		// The write phase re-checks per file; the gap between the two is
+		// best-effort against concurrent writers (TOCTOU).
+		await preflightArtifactTargets(targets, {
+			inputPath,
+			inPlace: options.inPlace,
+			mkdir: options.mkdir,
+		});
 		if (pngBytes !== undefined && targets.pngStdout) {
 			emitArtifact(pngBytes, streams, route);
 		}

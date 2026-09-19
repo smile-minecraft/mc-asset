@@ -1,4 +1,10 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, realpath, stat } from "node:fs/promises";
+import {
+	basename,
+	dirname,
+	join as joinPath,
+	resolve as resolvePath,
+} from "node:path";
 import process from "node:process";
 import { applyOperations, type BatchReport } from "../core/batch.ts";
 import { createAuthoringPalette } from "../core/canvas.ts";
@@ -18,7 +24,7 @@ import {
 } from "./channels.ts";
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
 import { exitCodeForMcAssetError } from "./exit.ts";
-import { atomicWriteFile } from "./filesystem.ts";
+import { type AtomicWriteSeams, atomicWriteFile } from "./filesystem.ts";
 import { parseOperationsJson } from "./operations-json.ts";
 
 /**
@@ -210,6 +216,14 @@ export interface ResolvedArtifacts {
  * --output/--stdout carry PNG; --source carries .mcpx; --in-place rewrites
  * the file input (PNG for import/render, .mcpx for build) and implies
  * force for that target only. No target at all is OUTPUT_REQUIRED.
+ *
+ * Same-path and relative/absolute/dot-segment aliases are refused here as
+ * ARGUMENT_CONFLICT unless the target comes from an explicit --in-place.
+ * Case-only and Unicode NFC/NFD equivalences fold into the same identity
+ * (see foldIdentity), so they are refused here too. Symlink aliases need
+ * the filesystem, so the async preflight below re-checks with canonical
+ * keys; the sync check here is never weaker than a no-op (it only throws
+ * on provably identical normalized paths).
  */
 export function resolveArtifactTargets(
 	request: ArtifactRequest,
@@ -252,7 +266,65 @@ export function resolveArtifactTargets(
 			"One of --output, --stdout, --source, or --in-place is required.",
 		);
 	}
+	assertNoNormalizedAlias(request.inputPath, request.inPlace, [
+		...pngFiles,
+		...mcpxFiles,
+	]);
+	assertNoNormalizedDuplicate([...pngFiles, ...mcpxFiles]);
 	return { pngStdout, pngFiles, mcpxFiles };
+}
+
+/** Normalized (symlink-blind) identity: catches literal, absolute, and dot-segment aliases. */
+function normalizedKey(path: string): string {
+	return foldIdentity(resolvePath(path));
+}
+
+/**
+ * Cross-platform target identity. The full normalized absolute path is
+ * folded with Unicode NFC plus en-US case folding, so `case.png` vs
+ * `CASE.png` and NFC vs NFD spellings compare equal on every platform.
+ * This is deliberately conservative: on a case-sensitive filesystem two
+ * confusingly equivalent names are refused rather than risking one
+ * artifact silently overwriting the other on a case-insensitive or
+ * normalization-insensitive volume (macOS defaults). Safety here never
+ * depends on detecting the volume's actual sensitivity.
+ */
+function foldIdentity(value: string): string {
+	return value.normalize("NFC").toLocaleLowerCase("en-US");
+}
+
+function assertNoNormalizedAlias(
+	inputPath: string | undefined,
+	inPlace: boolean | undefined,
+	targets: FileTarget[],
+): void {
+	if (inPlace === true || inputPath === undefined || inputPath === "") {
+		return;
+	}
+	const inputKey = normalizedKey(inputPath);
+	for (const target of targets) {
+		if (normalizedKey(target.path) === inputKey) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				`Output aliases the input: ${target.path}. Pass --in-place to rewrite it.`,
+			);
+		}
+	}
+}
+
+function assertNoNormalizedDuplicate(targets: FileTarget[]): void {
+	const seen = new Map<string, string>();
+	for (const target of targets) {
+		const key = normalizedKey(target.path);
+		const prior = seen.get(key);
+		if (prior !== undefined) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				`Duplicate output target: ${target.path} aliases ${prior}; each target may be written once.`,
+			);
+		}
+		seen.set(key, target.path);
+	}
 }
 
 /** Minecraft profiles export PNG only (§34); the gate covers explicit --output paths. */
@@ -284,6 +356,142 @@ export interface ArtifactPayload {
 }
 
 /**
+ * Canonical identity without requiring the target to exist: the target
+ * itself when it resolves, otherwise the nearest existing ancestor with
+ * the missing segments re-appended. A failed resolve never skips the
+ * check; it falls back to the normalized absolute path. Every form is
+ * folded (see foldIdentity) so case and Unicode equivalences match.
+ */
+async function canonicalKey(path: string): Promise<string> {
+	try {
+		return foldIdentity(await realpath(path));
+	} catch {
+		// Target (or an ancestor) is missing: anchor on what does exist.
+	}
+	const absolute = resolvePath(path);
+	let dir = dirname(absolute);
+	const below: string[] = [basename(absolute)];
+	for (;;) {
+		try {
+			const realDir = await realpath(dir);
+			return foldIdentity(joinPath(realDir, ...below));
+		} catch {
+			const parent = dirname(dir);
+			if (parent === dir) {
+				return foldIdentity(absolute);
+			}
+			below.unshift(basename(dir));
+			dir = parent;
+		}
+	}
+}
+
+export interface PreflightOptions {
+	inputPath?: string | undefined;
+	inPlace?: boolean | undefined;
+	mkdir?: boolean | undefined;
+}
+
+async function preflightTargetsExistence(
+	targets: FileTarget[],
+	mkdir: boolean | undefined,
+): Promise<void> {
+	for (const target of targets) {
+		if (target.path === "") {
+			throw new McAssetError("INVALID_ARGUMENT", "Output path is empty.");
+		}
+		if (!target.force && (await targetExists(target.path))) {
+			throw new McAssetError(
+				"OUTPUT_EXISTS",
+				`Output exists: ${target.path}. Pass --force to overwrite.`,
+			);
+		}
+		const parent = dirname(target.path);
+		if (!(await targetExists(parent)) && mkdir !== true) {
+			throw new McAssetError(
+				"FILESYSTEM_ERROR",
+				`Parent directory is missing: ${parent}. Pass --mkdir to create it.`,
+			);
+		}
+	}
+}
+
+/**
+ * Full preflight for the command layer: symlink-aware alias/duplicate
+ * checks plus the union existence/parent gate. Callers MUST run this
+ * before emitting any stdout artifact bytes, so a conflicting file
+ * target keeps stdout at zero bytes. Checks that fail here throw the
+ * same codes the write phase would (ARGUMENT_CONFLICT, OUTPUT_EXISTS,
+ * FILESYSTEM_ERROR); races between this preflight and the writes stay
+ * best-effort (TOCTOU) and are re-checked per file on the write path.
+ */
+export async function preflightArtifactTargets(
+	resolved: ResolvedArtifacts,
+	options: PreflightOptions = {},
+): Promise<void> {
+	const all = [...resolved.pngFiles, ...resolved.mcpxFiles];
+	const keys = await Promise.all(
+		all.map((target) => canonicalKey(target.path)),
+	);
+	if (
+		options.inPlace !== true &&
+		options.inputPath !== undefined &&
+		options.inputPath !== ""
+	) {
+		const inputKey = await canonicalKey(options.inputPath);
+		for (let index = 0; index < all.length; index += 1) {
+			if (keys[index] === inputKey) {
+				throw new McAssetError(
+					"ARGUMENT_CONFLICT",
+					`Output aliases the input: ${(all[index] as FileTarget).path}. Pass --in-place to rewrite it.`,
+				);
+			}
+		}
+	}
+	const seen = new Map<string, string>();
+	for (let index = 0; index < all.length; index += 1) {
+		const key = keys[index] as string;
+		const prior = seen.get(key);
+		const label = (all[index] as FileTarget).path;
+		if (prior !== undefined) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				`Duplicate output target: ${label} aliases ${prior}; each target may be written once.`,
+			);
+		}
+		seen.set(key, label);
+	}
+	await preflightTargetsExistence(all, options.mkdir);
+}
+
+/** Failure details carry the per-file atomic outcome (never all-or-nothing). */
+function withCompleted(
+	error: unknown,
+	completed: string[],
+	failedTarget: string,
+): McAssetError {
+	const done = [...completed];
+	if (error instanceof McAssetError) {
+		const extra =
+			typeof error.details === "object" &&
+			error.details !== null &&
+			!Array.isArray(error.details)
+				? { ...(error.details as Record<string, unknown>) }
+				: {};
+		return new McAssetError(
+			error.code,
+			error.message.replace(/^\[[A-Z0-9_]+\] /, ""),
+			{ ...extra, completed: done, failedTarget },
+		);
+	}
+	return new McAssetError(
+		"FILESYSTEM_ERROR",
+		`Cannot write output: ${failedTarget}.`,
+		{ completed: done, failedTarget },
+	);
+}
+
+/**
  * Guarded writes: every non-force target is existence-checked before the
  * first byte lands anywhere, so an OUTPUT_EXISTS refusal writes nothing.
  * The atomic rename and --mkdir handling stay inside atomicWriteFile.
@@ -301,31 +509,45 @@ export async function writeFileTargets(
  * are existence-checked as one union before the first byte lands anywhere,
  * so refusing one artifact never leaves the other behind. Callers MUST pass
  * every file target of the command through this single call.
+ *
+ * Once writes start the semantics are per-file atomic, explicitly NOT
+ * all-or-nothing: a later target that fails leaves earlier commits in
+ * place, and the thrown error reports them in `details.completed` with
+ * the failing path in `details.failedTarget`.
  */
 export async function writeArtifactPayloads(
 	payloads: ArtifactPayload[],
 	mkdir: boolean | undefined,
+	seams: AtomicWriteSeams = {},
 ): Promise<void> {
-	for (const payload of payloads) {
-		for (const target of payload.targets) {
-			if (target.path === "") {
-				throw new McAssetError("INVALID_ARGUMENT", "Output path is empty.");
-			}
-			if (!target.force && (await targetExists(target.path))) {
-				throw new McAssetError(
-					"OUTPUT_EXISTS",
-					`Output exists: ${target.path}. Pass --force to overwrite.`,
+	const all = payloads.flatMap((payload) => payload.targets);
+	await preflightTargetsExistence(all, mkdir);
+	const completed: string[] = [];
+	try {
+		for (const payload of payloads) {
+			for (const target of payload.targets) {
+				if (target.path === "") {
+					throw new McAssetError("INVALID_ARGUMENT", "Output path is empty.");
+				}
+				await atomicWriteFile(
+					target.path,
+					payload.data,
+					{
+						force: target.force,
+						mkdir,
+					},
+					undefined,
+					seams,
 				);
+				completed.push(target.path);
 			}
 		}
-	}
-	for (const payload of payloads) {
-		for (const target of payload.targets) {
-			await atomicWriteFile(target.path, payload.data, {
-				force: target.force,
-				mkdir,
-			});
-		}
+	} catch (error) {
+		const failed = payloads
+			.flatMap((payload) => payload.targets)
+			.map((target) => target.path)
+			.find((path) => !completed.includes(path));
+		throw withCompleted(error, completed, failed ?? "(unknown target)");
 	}
 }
 

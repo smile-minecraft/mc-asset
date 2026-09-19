@@ -91,6 +91,50 @@ Common file flags per command: `--output`, `--stdout`, `--source`,
   only (§34): an explicit `--output` path with any other extension is
   UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT.
 
+### Target identity, duplicates, and write timing (release safety)
+
+- **One identity, one write.** Every file target (across `--output`,
+  `--source`, and `--in-place`) is compared by its full normalized
+  absolute path folded with Unicode NFC plus en-US case folding. Two
+  targets with the same folded identity — the same path, a
+  relative/absolute/dot-segment alias, a symlink alias, a case-only
+  difference (`case.png` vs `CASE.png`), or NFC/NFD spellings of the same
+  name — are the same target. The folding is deliberately conservative:
+  it refuses confusingly equivalent names even on a case-sensitive
+  filesystem, so safety never depends on detecting the volume's actual
+  case or normalization sensitivity (macOS defaults are insensitive for
+  both).
+- **Alias and duplicate refusals.** A file target that aliases the input
+  without an explicit `--in-place` is ARGUMENT_CONFLICT (exit 2); so is
+  any pair of file targets sharing one identity, including a PNG target
+  and an `.mcpx` target on the same path. Both checks run before the
+  first byte lands anywhere, and `--force` never authorizes them — only
+  `--in-place` authorizes rewriting the input.
+- **stdout timing.** When `--stdout` is combined with file targets, the
+  full file-target preflight (alias, duplicate, existence, parents) runs
+  before any stdout artifact byte. A conflicting file target therefore
+  keeps stdout at zero bytes.
+- **Per-file atomic, not all-or-nothing.** Refusals detected in union
+  preflight (OUTPUT_EXISTS, missing parents without `--mkdir`,
+  alias/duplicate) write nothing. Once writes start, each file commits
+  atomically (same-directory temp plus rename) on its own: if a later
+  target fails, earlier commits stay, and the thrown error reports them
+  in `details.completed` (paths in commit order) with the failing path
+  in `details.failedTarget`. The error code stays the original cause
+  (usually FILESYSTEM_ERROR); the batch is never claimed to be
+  transactional.
+- **Temp files.** Each write stages a same-directory temp created
+  exclusively (O_EXCL): a taken name is never truncated, the writer
+  retries with a fresh name, and cleanup only ever removes temps this
+  call created — a collided name owned by someone else is left alone.
+  Temp names carry pid, a counter, and a cryptographic suffix, never a
+  fixed counter alone.
+- **TOCTOU limit.** The preflight/write gap is best-effort against
+  concurrent writers to one target: two writers may both pass preflight
+  and the atomic rename decides (last-wins, always a whole file). The
+  write phase re-checks existence per file, but a race resolved after
+  stdout bytes went out cannot be recalled.
+
 ## Batch operations (`--operations`)
 
 Pixel/rect/line/fill manipulation travels through `--operations <path>`
