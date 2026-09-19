@@ -7,17 +7,15 @@ import {
 } from "../core/selection.ts";
 import type { PixelCanvas } from "../core/types.ts";
 import { decodeImage } from "../io/decode.ts";
-import { decodePng } from "../io/png.ts";
 import { parseMcpx } from "../mcpx/index.ts";
 import { readInputFile, readInputText, type WarningNote } from "./artifacts.ts";
 
 /**
  * Shared canvas intake for the wave1 pixel commands (transform, quantize,
  * cleanup, palette, recolor). `.mcpx` sources parse as text; anything else
- * goes through the PNG decoder, so JPEG/WebP inputs fail as
- * UNSUPPORTED_IMAGE_FORMAT (exit 5) until the decoder track lands real
- * raster support. No filenames are derived here; callers pass explicit
- * input and output paths.
+ * goes through the shared multi-format raster decoder (PNG, JPEG, WebP),
+ * the same decode source as the raster intake below. No filenames are
+ * derived here; callers pass explicit input and output paths.
  */
 
 export interface LoadedCanvas {
@@ -34,9 +32,12 @@ export async function loadEditableCanvas(
 			warnings: [],
 		};
 	}
-	const decoded = decodePng(await readInputFile(inputPath, "image"));
+	const decoded = await decodeImage(await readInputFile(inputPath, "image"));
+	const canvas = createCanvas(decoded.width, decoded.height);
+	const layer = addLayer(canvas, { id: "base" });
+	replaceLayerPixels(canvas, layer.id, decoded.pixels);
 	return {
-		canvas: decoded.canvas,
+		canvas,
 		warnings: decoded.warnings.map((warning) => ({
 			code: warning.code,
 			message: warning.message,
@@ -47,8 +48,8 @@ export async function loadEditableCanvas(
 /**
  * Raster intake for pixelize: PNG, JPEG, and WebP all decode through the
  * shared multi-format entry. The .mcpx source format is rejected here so
- * the raster-only contract lives in one place. Existing loadEditableCanvas
- * behavior above is unchanged.
+ * the raster-only contract lives in one place. The editable intake above
+ * shares the same decode source and canvas assembly.
  */
 export async function loadRasterCanvas(
 	inputPath: string,
