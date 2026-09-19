@@ -33,7 +33,14 @@ import { parseOperationsJson } from "./operations-json.ts";
  * one success/failure emission shape for import, render, and build.
  */
 
-export type WriteCommandName = "import" | "render" | "build";
+export type WriteCommandName =
+	| "import"
+	| "render"
+	| "build"
+	| "transform"
+	| "quantize"
+	| "cleanup"
+	| "recolor";
 
 export interface WarningNote {
 	code: string;
@@ -49,6 +56,8 @@ export interface CommandResult {
 	output?: string | undefined;
 	source?: string | undefined;
 	stdout?: true | undefined;
+	/** Command-specific report fields (quantize colors, cleanup counts, ...). */
+	details?: Record<string, unknown> | undefined;
 }
 
 function stripCodePrefix(message: string): string {
@@ -558,7 +567,11 @@ export function emitCommandSuccess(
 	result: CommandResult,
 ): void {
 	if (globalJson) {
-		emitEnvelope(successEnvelope(result), streams, route);
+		// Command-specific fields ride flat beside the frozen V0.1 keys so
+		// agents read result.colors / result.detected without unwrapping.
+		// V0.1 callers pass no details and emit exactly the old shape.
+		const { details, ...rest } = result;
+		emitEnvelope(successEnvelope({ ...rest, ...details }), streams, route);
 		return;
 	}
 	const parts = [

@@ -11,8 +11,14 @@ import {
 	routeStreams,
 } from "./channels.ts";
 import { type BuildOptions, runBuild } from "./cmd-build.ts";
+import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
 import { type ImportOptions, runImport } from "./cmd-import.ts";
+import { type MaterialOptions, runMaterial } from "./cmd-material.ts";
+import { type PaletteOptions, runPalette } from "./cmd-palette.ts";
+import { type QuantizeOptions, runQuantize } from "./cmd-quantize.ts";
+import { type RecolorOptions, runRecolor } from "./cmd-recolor.ts";
 import { type RenderOptions, runRender } from "./cmd-render.ts";
+import { runTransform, type TransformOptions } from "./cmd-transform.ts";
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
 import { exitCodeForMcAssetError } from "./exit.ts";
 import { atomicWriteFile } from "./filesystem.ts";
@@ -317,6 +323,282 @@ export function buildProgram(): Command {
 			);
 			process.exitCode = code;
 		});
+
+	program
+		.command("transform <input>")
+		.description(
+			"Apply exactly one geometry operation (flip, rotate, crop, pad, resize, translate).",
+		)
+		.option("--flip <direction>", "Mirror horizontally (h) or vertically (v).")
+		.option("--rotate <degrees>", "Rotate by 90, 180, or 270 degrees.")
+		.option("--crop <x,y,w,h>", "Crop to an integer rectangle.")
+		.option("--pad <l,t,r,b>", "Pad every side by integer amounts.")
+		.option(
+			"--pad-color <color>",
+			"Pad fill (transparent, #RRGGBB, #RRGGBBAA).",
+		)
+		.option("--resize <WxH>", "Resize to WxH integer dimensions.")
+		.option(
+			"--resize-mode <mode>",
+			"Resize sampling (nearest, box, pixel-aware).",
+		)
+		.option("--translate <dx,dy>", "Shift contents by integer offsets.")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--source <path>", "Write the editable .mcpx source file.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--in-place",
+			"Rewrite the input in its own kind (implies force for that target).",
+		)
+		.option("--input <path>", "Input path used with --in-place.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.option(
+			"--selection <scope>",
+			"Rejected with geometry (ARGUMENT_CONFLICT).",
+		)
+		.action(
+			async (input: string, options: TransformOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runTransform(
+					input,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("quantize <input>")
+		.description("Reduce the color count with the integer median-cut.")
+		.option("--colors <n>", "Required color budget, an integer in [1, 4096].")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--source <path>", "Write the editable .mcpx source file.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--in-place",
+			"Rewrite the input in its own kind (implies force for that target).",
+		)
+		.option("--input <path>", "Input path used with --in-place.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.option(
+			"--selection <scope>",
+			"Scope pixel writes (rect:<x>,<y>,<w>,<h> or region:<id>).",
+		)
+		.action(
+			async (input: string, options: QuantizeOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runQuantize(
+					input,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("cleanup <input>")
+		.description(
+			"Detect pixel defects; fix only the --fix classes with explicit authorization.",
+		)
+		.option(
+			"--fix <classes>",
+			"Comma list of isolated, noise, cluster, fringe, outlier, hole, aa. Omitted means detect and report only.",
+		)
+		.option("--allow-render-pass-change", "Authorize alpha-affecting classes.")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--source <path>", "Write the editable .mcpx source file.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--in-place",
+			"Rewrite the input in its own kind (implies force for that target).",
+		)
+		.option("--input <path>", "Input path used with --in-place.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.option(
+			"--selection <scope>",
+			"Scope pixel writes (rect:<x>,<y>,<w>,<h> or region:<id>).",
+		)
+		.action(
+			async (input: string, options: CleanupOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runCleanup(
+					input,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	const palette = program
+		.command("palette")
+		.description("Read-only palette reports (no artifact files).");
+	palette
+		.command("extract <image>")
+		.description("Report the distinct colors as an authoring palette.")
+		.option("--output <path>", "Rejected: reports take no file flags.")
+		.option("--stdout", "Rejected: reports take no file flags.")
+		.option("--source <path>", "Rejected: reports take no file flags.")
+		.option("--force", "Rejected: reports take no file flags.")
+		.option("--mkdir", "Rejected: reports take no file flags.")
+		.option("--in-place", "Rejected: reports take no file flags.")
+		.option("--input <path>", "Rejected: reports take no file flags.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(
+			async (image: string, options: PaletteOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runPalette(
+					"extract",
+					image,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+	palette
+		.command("inspect <image>")
+		.description("Report palette characteristics in the frozen shape.")
+		.option("--output <path>", "Rejected: reports take no file flags.")
+		.option("--stdout", "Rejected: reports take no file flags.")
+		.option("--source <path>", "Rejected: reports take no file flags.")
+		.option("--force", "Rejected: reports take no file flags.")
+		.option("--mkdir", "Rejected: reports take no file flags.")
+		.option("--in-place", "Rejected: reports take no file flags.")
+		.option("--input <path>", "Rejected: reports take no file flags.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(
+			async (image: string, options: PaletteOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runPalette(
+					"inspect",
+					image,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	const material = program
+		.command("material")
+		.description("Read-only material queries (no artifact files).");
+	material
+		.command("list")
+		.description("List the builtin material ids in registry order.")
+		.option("--output <path>", "Rejected: reports take no file flags.")
+		.option("--stdout", "Rejected: reports take no file flags.")
+		.option("--source <path>", "Rejected: reports take no file flags.")
+		.option("--force", "Rejected: reports take no file flags.")
+		.option("--mkdir", "Rejected: reports take no file flags.")
+		.option("--in-place", "Rejected: reports take no file flags.")
+		.option("--input <path>", "Rejected: reports take no file flags.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(async (options: MaterialOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runMaterial(
+				"list",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	material
+		.command("show <name>")
+		.description("Show one builtin material definition.")
+		.option("--output <path>", "Rejected: reports take no file flags.")
+		.option("--stdout", "Rejected: reports take no file flags.")
+		.option("--source <path>", "Rejected: reports take no file flags.")
+		.option("--force", "Rejected: reports take no file flags.")
+		.option("--mkdir", "Rejected: reports take no file flags.")
+		.option("--in-place", "Rejected: reports take no file flags.")
+		.option("--input <path>", "Rejected: reports take no file flags.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(
+			async (name: string, options: MaterialOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runMaterial(
+					"show",
+					name,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("recolor <source>")
+		.description("Recolor an editable .mcpx source with a builtin material.")
+		.option("--material <name>", "Required builtin material id.")
+		.option("--region <id>", "Limit the write to one region id.")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--source <path>", "Write the editable .mcpx source file.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--in-place",
+			"Rewrite the input .mcpx (implies force for that target).",
+		)
+		.option("--input <path>", "Input path used with --in-place.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.option(
+			"--selection <scope>",
+			"Scope pixel writes (rect:<x>,<y>,<w>,<h> or region:<id>).",
+		)
+		.action(
+			async (source: string, options: RecolorOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runRecolor(
+					source,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
 
 	program
 		.command("build [source]")

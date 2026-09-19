@@ -1,0 +1,19 @@
+{
+	"operations": [
+		{ "id": "mk", "type": "createLayer", "layerId": "shade" },
+		{
+			"id": "fill",
+			"type": "fillLayer",
+			"layerId": "shade",
+			"color": "#0000FFFF"
+		},
+		{
+			"id": "dot",
+			"type": "setPixel",
+			"layerId": "shade",
+			"x": 0,
+			"y": 0,
+			"color": "#0000FFFF"
+		}
+	]
+}

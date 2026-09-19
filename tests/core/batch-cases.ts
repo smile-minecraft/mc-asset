@@ -513,4 +513,210 @@ export const BATCH_CASES: BatchCase[] = [
 			check.equal(report.applied, 6, "all six kinds applied");
 		},
 	},
+	{
+		name: "layer vocabulary dispatches in order",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const ops: BatchOperation[] = [
+				{ id: "mk", type: "createLayer", layerId: "shade" },
+				{
+					id: "fill",
+					type: "fillLayer",
+					layerId: "shade",
+					color: FILL,
+				},
+				{ id: "ren", type: "renameLayer", layerId: "shade", name: "Shadow" },
+				{ id: "move", type: "moveLayer", layerId: "shade", dx: 0, dy: 0 },
+				{ id: "dup", type: "duplicateLayer", layerId: "shade" },
+				{ id: "ord", type: "reorderLayer", layerId: "shade", toIndex: 0 },
+				{ id: "clr", type: "clearLayer", layerId: "shade-copy" },
+				{
+					id: "mrg",
+					type: "mergeLayer",
+					sourceId: "shade-copy",
+					targetId: "shade",
+				},
+				{ id: "rm", type: "removeLayer", layerId: "shade" },
+			];
+			const report = applyOperations(canvas, ops);
+			check.equal(report.applied, 9, "all nine layer ops applied");
+			check.deepEqual(
+				canvas.layers.map((layer) => layer.id),
+				["base"],
+				"merge plus remove collapse back to the seed layer",
+			);
+			const layer = getLayer(canvas, "base");
+			check.ok(layer.pixels.length === 8 * 8 * 4, "base pixels intact");
+		},
+	},
+	{
+		name: "region vocabulary dispatches in order",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const ops: BatchOperation[] = [
+				{ id: "mk", type: "createRegion", regionId: "blade" },
+				{
+					id: "px",
+					type: "setRegionPixel",
+					regionId: "blade",
+					x: 2,
+					y: 3,
+					value: 1,
+				},
+				{ id: "ren", type: "renameRegion", regionId: "blade", name: "Blade" },
+				{ id: "mk2", type: "createRegion", regionId: "hilt" },
+				{ id: "ord", type: "reorderRegion", regionId: "hilt", toIndex: 0 },
+				{ id: "rm", type: "removeRegion", regionId: "hilt" },
+			];
+			const report = applyOperations(canvas, ops);
+			check.equal(report.applied, 6, "all six region ops applied");
+			check.deepEqual(
+				canvas.regions.map((region) => region.id),
+				["blade"],
+				"one region survives",
+			);
+			check.equal(canvas.regions[0]?.mask[3 * 8 + 2], 1, "region pixel set");
+			check.equal(canvas.regions[0]?.name, "Blade", "region renamed");
+		},
+	},
+	{
+		name: "structural failure rolls the layer list back",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const beforeIds = canvas.layers.map((layer) => layer.id);
+			const before = snapshotAll(canvas);
+			const ops: BatchOperation[] = [
+				{ id: "mk", type: "createLayer", layerId: "temp" },
+				{
+					id: "fill",
+					type: "fillLayer",
+					layerId: "temp",
+					color: INK,
+				},
+				{ id: "boom", type: "removeLayer", layerId: "nope" },
+			];
+			try {
+				applyOperations(canvas, ops);
+				check.fail("expected missing layer to throw");
+			} catch (error) {
+				check.equal(
+					(error as McAssetError).code,
+					"LAYER_NOT_FOUND",
+					"original code preserved",
+				);
+				check.equal(
+					caughtDetails(error).operationIndex,
+					2,
+					"failing index reported",
+				);
+			}
+			check.deepEqual(
+				canvas.layers.map((layer) => layer.id),
+				beforeIds,
+				"created layer rolled back",
+			);
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"bytes restored too",
+			);
+		},
+	},
+	{
+		name: "removing the last layer is refused",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const before = snapshotAll(canvas);
+			try {
+				applyOperations(canvas, [
+					{ id: "rm", type: "removeLayer", layerId: "base" },
+				]);
+				check.fail("expected last-layer removal to throw");
+			} catch (error) {
+				check.equal(
+					(error as McAssetError).code,
+					"INVALID_ARGUMENT",
+					"last layer is kept",
+				);
+			}
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"refusal writes nothing",
+			);
+		},
+	},
+	{
+		name: "merging a layer with itself is refused",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			try {
+				applyOperations(canvas, [
+					{
+						id: "self",
+						type: "mergeLayer",
+						sourceId: "base",
+						targetId: "base",
+					},
+				]);
+				check.fail("expected self-merge to throw");
+			} catch (error) {
+				check.equal(
+					(error as McAssetError).code,
+					"INVALID_ARGUMENT",
+					"self merge refused",
+				);
+			}
+		},
+	},
+	{
+		name: "duplicate layer id carries DUPLICATE_LAYER_ID with position",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const beforeIds = canvas.layers.map((layer) => layer.id);
+			try {
+				applyOperations(canvas, [
+					{ id: "dup", type: "createLayer", layerId: "base" },
+				]);
+				check.fail("expected duplicate layer id to throw");
+			} catch (error) {
+				const err = error as McAssetError;
+				check.equal(err.code, "DUPLICATE_LAYER_ID", "duplicate code");
+				check.equal(caughtDetails(error).operationIndex, 0, "index 0");
+			}
+			check.deepEqual(
+				canvas.layers.map((layer) => layer.id),
+				beforeIds,
+				"no layer added",
+			);
+		},
+	},
+	{
+		name: "geometry vocabulary stays out of the typed core",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const before = snapshotAll(canvas);
+			const ops = [
+				{ id: "rs", type: "resize", width: 4, height: 4 },
+			] as unknown as BatchOperation[];
+			try {
+				applyOperations(canvas, ops);
+				check.fail("expected geometry to throw");
+			} catch (error) {
+				check.equal(
+					(error as McAssetError).code,
+					"UNKNOWN_OPERATION",
+					"geometry never enters the batch",
+				);
+			}
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"geometry refusal writes nothing",
+			);
+		},
+	},
 ];

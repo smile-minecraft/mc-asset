@@ -21,6 +21,20 @@ const KNOWN_TYPES: ReadonlySet<string> = new Set([
 	"drawRect",
 	"fillRect",
 	"floodFill",
+	"createLayer",
+	"removeLayer",
+	"renameLayer",
+	"reorderLayer",
+	"duplicateLayer",
+	"mergeLayer",
+	"clearLayer",
+	"fillLayer",
+	"moveLayer",
+	"createRegion",
+	"removeRegion",
+	"renameRegion",
+	"reorderRegion",
+	"setRegionPixel",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -172,6 +186,85 @@ function takeId(op: Record<string, unknown>, path: string): string | undefined {
 	return raw;
 }
 
+function takeOptionalId(
+	op: Record<string, unknown>,
+	field: string,
+	path: string,
+	what: string,
+): string | undefined {
+	const raw = op[field];
+	if (raw === undefined) {
+		return undefined;
+	}
+	if (typeof raw !== "string" || raw === "") {
+		throw invalid(
+			`${path}.${field}`,
+			`${what} must be a non-empty string when provided.`,
+			raw,
+		);
+	}
+	return raw;
+}
+
+function takeName(
+	op: Record<string, unknown>,
+	path: string,
+	what: string,
+): string {
+	const raw = op.name;
+	if (typeof raw !== "string" || raw === "") {
+		throw invalid(`${path}.name`, `${what} must be a non-empty string.`, raw);
+	}
+	return raw;
+}
+
+function takeOptionalName(
+	op: Record<string, unknown>,
+	path: string,
+	what: string,
+): string | undefined {
+	if (op.name === undefined) {
+		return undefined;
+	}
+	return takeName(op, path, what);
+}
+
+function takeToIndex(op: Record<string, unknown>, path: string): number {
+	const at = takeInt(op.toIndex, `${path}.toIndex`, "Stack position");
+	if (at < 0) {
+		throw invalid(
+			`${path}.toIndex`,
+			"Stack position must be 0 or a positive integer.",
+			op.toIndex,
+		);
+	}
+	return at;
+}
+
+function takeMaskValue(op: Record<string, unknown>, path: string): number {
+	const at = takeInt(op.value, `${path}.value`, "Region mask value");
+	if (at !== 0 && at !== 1) {
+		throw invalid(
+			`${path}.value`,
+			"Region mask value must be 0 (outside) or 1 (inside).",
+			op.value,
+		);
+	}
+	return at;
+}
+
+function takeRegionId(op: Record<string, unknown>, path: string): string {
+	const raw = op.regionId;
+	if (typeof raw !== "string" || raw === "") {
+		throw invalid(
+			`${path}.regionId`,
+			"Operation regionId must be a non-empty string.",
+			raw,
+		);
+	}
+	return raw;
+}
+
 function parseOneOperation(
 	item: unknown,
 	path: string,
@@ -184,7 +277,7 @@ function parseOneOperation(
 	if (typeof rawType !== "string" || !KNOWN_TYPES.has(rawType)) {
 		throw invalid(
 			`${path}.type`,
-			`Unknown operation type: ${String(rawType)}. V0.1 supports setPixel, clearPixel, drawLine, drawRect, fillRect, floodFill.`,
+			`Unknown operation type: ${String(rawType)}. Pixel ops are setPixel, clearPixel, drawLine, drawRect, fillRect, floodFill; layer ops are createLayer, removeLayer, renameLayer, reorderLayer, duplicateLayer, mergeLayer, clearLayer, fillLayer, moveLayer; region ops are createRegion, removeRegion, renameRegion, reorderRegion, setRegionPixel. Geometry never enters the batch; use the transform command.`,
 			rawType,
 		);
 	}
@@ -248,7 +341,7 @@ function parseOneOperation(
 				},
 				id,
 			);
-		default:
+		case "floodFill":
 			return attachId(
 				{
 					type: "floodFill" as const,
@@ -256,6 +349,139 @@ function parseOneOperation(
 					x: takeInt(item.x, `${path}.x`, "Pixel x"),
 					y: takeInt(item.y, `${path}.y`, "Pixel y"),
 					color: takeColor(item.color, `${path}.color`),
+				},
+				id,
+			);
+		case "createLayer": {
+			const createdId = takeOptionalId(item, "layerId", path, "Layer id");
+			const createdName = takeOptionalName(item, path, "Layer");
+			return attachId(
+				{
+					type: "createLayer" as const,
+					...(createdId !== undefined ? { layerId: createdId } : {}),
+					...(createdName !== undefined ? { name: createdName } : {}),
+				},
+				id,
+			);
+		}
+		case "removeLayer":
+			return attachId({ type: "removeLayer" as const, layerId }, id);
+		case "renameLayer":
+			return attachId(
+				{
+					type: "renameLayer" as const,
+					layerId,
+					name: takeName(item, path, "Layer"),
+				},
+				id,
+			);
+		case "reorderLayer":
+			return attachId(
+				{
+					type: "reorderLayer" as const,
+					layerId,
+					toIndex: takeToIndex(item, path),
+				},
+				id,
+			);
+		case "duplicateLayer": {
+			const copyId = takeOptionalId(item, "newLayerId", path, "New layer id");
+			const copyName = takeOptionalName(item, path, "Layer");
+			return attachId(
+				{
+					type: "duplicateLayer" as const,
+					layerId,
+					...(copyId !== undefined ? { newLayerId: copyId } : {}),
+					...(copyName !== undefined ? { name: copyName } : {}),
+				},
+				id,
+			);
+		}
+		case "mergeLayer": {
+			const sourceId = takeOptionalId(item, "sourceId", path, "Source layer");
+			const targetId = takeOptionalId(item, "targetId", path, "Target layer");
+			if (sourceId === undefined || targetId === undefined) {
+				throw invalid(
+					`${path}.sourceId`,
+					"mergeLayer needs both sourceId and targetId.",
+					item,
+				);
+			}
+			return attachId({ type: "mergeLayer" as const, sourceId, targetId }, id);
+		}
+		case "clearLayer":
+			return attachId({ type: "clearLayer" as const, layerId }, id);
+		case "fillLayer":
+			return attachId(
+				{
+					type: "fillLayer" as const,
+					layerId,
+					color: takeColor(item.color, `${path}.color`),
+				},
+				id,
+			);
+		case "moveLayer":
+			return attachId(
+				{
+					type: "moveLayer" as const,
+					layerId,
+					dx: takeInt(item.dx, `${path}.dx`, "Move dx"),
+					dy: takeInt(item.dy, `${path}.dy`, "Move dy"),
+				},
+				id,
+			);
+		case "createRegion": {
+			const createdRegionId = takeOptionalId(
+				item,
+				"regionId",
+				path,
+				"Region id",
+			);
+			const createdRegionName = takeOptionalName(item, path, "Region");
+			return attachId(
+				{
+					type: "createRegion" as const,
+					...(createdRegionId !== undefined
+						? { regionId: createdRegionId }
+						: {}),
+					...(createdRegionName !== undefined
+						? { name: createdRegionName }
+						: {}),
+				},
+				id,
+			);
+		}
+		case "removeRegion":
+			return attachId(
+				{ type: "removeRegion" as const, regionId: takeRegionId(item, path) },
+				id,
+			);
+		case "renameRegion":
+			return attachId(
+				{
+					type: "renameRegion" as const,
+					regionId: takeRegionId(item, path),
+					name: takeName(item, path, "Region"),
+				},
+				id,
+			);
+		case "reorderRegion":
+			return attachId(
+				{
+					type: "reorderRegion" as const,
+					regionId: takeRegionId(item, path),
+					toIndex: takeToIndex(item, path),
+				},
+				id,
+			);
+		default:
+			return attachId(
+				{
+					type: "setRegionPixel" as const,
+					regionId: takeRegionId(item, path),
+					x: takeInt(item.x, `${path}.x`, "Pixel x"),
+					y: takeInt(item.y, `${path}.y`, "Pixel y"),
+					value: takeMaskValue(item, path),
 				},
 				id,
 			);

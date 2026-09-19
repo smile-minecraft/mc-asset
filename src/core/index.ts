@@ -17,6 +17,22 @@ export {
 	setPixel,
 	setRegionValue,
 } from "./canvas.ts";
+export type {
+	CleanupClass,
+	CleanupCounts,
+	CleanupDetection,
+	CleanupOptions,
+	CleanupPixel,
+	CleanupPositions,
+	CleanupResult,
+	FixCleanupOptions,
+} from "./cleanup.ts";
+export {
+	CLEANUP_CLASSES,
+	detectCleanup,
+	fixCleanup,
+	isCleanupClass,
+} from "./cleanup.ts";
 export type { ErrorCode, ExitCode, FixedErrorCode } from "./errors.ts";
 export {
 	ERROR_EXIT_CODE,
@@ -25,6 +41,86 @@ export {
 	McAssetError,
 	resolveExitCode,
 } from "./errors.ts";
+export type { DuplicateLayerOptions } from "./layers.ts";
+export {
+	clearLayer,
+	duplicateLayer,
+	fillLayer,
+	mergeLayer,
+	moveLayer,
+	parseFillColor,
+	removeLayer,
+	removeRegion,
+	renameLayer,
+	renameRegion,
+	reorderLayer,
+	reorderRegion,
+} from "./layers.ts";
+export type {
+	BuiltinMaterialId,
+	MaterialCharacteristics,
+	MaterialDefinition,
+} from "./material.ts";
+export {
+	findPaletteEntryByRole,
+	getMaterial,
+	getMaterialPalette,
+	isBuiltinMaterialId,
+	listMaterialIds,
+} from "./material.ts";
+export type {
+	PaletteDominantColor,
+	PaletteInspectReport,
+	PaletteRoleSummary,
+} from "./palette.ts";
+export {
+	applyPalette,
+	extractPalette,
+	inspectPalette,
+	mapPixelsToPalette,
+} from "./palette.ts";
+export type { QuantizeResult } from "./quantizer.ts";
+export {
+	assertMcpxPaletteCapacity,
+	quantizePixels,
+	validateColorsOption,
+} from "./quantizer.ts";
+export type {
+	RecolorBand,
+	RecolorOptions,
+	RecolorReport,
+} from "./recolor.ts";
+export {
+	bandForLuminance,
+	luminanceOf,
+	mapRoleToBand,
+	recolorColor,
+	recolorLayer,
+} from "./recolor.ts";
+export type {
+	ResolvedSelection,
+	SelectedPoint,
+	SelectionKind,
+} from "./selection.ts";
+export {
+	countSelectedPixels,
+	forEachSelectedPixel,
+	isPixelSelected,
+	listSelectedPixels,
+	resolveSelection,
+} from "./selection.ts";
+export type { PadOptions, ResizeMode } from "./transform.ts";
+export {
+	crop,
+	flipHorizontal,
+	flipVertical,
+	pad,
+	resize,
+	rotate90,
+	rotate180,
+	rotate270,
+	translate,
+} from "./transform.ts";
 export type {
 	AuthoringPalette,
 	AuthoringPaletteEntry,

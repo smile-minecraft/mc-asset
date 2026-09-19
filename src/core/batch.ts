@@ -1,17 +1,40 @@
-import { getLayer, setPixel } from "./canvas.ts";
+import { addLayer, addRegion, setPixel, setRegionValue } from "./canvas.ts";
 import type { ErrorCode } from "./errors.ts";
 import { McAssetError } from "./errors.ts";
+import {
+	clearLayer,
+	duplicateLayer,
+	fillLayer,
+	mergeLayer,
+	moveLayer,
+	removeLayer,
+	removeRegion,
+	renameLayer,
+	renameRegion,
+	reorderLayer,
+	reorderRegion,
+} from "./layers.ts";
 import { clearPixel, drawLine, drawRect, fillRect, floodFill } from "./ops.ts";
-import type { PixelCanvas, Rect, RGBA } from "./types.ts";
+import type {
+	PixelCanvas,
+	PixelLayer,
+	PixelRegion,
+	Rect,
+	RGBA,
+} from "./types.ts";
 
 /**
  * Typed batch operations over the pixel primitives (§28) with atomic
  * transaction semantics (§30) and per-operation reporting (§103).
  *
  * The operation vocabulary mirrors the primitive signatures: setPixel,
- * clearPixel, drawLine, drawRect, fillRect, floodFill. JSON parsing
- * (hex colors, from/to pairs) is left to the CLI layer; this module only
- * accepts typed objects.
+ * clearPixel, drawLine, drawRect, fillRect, floodFill, plus the layer and
+ * region vocabulary (create/remove/rename/reorder/duplicate/merge/clear/
+ * fill/move layers, create/remove/rename/reorder regions, setRegionPixel).
+ * Geometry operations (resize, crop, pad, translate, flip, rotate) are
+ * deliberately absent: they travel through the transform command, never
+ * the batch. JSON parsing (hex colors, from/to pairs) is left to the CLI
+ * layer; this module only accepts typed objects.
  */
 
 interface OperationBase {
@@ -65,13 +88,112 @@ export interface FloodFillOperation extends OperationBase {
 	color: RGBA;
 }
 
+export interface CreateLayerOperation extends OperationBase {
+	type: "createLayer";
+	layerId?: string;
+	name?: string;
+}
+
+export interface RemoveLayerOperation extends OperationBase {
+	type: "removeLayer";
+	layerId: string;
+}
+
+export interface RenameLayerOperation extends OperationBase {
+	type: "renameLayer";
+	layerId: string;
+	name: string;
+}
+
+export interface ReorderLayerOperation extends OperationBase {
+	type: "reorderLayer";
+	layerId: string;
+	toIndex: number;
+}
+
+export interface DuplicateLayerOperation extends OperationBase {
+	type: "duplicateLayer";
+	layerId: string;
+	newLayerId?: string;
+	name?: string;
+}
+
+export interface MergeLayerOperation extends OperationBase {
+	type: "mergeLayer";
+	sourceId: string;
+	targetId: string;
+}
+
+export interface ClearLayerOperation extends OperationBase {
+	type: "clearLayer";
+	layerId: string;
+}
+
+export interface FillLayerOperation extends OperationBase {
+	type: "fillLayer";
+	layerId: string;
+	color: RGBA;
+}
+
+export interface MoveLayerOperation extends OperationBase {
+	type: "moveLayer";
+	layerId: string;
+	dx: number;
+	dy: number;
+}
+
+export interface CreateRegionOperation extends OperationBase {
+	type: "createRegion";
+	regionId?: string;
+	name?: string;
+}
+
+export interface RemoveRegionOperation extends OperationBase {
+	type: "removeRegion";
+	regionId: string;
+}
+
+export interface RenameRegionOperation extends OperationBase {
+	type: "renameRegion";
+	regionId: string;
+	name: string;
+}
+
+export interface ReorderRegionOperation extends OperationBase {
+	type: "reorderRegion";
+	regionId: string;
+	toIndex: number;
+}
+
+export interface SetRegionPixelOperation extends OperationBase {
+	type: "setRegionPixel";
+	regionId: string;
+	x: number;
+	y: number;
+	value: number;
+}
+
 export type BatchOperation =
 	| SetPixelOperation
 	| ClearPixelOperation
 	| DrawLineOperation
 	| DrawRectOperation
 	| FillRectOperation
-	| FloodFillOperation;
+	| FloodFillOperation
+	| CreateLayerOperation
+	| RemoveLayerOperation
+	| RenameLayerOperation
+	| ReorderLayerOperation
+	| DuplicateLayerOperation
+	| MergeLayerOperation
+	| ClearLayerOperation
+	| FillLayerOperation
+	| MoveLayerOperation
+	| CreateRegionOperation
+	| RemoveRegionOperation
+	| RenameRegionOperation
+	| ReorderRegionOperation
+	| SetRegionPixelOperation;
 
 export interface AppliedOperationReport {
 	index: number;
@@ -187,6 +309,15 @@ function wrapUnexpected(
 	return new McAssetError("INTERNAL_ERROR", String(error), details);
 }
 
+function hexByte(value: number): string {
+	const digits = "0123456789abcdef";
+	return digits[(value >> 4) & 15] + digits[value & 15];
+}
+
+function toHexColor(color: RGBA): string {
+	return `#${hexByte(color.r)}${hexByte(color.g)}${hexByte(color.b)}${hexByte(color.a)}`;
+}
+
 function dispatch(canvas: PixelCanvas, op: BatchOperation): void {
 	switch (op.type) {
 		case "setPixel":
@@ -212,6 +343,64 @@ function dispatch(canvas: PixelCanvas, op: BatchOperation): void {
 		case "floodFill":
 			assertLayerId(op.layerId);
 			floodFill(canvas, op.layerId, op.x, op.y, op.color);
+			return;
+		case "createLayer":
+			addLayer(canvas, {
+				...(op.layerId !== undefined ? { id: op.layerId } : {}),
+				...(op.name !== undefined ? { name: op.name } : {}),
+			});
+			return;
+		case "removeLayer":
+			assertLayerId(op.layerId);
+			removeLayer(canvas, op.layerId);
+			return;
+		case "renameLayer":
+			assertLayerId(op.layerId);
+			renameLayer(canvas, op.layerId, op.name);
+			return;
+		case "reorderLayer":
+			assertLayerId(op.layerId);
+			reorderLayer(canvas, op.layerId, op.toIndex);
+			return;
+		case "duplicateLayer":
+			assertLayerId(op.layerId);
+			duplicateLayer(canvas, op.layerId, {
+				...(op.newLayerId !== undefined ? { id: op.newLayerId } : {}),
+				...(op.name !== undefined ? { name: op.name } : {}),
+			});
+			return;
+		case "mergeLayer":
+			mergeLayer(canvas, op.sourceId, op.targetId);
+			return;
+		case "clearLayer":
+			assertLayerId(op.layerId);
+			clearLayer(canvas, op.layerId);
+			return;
+		case "fillLayer":
+			assertLayerId(op.layerId);
+			fillLayer(canvas, op.layerId, toHexColor(op.color));
+			return;
+		case "moveLayer":
+			assertLayerId(op.layerId);
+			moveLayer(canvas, op.layerId, op.dx, op.dy);
+			return;
+		case "createRegion":
+			addRegion(canvas, {
+				...(op.regionId !== undefined ? { id: op.regionId } : {}),
+				...(op.name !== undefined ? { name: op.name } : {}),
+			});
+			return;
+		case "removeRegion":
+			removeRegion(canvas, op.regionId);
+			return;
+		case "renameRegion":
+			renameRegion(canvas, op.regionId, op.name);
+			return;
+		case "reorderRegion":
+			reorderRegion(canvas, op.regionId, op.toIndex);
+			return;
+		case "setRegionPixel":
+			setRegionValue(canvas, op.regionId, op.x, op.y, op.value);
 			return;
 		default:
 			throw unknownOperationError(op);
@@ -272,24 +461,39 @@ export function applyOperations(
 		});
 	}
 	const atomic = options?.atomic ?? true;
-	// Snapshot every layer's bytes before the first write; pixel primitives
-	// never change the layer list, so restoring bytes restores the canvas.
-	const snapshots = canvas.layers.map((layer) => ({
-		id: layer.id,
+	// Structural snapshot before the first write: layer and region ops can
+	// add, remove, or reorder entries, so the rollback restores the whole
+	// layer/region lists (deep clones), not just pixel bytes. Dimensions
+	// never change on this path, so width/height need no restore.
+	const snapshotLayers: PixelLayer[] = canvas.layers.map((layer) => ({
+		...layer,
 		pixels: layer.pixels.slice(),
+		...(layer.metadata !== undefined
+			? { metadata: { ...layer.metadata } }
+			: {}),
+	}));
+	const snapshotRegions: PixelRegion[] = canvas.regions.map((region) => ({
+		...region,
+		mask: region.mask.slice(),
+		...(region.metadata !== undefined
+			? { metadata: { ...region.metadata } }
+			: {}),
 	}));
 	const rollback = (): void => {
-		for (const snapshot of snapshots) {
-			const layer = findLayer(canvas, snapshot.id);
-			if (layer === undefined) {
-				continue;
-			}
-			if (layer.pixels.length === snapshot.pixels.length) {
-				layer.pixels.set(snapshot.pixels);
-			} else {
-				layer.pixels = snapshot.pixels.slice();
-			}
-		}
+		canvas.layers = snapshotLayers.map((layer) => ({
+			...layer,
+			pixels: layer.pixels.slice(),
+			...(layer.metadata !== undefined
+				? { metadata: { ...layer.metadata } }
+				: {}),
+		}));
+		canvas.regions = snapshotRegions.map((region) => ({
+			...region,
+			mask: region.mask.slice(),
+			...(region.metadata !== undefined
+				? { metadata: { ...region.metadata } }
+				: {}),
+		}));
 	};
 	const seenIds = new Set<string>();
 	const reports: BatchOperationReport[] = [];
@@ -345,12 +549,4 @@ export function applyOperations(
 		applied += 1;
 	}
 	return { applied, failed, operations: reports };
-}
-
-function findLayer(canvas: PixelCanvas, id: string) {
-	try {
-		return getLayer(canvas, id);
-	} catch {
-		return undefined;
-	}
 }
