@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Buffer } from "node:buffer";
 import {
+	mkdir,
 	mkdtemp,
 	readdir,
 	readFile,
@@ -807,4 +808,417 @@ describe("conformance: --json shapes and determinism", () => {
 			await rm(dir, { recursive: true, force: true });
 		}
 	}, 30_000);
+});
+
+describe("conformance: V0.2 §98 output guards", () => {
+	const PX_PNG = join(FIXTURES, "px-8x8.png");
+
+	interface GuardEntry {
+		command: string;
+		input: string;
+		args: string[];
+		workName: string;
+	}
+
+	// Minimal valid invocation per write command: the guard matrix below
+	// only varies the output targeting, never the operation itself.
+	const ENTRIES: GuardEntry[] = [
+		{
+			command: "transform",
+			input: SWORD_MCPX,
+			args: ["--flip", "h"],
+			workName: "work.mcpx",
+		},
+		{
+			command: "quantize",
+			input: SWORD_MCPX,
+			args: ["--colors", "2"],
+			workName: "work.mcpx",
+		},
+		{ command: "cleanup", input: SWORD_MCPX, args: [], workName: "work.mcpx" },
+		{
+			command: "pixelize",
+			input: PX_PNG,
+			args: ["--size", "16"],
+			workName: "work.png",
+		},
+		{
+			command: "recolor",
+			input: SWORD_MCPX,
+			args: ["--material", "copper"],
+			workName: "work.mcpx",
+		},
+	];
+
+	for (const entry of ENTRIES) {
+		test(`${entry.command}: missing output is OUTPUT_REQUIRED with zero files`, async () => {
+			const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+			try {
+				const before = await listAllFiles(dir);
+				const result = await runCli([
+					entry.command,
+					entry.input,
+					...entry.args,
+				]);
+				expect(result.code).toBe(2);
+				expect(stdoutText(result) + result.stderr).toContain("OUTPUT_REQUIRED");
+				expect(await listAllFiles(dir)).toEqual(before);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		}, 30_000);
+
+		test(`${entry.command}: existing output needs --force; forced rerun matches`, async () => {
+			const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+			try {
+				const out = join(dir, "guard.png");
+				expect(
+					(
+						await runCli([
+							entry.command,
+							entry.input,
+							...entry.args,
+							"--output",
+							out,
+						])
+					).code,
+				).toBe(0);
+				const original = await readFile(out);
+				const before = await listAllFiles(dir);
+				const refused = await runCli([
+					entry.command,
+					entry.input,
+					...entry.args,
+					"--output",
+					out,
+				]);
+				expect(refused.code).toBe(4);
+				expect(stdoutText(refused) + refused.stderr).toContain("OUTPUT_EXISTS");
+				expect(await readFile(out)).toEqual(original);
+				expect(await listAllFiles(dir)).toEqual(before);
+				expect(
+					(
+						await runCli([
+							entry.command,
+							entry.input,
+							...entry.args,
+							"--output",
+							out,
+							"--force",
+						])
+					).code,
+				).toBe(0);
+				expect(await readFile(out)).toEqual(original);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		}, 60_000);
+
+		test(`${entry.command}: missing parents need --mkdir`, async () => {
+			const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+			try {
+				const nested = join(dir, "nope", "nested", "guard.png");
+				const refused = await runCli([
+					entry.command,
+					entry.input,
+					...entry.args,
+					"--output",
+					nested,
+				]);
+				expect(refused.code).toBe(4);
+				expect(stdoutText(refused) + refused.stderr).toContain(
+					"FILESYSTEM_ERROR",
+				);
+				expect(await fileExists(join(dir, "nope"))).toBe(false);
+				const made = join(dir, "fresh", "nested", "guard.png");
+				expect(
+					(
+						await runCli([
+							entry.command,
+							entry.input,
+							...entry.args,
+							"--output",
+							made,
+							"--mkdir",
+						])
+					).code,
+				).toBe(0);
+				expect(await fileExists(made)).toBe(true);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		}, 60_000);
+
+		test(`${entry.command}: output aliasing the input is refused without touching it`, async () => {
+			const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+			try {
+				const work = join(dir, entry.workName);
+				await writeFile(work, await readFile(entry.input));
+				const original = await readFile(work);
+				const literal = await runCli([
+					entry.command,
+					work,
+					...entry.args,
+					"--output",
+					work,
+				]);
+				expect(literal.code).toBe(2);
+				expect(stdoutText(literal) + literal.stderr).toContain(
+					"ARGUMENT_CONFLICT",
+				);
+				expect(await readFile(work)).toEqual(original);
+				// Dot-segment spellings of the same path fold to the same
+				// identity, so they are refused the same way.
+				const dotted = await runCli([
+					entry.command,
+					work,
+					...entry.args,
+					"--output",
+					`${dir}/./${entry.workName}`,
+				]);
+				expect(dotted.code).toBe(2);
+				expect(stdoutText(dotted) + dotted.stderr).toContain(
+					"ARGUMENT_CONFLICT",
+				);
+				expect(await readFile(work)).toEqual(original);
+				expect(await listAllFiles(dir)).toEqual([entry.workName]);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		}, 60_000);
+	}
+});
+
+describe("conformance: V0.2 variant output guards", () => {
+	test("missing --output-dir is OUTPUT_REQUIRED with zero files", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const before = await listAllFiles(dir);
+			const result = await runCli([
+				"variant",
+				SWORD_MCPX,
+				"--materials",
+				"iron",
+			]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("OUTPUT_REQUIRED");
+			expect(await listAllFiles(dir)).toEqual(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("existing variant files need --force; forced rerun is byte-identical", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const outDir = join(dir, "out");
+			expect(
+				(
+					await runCli([
+						"variant",
+						SWORD_MCPX,
+						"--materials",
+						"iron,copper",
+						"--output-dir",
+						outDir,
+						"--mkdir",
+					])
+				).code,
+			).toBe(0);
+			const names = await listAllFiles(outDir);
+			expect(names).toEqual([
+				"sword_copper.mcpx",
+				"sword_copper.png",
+				"sword_iron.mcpx",
+				"sword_iron.png",
+			]);
+			const original: string[] = [];
+			for (const name of names) {
+				original.push((await readFile(join(outDir, name))).toString("base64"));
+			}
+			const refused = await runCli([
+				"variant",
+				SWORD_MCPX,
+				"--materials",
+				"iron,copper",
+				"--output-dir",
+				outDir,
+			]);
+			expect(refused.code).toBe(4);
+			expect(stdoutText(refused) + refused.stderr).toContain("OUTPUT_EXISTS");
+			for (let index = 0; index < names.length; index += 1) {
+				const name = names[index] as string;
+				expect((await readFile(join(outDir, name))).toString("base64")).toBe(
+					original[index] as string,
+				);
+			}
+			expect(
+				(
+					await runCli([
+						"variant",
+						SWORD_MCPX,
+						"--materials",
+						"iron,copper",
+						"--output-dir",
+						outDir,
+						"--force",
+					])
+				).code,
+			).toBe(0);
+			for (let index = 0; index < names.length; index += 1) {
+				const name = names[index] as string;
+				expect((await readFile(join(outDir, name))).toString("base64")).toBe(
+					original[index] as string,
+				);
+			}
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("missing parents need --mkdir", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const nested = join(dir, "a", "b", "out");
+			const refused = await runCli([
+				"variant",
+				SWORD_MCPX,
+				"--materials",
+				"iron",
+				"--output-dir",
+				nested,
+			]);
+			expect(refused.code).toBe(4);
+			expect(stdoutText(refused) + refused.stderr).toContain(
+				"FILESYSTEM_ERROR",
+			);
+			expect(await listAllFiles(dir)).toEqual([]);
+			const made = join(dir, "fresh", "out");
+			expect(
+				(
+					await runCli([
+						"variant",
+						SWORD_MCPX,
+						"--materials",
+						"iron",
+						"--output-dir",
+						made,
+						"--mkdir",
+					])
+				).code,
+			).toBe(0);
+			expect(await listAllFiles(made)).toEqual([
+				"sword_iron.mcpx",
+				"sword_iron.png",
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("--output alongside variant is ARGUMENT_CONFLICT with zero files", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const before = await listAllFiles(dir);
+			const result = await runCli([
+				"variant",
+				SWORD_MCPX,
+				"--materials",
+				"iron",
+				"--output-dir",
+				join(dir, "out"),
+				"--output",
+				join(dir, "single.png"),
+			]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("ARGUMENT_CONFLICT");
+			expect(await listAllFiles(dir)).toEqual(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("source inside the output dir still fans out: derived names never alias it", async () => {
+		// Variant targets are always <stem>_<material>.png/.mcpx, so they
+		// can never fold to the source identity; the fan-out must succeed
+		// with the source bytes untouched instead of refusing as an alias.
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const outDir = join(dir, "out");
+			await mkdir(outDir, { recursive: true });
+			const source = join(outDir, "base.mcpx");
+			await writeFile(source, await readFile(SWORD_MCPX));
+			const original = await readFile(source);
+			const result = await runCli([
+				"variant",
+				source,
+				"--materials",
+				"iron",
+				"--output-dir",
+				outDir,
+				"--mkdir",
+			]);
+			expect(result.code).toBe(0);
+			expect(await listAllFiles(outDir)).toEqual([
+				"base.mcpx",
+				"base_iron.mcpx",
+				"base_iron.png",
+			]);
+			expect(await readFile(source)).toEqual(original);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+});
+
+describe("conformance: V0.2 rerun determinism", () => {
+	test("transform, quantize, cleanup, and recolor rerun byte-identical", async () => {
+		// Pixelize and variant reruns are already locked in their own spawn
+		// suites; this case covers the remaining V0.2 write commands.
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const cases: Array<{ command: string; args: string[] }> = [
+				{ command: "transform", args: ["--flip", "h"] },
+				{ command: "quantize", args: ["--colors", "2"] },
+				{ command: "cleanup", args: [] },
+				{ command: "recolor", args: ["--material", "copper"] },
+			];
+			for (const entry of cases) {
+				const firstPng = join(dir, `${entry.command}-a.png`);
+				const firstMcpx = join(dir, `${entry.command}-a.mcpx`);
+				const secondPng = join(dir, `${entry.command}-b.png`);
+				const secondMcpx = join(dir, `${entry.command}-b.mcpx`);
+				expect(
+					(
+						await runCli([
+							entry.command,
+							SWORD_MCPX,
+							...entry.args,
+							"--output",
+							firstPng,
+							"--source",
+							firstMcpx,
+						])
+					).code,
+				).toBe(0);
+				expect(
+					(
+						await runCli([
+							entry.command,
+							SWORD_MCPX,
+							...entry.args,
+							"--output",
+							secondPng,
+							"--source",
+							secondMcpx,
+						])
+					).code,
+				).toBe(0);
+				expect(await readFile(firstPng)).toEqual(await readFile(secondPng));
+				expect(await readFile(firstMcpx)).toEqual(await readFile(secondMcpx));
+			}
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
 });
