@@ -416,6 +416,59 @@ function findHole(
 }
 
 /**
+ * Opaque vs fully-transparent 4-neighbor tally for one pixel, skipping
+ * every neighbor that is out of bounds. Callers must use this same tally
+ * for detection and for the aa fix; the horizontal guards are load-bearing
+ * because a raw index step at x = 0 or x = width - 1 stays inside the
+ * buffer and would fold back onto the previous/next row instead of
+ * failing loudly.
+ */
+function aaNeighborVotes(
+	pixels: Uint8Array,
+	width: number,
+	height: number,
+	x: number,
+	y: number,
+): { opaque: number; clear: number } {
+	const offset = (y * width + x) * 4;
+	let opaque = 0;
+	let clear = 0;
+	if (x > 0) {
+		const alpha = pixels[offset - 4 + 3] as number;
+		if (isOpaque(alpha)) {
+			opaque += 1;
+		} else if (isTransparent(alpha)) {
+			clear += 1;
+		}
+	}
+	if (x + 1 < width) {
+		const alpha = pixels[offset + 4 + 3] as number;
+		if (isOpaque(alpha)) {
+			opaque += 1;
+		} else if (isTransparent(alpha)) {
+			clear += 1;
+		}
+	}
+	if (y > 0) {
+		const alpha = pixels[offset - width * 4 + 3] as number;
+		if (isOpaque(alpha)) {
+			opaque += 1;
+		} else if (isTransparent(alpha)) {
+			clear += 1;
+		}
+	}
+	if (y + 1 < height) {
+		const alpha = pixels[offset + width * 4 + 3] as number;
+		if (isOpaque(alpha)) {
+			opaque += 1;
+		} else if (isTransparent(alpha)) {
+			clear += 1;
+		}
+	}
+	return { opaque, clear };
+}
+
+/**
  * Partial pixel with at least one opaque and one fully transparent
  * 4-neighbor: an unwanted blend step on a hard edge.
  */
@@ -431,36 +484,7 @@ function findAA(
 			if (!isPartial(pixels[offset + 3])) {
 				continue;
 			}
-			let opaque = 0;
-			let clear = 0;
-			if (x > 0) {
-				if (isOpaque(pixels[offset - 4 + 3])) {
-					opaque += 1;
-				} else if (isTransparent(pixels[offset - 4 + 3])) {
-					clear += 1;
-				}
-			}
-			if (x + 1 < width) {
-				if (isOpaque(pixels[offset + 4 + 3])) {
-					opaque += 1;
-				} else if (isTransparent(pixels[offset + 4 + 3])) {
-					clear += 1;
-				}
-			}
-			if (y > 0) {
-				if (isOpaque(pixels[offset - width * 4 + 3])) {
-					opaque += 1;
-				} else if (isTransparent(pixels[offset - width * 4 + 3])) {
-					clear += 1;
-				}
-			}
-			if (y + 1 < height) {
-				if (isOpaque(pixels[offset + width * 4 + 3])) {
-					opaque += 1;
-				} else if (isTransparent(pixels[offset + width * 4 + 3])) {
-					clear += 1;
-				}
-			}
+			const { opaque, clear } = aaNeighborVotes(pixels, width, height, x, y);
 			if (opaque > 0 && clear > 0) {
 				out.push({ x, y });
 			}
@@ -497,6 +521,7 @@ function replacementFor(
 	name: CleanupClass,
 	before: Uint8Array,
 	width: number,
+	height: number,
 	palette: readonly RGBA[],
 	x: number,
 	y: number,
@@ -565,28 +590,7 @@ function replacementFor(
 			return { r, g, b, a: 255 };
 		}
 		case "aa": {
-			let opaque = 0;
-			let clear = 0;
-			if (isOpaque(before[offset - 4 + 3] as number)) {
-				opaque += 1;
-			} else if (isTransparent(before[offset - 4 + 3] as number)) {
-				clear += 1;
-			}
-			if (isOpaque(before[offset + 4 + 3] as number)) {
-				opaque += 1;
-			} else if (isTransparent(before[offset + 4 + 3] as number)) {
-				clear += 1;
-			}
-			if (isOpaque(before[offset - width * 4 + 3] as number)) {
-				opaque += 1;
-			} else if (isTransparent(before[offset - width * 4 + 3] as number)) {
-				clear += 1;
-			}
-			if (isOpaque(before[offset + width * 4 + 3] as number)) {
-				opaque += 1;
-			} else if (isTransparent(before[offset + width * 4 + 3] as number)) {
-				clear += 1;
-			}
+			const { opaque, clear } = aaNeighborVotes(before, width, height, x, y);
 			if (opaque >= clear) {
 				return {
 					r: before[offset] as number,
@@ -753,6 +757,7 @@ export function fixCleanup(
 				name,
 				before,
 				width,
+				height,
 				palette,
 				pixel.x,
 				pixel.y,

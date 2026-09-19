@@ -90,6 +90,37 @@ function buffersEqual(a: Uint8Array, b: Uint8Array): boolean {
 	return true;
 }
 
+function alphaAt(
+	canvas: PixelCanvas,
+	layerId: string,
+	width: number,
+	x: number,
+	y: number,
+): number | undefined {
+	const layer = canvas.layers.find((entry) => entry.id === layerId);
+	return layer?.pixels[(y * width + x) * 4 + 3];
+}
+
+function rgbaAt(
+	canvas: PixelCanvas,
+	layerId: string,
+	width: number,
+	x: number,
+	y: number,
+): number[] | undefined {
+	const layer = canvas.layers.find((entry) => entry.id === layerId);
+	if (layer === undefined) {
+		return undefined;
+	}
+	const offset = (y * width + x) * 4;
+	return [
+		layer.pixels[offset],
+		layer.pixels[offset + 1],
+		layer.pixels[offset + 2],
+		layer.pixels[offset + 3],
+	];
+}
+
 function countDiff(a: Uint8Array, b: Uint8Array): number {
 	let pixels = 0;
 	for (let i = 0; i < a.length; i += 4) {
@@ -572,6 +603,122 @@ export const CLEANUP_CASES: CleanupCase[] = [
 				],
 				[0, 0, 255, 0],
 				"transparent side keeps RGB, only alpha drops",
+			);
+		},
+	},
+	{
+		name: "aa fix at x=0 does not fold back to the previous row's last pixel",
+		run: (check) => {
+			// 2x3, row-major. The partial at (0,1) has one in-bounds opaque
+			// neighbor (up) and two in-bounds clear neighbors (right, down), so
+			// the correct fix drops alpha. An unguarded left read would hit
+			// (1,0), the previous row's last pixel, and flip the result opaque.
+			const { canvas, layerId } = fresh(2, 3);
+			setPixel(canvas, layerId, 0, 0, { ...INK });
+			setPixel(canvas, layerId, 1, 0, { ...INK });
+			setPixel(canvas, layerId, 0, 1, { ...PART_RED });
+			setPixel(canvas, layerId, 1, 1, { ...CLEAR });
+			setPixel(canvas, layerId, 0, 2, { ...CLEAR });
+			setPixel(canvas, layerId, 1, 2, { ...CLEAR });
+			check.deepEqual(
+				keys(detectAA(canvas, layerId)),
+				["0,1"],
+				"boundary partial is aa",
+			);
+			const result = fixCleanup(canvas, layerId, {
+				fix: ["aa"],
+				allowRenderPassChange: true,
+			});
+			check.equal(result.fixed.aa, 1, "one pixel fixed");
+			check.deepEqual(
+				rgbaAt(canvas, layerId, 2, 0, 1),
+				[255, 0, 0, 0],
+				"clear side wins, RGB kept, alpha dropped",
+			);
+			check.deepEqual(
+				rgbaAt(canvas, layerId, 2, 1, 0),
+				[255, 0, 0, 255],
+				"the wrap target (1,0) is untouched",
+			);
+		},
+	},
+	{
+		name: "aa fix at x=width-1 does not fold back to the next row's first pixel",
+		run: (check) => {
+			// 2x3. The partial at (1,1) has one in-bounds opaque neighbor (left)
+			// and two clear neighbors (up, down): alpha must drop. An unguarded
+			// right read would hit (0,2), the next row's first pixel, and snap
+			// alpha to opaque.
+			const { canvas, layerId } = fresh(2, 3);
+			setPixel(canvas, layerId, 0, 1, { ...INK });
+			setPixel(canvas, layerId, 1, 1, { ...PART_RED });
+			setPixel(canvas, layerId, 1, 0, { ...CLEAR });
+			setPixel(canvas, layerId, 1, 2, { ...CLEAR });
+			setPixel(canvas, layerId, 0, 2, { ...INK });
+			check.deepEqual(
+				keys(detectAA(canvas, layerId)),
+				["1,1"],
+				"boundary partial is aa",
+			);
+			const result = fixCleanup(canvas, layerId, {
+				fix: ["aa"],
+				allowRenderPassChange: true,
+			});
+			check.equal(result.fixed.aa, 1, "one pixel fixed");
+			check.deepEqual(
+				rgbaAt(canvas, layerId, 2, 1, 1),
+				[255, 0, 0, 0],
+				"clear side wins, RGB kept, alpha dropped",
+			);
+			check.deepEqual(
+				rgbaAt(canvas, layerId, 2, 0, 2),
+				[255, 0, 0, 255],
+				"the wrap target (0,2) is untouched",
+			);
+		},
+	},
+	{
+		name: "aa fix at y edges uses only in-bounds neighbors",
+		run: (check) => {
+			// Single row: the partial counts left opaque and right clear only.
+			// The out-of-bounds top/bottom neighbors must contribute nothing.
+			const row = fresh(3, 1);
+			setPixel(row.canvas, row.layerId, 0, 0, { ...INK });
+			setPixel(row.canvas, row.layerId, 1, 0, { ...PART_RED });
+			setPixel(row.canvas, row.layerId, 2, 0, { ...CLEAR });
+			check.deepEqual(
+				keys(detectAA(row.canvas, row.layerId)),
+				["1,0"],
+				"edge partial is aa",
+			);
+			fixCleanup(row.canvas, row.layerId, {
+				fix: ["aa"],
+				allowRenderPassChange: true,
+			});
+			check.equal(
+				alphaAt(row.canvas, row.layerId, 3, 1, 0),
+				255,
+				"1 opaque vs 1 clear tie goes opaque",
+			);
+			// Bottom row of a taller canvas: same tally, no read past the buffer.
+			const bottom = fresh(3, 2);
+			setPixel(bottom.canvas, bottom.layerId, 0, 1, { ...INK });
+			setPixel(bottom.canvas, bottom.layerId, 1, 1, { ...PART_RED });
+			setPixel(bottom.canvas, bottom.layerId, 2, 1, { ...CLEAR });
+			setPixel(bottom.canvas, bottom.layerId, 1, 0, { ...CLEAR });
+			check.deepEqual(
+				keys(detectAA(bottom.canvas, bottom.layerId)),
+				["1,1"],
+				"height-1 partial is aa",
+			);
+			fixCleanup(bottom.canvas, bottom.layerId, {
+				fix: ["aa"],
+				allowRenderPassChange: true,
+			});
+			check.equal(
+				alphaAt(bottom.canvas, bottom.layerId, 3, 1, 1),
+				0,
+				"2 clear vs 1 opaque drops alpha",
 			);
 		},
 	},
