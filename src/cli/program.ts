@@ -2,6 +2,7 @@ import process from "node:process";
 import { Command } from "commander";
 import { McAssetError } from "../core/errors.ts";
 import { VERSION } from "../index.ts";
+import { type AnalyzeCommandOptions, runAnalyze } from "./analyze.ts";
 import {
 	emitArtifact,
 	emitEnvelope,
@@ -155,6 +156,32 @@ export function buildProgram(): Command {
 			const code = await runStub(options, globals.json === true, realStreams());
 			process.exitCode = code;
 		});
+
+	program
+		.command("analyze <image>")
+		.description(
+			"Analyze an image and print a read-only report (predicted classification, never effective).",
+		)
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(
+			async (
+				image: string,
+				options: AnalyzeCommandOptions,
+				command: Command,
+			) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runAnalyze(
+					image,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
 
 	return program;
 }
