@@ -18,6 +18,7 @@ import { exitCodeForMcAssetError } from "./exit.ts";
 import { atomicWriteFile } from "./filesystem.ts";
 import { resolveOutputTarget } from "./output-guard.ts";
 import { parseProfile } from "./profiles.ts";
+import { runValidate, type ValidateCommandOptions } from "./validate.ts";
 
 export interface StubOptions {
 	output?: string | undefined;
@@ -178,6 +179,32 @@ export function buildProgram(): Command {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
 				const code = await runAnalyze(
 					image,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("validate <asset>")
+		.description(
+			"Validate an asset file and print a read-only verdict (exit 3 when the asset fails).",
+		)
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(
+			async (
+				asset: string,
+				options: ValidateCommandOptions,
+				command: Command,
+			) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runValidate(
+					asset,
 					options,
 					globals.json === true,
 					realStreams(),
