@@ -612,22 +612,74 @@ bucket 與 palette 的排序共用同一個全序：像素數多者先，再比�
 
 以上各項都有對應測試（見各段列出的測試名）；這些測試就是本節的迴歸鎖。
 
+## 實作補充（後續波次）
+
+引擎波之後落地的是 Pixelize、Variant、Analyze 擴充、跨 runtime 符合性，以及 V0.1 落差的 layer／region 接線。體例同「實作補充（引擎波）」：標 `（本凍結）` 的是在此正式固定，標 `（實作判讀）` 的是實作實況，權威來源是每項列出的程式與測試，本節只記錄、不重新凍結。
+
+### Pixelize 的 starter 階段與 preset（實作判讀）
+
+管線照「管線順序（本凍結）」的十一階段，`PIXELIZE_STAGES` 就是那份順序，旗標無法改動它，階段會被 trace 而不是被跳過。真正做運算的是 Resize（`nearest`）、Quantize（preset 的 colors）與 Cleanup（preset 的 cleanupClasses）三階段；其餘五階段是 starter no-op：Crop 保留全幅、Background 原樣保留 alpha（不壓平成單色）、Subject 不搬動主體、Edge 強調量 0、Cluster 合併門檻 0。這五個 starter 規則都 pending art-direction review。
+
+preset 的具體數值（對應待決清單該項）：`item` 為 colors=16、`block` 為 colors=12、`generic` 為 colors=32；三者 edge=0、cluster=0。cleanupClasses 為 `item`／`block` 的 `["outlier"]` 與 `generic` 的 `[]`（偵測-only），因此 preset 的清理只碰 `outlier`，不需要 `--allow-render-pass-change`。`--size` 接受單邊 `N`（等於 NxN）或 `WxH`；非整數是 `INVALID_ARGUMENT`，維度越界是 `INVALID_DIMENSION`，缺 `--size` 也是 `INVALID_ARGUMENT`。16／32／64／128 的正方形不加警告，其餘尺寸回 `NON_STANDARD_RESOLUTION` warning 但照樣產出（§45）。Minecraft profile 的輸出一律只有 PNG。
+
+解碼路徑：JPEG 用 jpeg-js@0.4.4（純 JS、自含 bundle），WebP 用 @jsquash/webp@1.5.0（libwebp）配合 `init({ instantiateWasm })` glue，wasm 以 base64 內嵌（`src/io/webp-wasm-b64.ts`），讓單檔 dist 不需 sidecar。選型與未驗證清單見 `.project-doc/decoder-selection.md`：漸進 JPEG、動畫 WebP、ICC／EXIF 附帶資料與大圖效能皆未驗證，JPEG 跨實現亦非 bit-exact。
+
+多格式 raster 入口（`decodeImage`）現同時支撐 `loadEditableCanvas` 與 `loadRasterCanvas`：`transform`／`quantize`／`cleanup`／`palette`／`pixelize`／`analyze` 都接受 PNG/JPEG/WebP；`recolor`／`variant` 維持 `.mcpx` gate（非 `.mcpx` 在進入解碼前先以 `INVALID_ARGUMENT` 拒絕），`import` 仍是 PNG-only。`docs/cli-surface.md` 的 V0.2 表已與實作一致。
+
+出處：`src/core/pixelize.ts` 的 `PIXELIZE_STAGES`、`PIXELIZE_PRESETS`、`runPixelize`、`parsePixelizeSize`、`isStandardPixelizeSize`、`describePixelizePreset`；`src/cli/cmd-pixelize.ts` 的 `runPixelizeCommand`；`src/io/decode.ts` 的 `decodeImage`、`ensureWebp`。
+
+測試：`tests/cli/pixelize.test.ts`（PNG／JPEG／lossless WebP／lossy WebP 解碼、三種輸出模式、三 preset 重跑 byte-identical、未知 preset 與缺 `--size` 被拒、`24x12` 非標準尺寸警告、Minecraft profile 非 PNG 被拒）、`tests/io/decode.test.ts`。
+
+### Variant 的輸出契約（實作判讀）
+
+`variant` 只吃 `.mcpx`。每個 `--materials` 條目各自從原始來源文字重新 parse 一次再上色，材料之間不會疊加，所以重跑 byte-identical。每個材料固定輸出兩個檔案：`<basename>_<material>.png` 與 `<basename>_<material>.mcpx`，一律寫進顯式的 `--output-dir`。缺 `--output-dir` 是 `OUTPUT_REQUIRED` 且零檔案；`--output` 與 variant 同用是 `ARGUMENT_CONFLICT`；同一份清單重複列同一材料是 `ARGUMENT_CONFLICT`（本節判讀，待複核）；未知材料、缺 `--materials`、非 `.mcpx` 來源都回 `INVALID_ARGUMENT`。`--stdout`／`--source`／`--in-place`／`--input`／`--selection` 未在 variant 宣告（`src/cli/program.ts`），使用時是未知選項。
+
+出處：`src/cli/cmd-variant.ts` 的 `runVariant`、`parseMaterialList`；`src/cli/program.ts` 的 `variant <source>` 命令宣告。
+
+測試：`tests/cli/variant.test.ts`（四檔命名、重跑 byte-identical、缺 output-dir 零檔案、`--output` 衝突、未知材料、缺 materials、非 mcpx 來源、缺父目錄需 `--mkdir`、既有檔需 `--force`）、`tests/conformance/cli-conformance.test.ts` 的 V0.2 variant output guards。
+
+### Analyze 擴充的 starter 規則（實作判讀）
+
+三組新欄位都是量測值，規則固定且確定性。`paletteCharacteristics`：`colorCount` 為 distinct RGBA 色數、`alphaLevels` 為相異 alpha 值個數、`transparentPixels` 為 `A = 0`、`partialAlphaPixels` 為 `0 < A < 255`；`roles` 由 canvas 的 authoring palette 統計，raster 來源（PNG／JPEG／WebP）一律空陣列。`pixelArtCharacteristics`：`resolution` 為 flatten 後的寬高、`aspect` 以整數 gcd 約簡成 `w:h`、`isolatedPixels` 沿用 cleanup isolated 偵測語意（不透明像素、現有 4-neighbor 全為 fully transparent）、`semiTransparentPixels` 同 `partialAlphaPixels`、`paletteSize` 為 distinct 色數、`tileFriendly` 為 starter wrap 規則：左右邊界與上下邊界逐 byte 嚴格相等，1 寬或 1 高的退化軸只與自己比。`tileFriendly` 仍待複核。
+
+`recommended` 由確定性規則導出，是建議不是執行結果：`quantize.colors` 取不小於色數的最小 2 的冪、上限 clamp 到 4096；`cleanup.classes` 目前無規則，固定空陣列；`resize.mode` 固定 `nearest`。human 輸出在 `profile:` 之後新增 `palette:`、`pixel-art:`、`recommended:` 三行，之後才是 warning 與 `target:`；`--json` 形狀照「JSON 形狀（本凍結）」，舊欄位未改名或移除。輸出仍是 predicted，不得讀成 effective。
+
+V0.1 的 conformance D5 gap（analyze 對 isolated 像素沉默）在 V0.2 退役：`isolatedPixels` 是 measured 欄位、規則固定且有測試；anti-aliasing 偵測仍未實作，`analyze` 對它保持沉默。
+
+出處：`src/analyze/metrics.ts` 的 `analyzeCanvas`、`countIsolatedPixels`、`isTileFriendly`、`recommendedQuantizeColors`；`src/cli/analyze.ts` 的 `formatHumanReport`。
+
+測試：`tests/cli/analyze.test.ts`（PNG／JPEG／lossless／lossy WebP intake、frozen shape、human 三行順序、`.mcpx` 被拒 exit 5、read-only、重跑相同）、`tests/conformance/cli-conformance.test.ts` 的 `D5 retired in V0.2`。
+
+### 跨 runtime 符合性（實作判讀）
+
+V0.2 的 §98 守衛矩陣（缺 output、OUTPUT_EXISTS／`--force`、缺父目錄／`--mkdir`、輸出別名或等同輸入）與重跑 determinism 都在 `tests/conformance/cli-conformance.test.ts`；`scripts/compare-runtime.mjs` 的 V0.2 情境把 Bun 跑 source CLI 與 Node 跑 bundle 的輸出一一 byte 比對：`transform`（PNG＋`.mcpx`）、`quantize`（PNG＋`.mcpx`）、`pixelize`（JPEG 與 lossless WebP，`--size 16`）、`variant`（4 檔）與 canonical `analyze` JSON。CI 的 bun 與 node 兩個 job 都跑這支腳本，任何差異即失敗。
+
+出處：`tests/conformance/cli-conformance.test.ts`、`scripts/compare-runtime.mjs` 的 `main`（V0.2 區塊）、`.github/workflows/ci.yml`。
+
+### V0.1 落差：layer／region 操作已接上（實作判讀）
+
+「進階 Layer／Region 操作」列出的操作已可經 `--operations` 批次與 CLI 使用：`createLayer`／`removeLayer`／`renameLayer`／`reorderLayer`／`createRegion`／`removeRegion`／`setRegionPixel` 與 V0.2 新增的 `duplicateLayer`／`mergeLayer`／`clearLayer`／`fillLayer`／`moveLayer`／`renameRegion`／`reorderRegion` 都在批次詞彙內。`build` 可在一輪批次裡建層、改名並寫入像素。幾何操作不進批次詞彙：帶幾何 `type` 的批次是 `INVALID_ARGUMENT`（對應待決清單該項）。
+
+出處：`src/cli/operations-json.ts` 的 `KNOWN_TYPES`、`parseOperationsJson`（幾何名稱不在此集合，於此回 `INVALID_ARGUMENT`）、`src/core/batch.ts` 的 `applyOperations` type 分派、`tests/cli/wave1.test.ts` 的 `--operations layer vocabulary runs on build` 與 `--operations rejects geometry vocabulary as INVALID_ARGUMENT`、`tests/core/batch-cases.ts`。
+
 ## 待決清單
 
 以下無法從規格推定，列出但不自行填補。其中前四項會直接影響對外行為，需要決策後才適合定案。
 
-| 項目 | 為什麼無法推定 | 需要什麼 |
-|---|---|---|
-| `resize`／`crop` 是否保留為 top-level 命令 | §48 的 command tree 可簡化，但這兩個是公開名稱；本凍結改由 `transform` 承載 | 決定是否保留別名 |
-| `pixel-aware` resize 的演算法 | §38 只列名稱 | 演算法定義或延後宣告 |
-| Pixelize preset 的具體數值 | §30 只有方向（剪影、可平鋪、無 heuristic），沒有數字 | 各 preset 的參數值 |
-| `pixelArtCharacteristics.tileFriendly` 的判斷規則 | §62 未定義 | 規則或門檻 |
-| `moveLayer` 與 `reorderLayer` 的命名區分 | §28 只有 `reorderLayer`；`move` 的語意未定義 | 確認 move 指平移或改堆疊位置 |
-| `outline`／`accent`／`custom` 的 recolor 目標 role | §68 只列 shadow／base／highlight | 是否要為其定義映射 |
-| material 第二批（`steel`／`leather`／`cloth`） | 只在 docs §32 出現，未進 §67 | 是否納入 |
-| `--colors` 上限 4096 是否合適 | 本凍結對齊 §97 的 tokenized 容量，非規格明定 | 確認上限 |
-| 目標材料不存在時要用哪個 error code | §99 的固定表中沒有專屬項 | 沿用 `INVALID_ARGUMENT` 或新增碼 |
-| geometry 操作是否進 `--operations` 批次詞彙 | §29 的批次只描述像素操作 | 是否要擴充批次 |
+| 項目 | 為什麼無法推定 | 需要什麼 | 現況（後續波次落地後；未改變任何決議） |
+|---|---|---|---|
+| `resize`／`crop` 是否保留為 top-level 命令 | §48 的 command tree 可簡化，但這兩個是公開名稱；本凍結改由 `transform` 承載 | 決定是否保留別名 | 仍待決；V0.2 由 `transform` 承載，未設 top-level 別名 |
+| `pixel-aware` resize 的演算法 | §38 只列名稱 | 演算法定義或延後宣告 | 仍待決；實作只受理名稱並以 `INVALID_ARGUMENT` 拒絕（見「pixel-aware 的拒絕語意」） |
+| Pixelize preset 的具體數值 | §30 只有方向（剪影、可平鋪、無 heuristic），沒有數字 | 各 preset 的參數值 | 已依使用者同意的 starter 路徑落地（`item` 16／`block` 12／`generic` 32）；是否定案仍待決 |
+| `pixelArtCharacteristics.tileFriendly` 的判斷規則 | §62 未定義 | 規則或門檻 | starter 規則（wrap 邊界嚴格相等）已落地並有測試，仍待複核 |
+| `moveLayer` 與 `reorderLayer` 的命名區分 | §28 只有 `reorderLayer`；`move` 的語意未定義 | 確認 move 指平移或改堆疊位置 | 已定：`moveLayer` 是像素平移（整數 `dx`／`dy`），`reorderLayer` 改堆疊位置；命名是否維持仍待決 |
+| `outline`／`accent`／`custom` 的 recolor 目標 role | §68 只列 shadow／base／highlight | 是否要為其定義映射 | 仍待決；實作保持原樣不改寫 |
+| material 第二批（`steel`／`leather`／`cloth`） | 只在 docs §32 出現，未進 §67 | 是否納入 | 仍待決；V0.2 只內建七個 starter material |
+| `--colors` 上限 4096 是否合適 | 本凍結對齊 §97 的 tokenized 容量，非規格明定 | 確認上限 | 仍待決；實作照此上限 |
+| 目標材料不存在時要用哪個 error code | §99 的固定表中沒有專屬項 | 沿用 `INVALID_ARGUMENT` 或新增碼 | 仍待決；實作暫用 `INVALID_ARGUMENT`（§105.12） |
+| geometry 操作是否進 `--operations` 批次詞彙 | §29 的批次只描述像素操作 | 是否要擴充批次 | 仍待決；實作把幾何詞彙列為 `INVALID_ARGUMENT` |
+
+「現況」一欄只記實作實況，不代表任何項目已定案；未提到的細節仍以各節敘述為準。
 
 ## 後續實作的共同義務
 

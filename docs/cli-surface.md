@@ -345,3 +345,9 @@ material  list | material show <name>
   `paletteCharacteristics`, `pixelArtCharacteristics`, and `recommended`;
   the frozen JSON shape is in `docs/v02-design.md`. Its output remains
   predicted, never effective (§40).
+- `variant` declares only `--materials`, `--output-dir`, `--output`
+  (ARGUMENT_CONFLICT), `--force`, `--mkdir`, and `--profile`; the other
+  `<file flags>` (`--stdout`, `--source`, `--in-place`, `--input`,
+  `--selection`) are undeclared and fail as unknown options (exit 2).
+- `pixelize` declares `--selection` but always rejects a non-empty value
+  with ARGUMENT_CONFLICT: the pipeline owns cropping and resizing.

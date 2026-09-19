@@ -1,6 +1,8 @@
 # mc-asset
 
-Pixel-native Minecraft asset toolchain (V0.1).
+Pixel-native Minecraft asset toolchain. The V0.1 command set and the frozen
+V0.2 command set both ship from this entry point; `--version` still prints
+`0.1.0` (commander-owned).
 
 Entry point for development: `bun src/cli/index.ts`. For installation,
 `mc-asset` ships through Homebrew — see `docs/homebrew.md` and
@@ -18,6 +20,21 @@ not product surface):
 | `build [source.mcpx]` (or `--stdin`) | `.mcpx` source | PNG and/or `.mcpx` |
 | `analyze <image>` | Image file | Report only, no artifact file |
 | `validate <asset>` | Asset file | Report only; exit 3 when the asset fails |
+
+V0.2 commands (nine, frozen; semantics in `docs/v02-design.md`, flags and
+exit codes in `docs/cli-surface.md`):
+
+| Command | Input | Output |
+|---|---|---|
+| `transform <input>` | PNG/JPEG/WebP/`.mcpx` | PNG and/or `.mcpx` |
+| `quantize <input>` | PNG/JPEG/WebP/`.mcpx` | PNG and/or `.mcpx` |
+| `cleanup <input>` | PNG/JPEG/WebP/`.mcpx` | PNG and/or `.mcpx` |
+| `pixelize <image>` | PNG/JPEG/WebP | PNG and/or `.mcpx`; Minecraft profiles PNG only |
+| `palette extract` / `palette inspect <image>` | PNG/JPEG/WebP/`.mcpx` | Report only |
+| `material list` / `material show <name>` | — | Report only |
+| `recolor <source>` | `.mcpx` | PNG and/or `.mcpx` |
+| `variant <source>` | `.mcpx` | Several PNG and/or `.mcpx` under `--output-dir` |
+| `analyze <image>` (extended) | PNG/JPEG/WebP | Report only |
 
 ## Prerequisites
 
@@ -76,7 +93,11 @@ bun src/cli/index.ts analyze /tmp/mc-asset-quickstart/blank.png
 # alpha: predicted cutout (opaque=60 transparent=196 partial=0)
 # dominant: #00000000 x196 (0.7656), #FF0000FF x60 (0.2344)
 # profile: predicted profile generic has no Minecraft-specific restrictions.
+# palette: colorCount=2 alphaLevels=2 transparent=196 partial=0
+# pixel-art: 16x16 aspect=1:1 isolated=0 semiTransparent=0 tileFriendly=true
+# recommended: quantize.colors=2 cleanup=none resize=nearest
 # warning [PENDING_SOURCE_PNG_ONLY] Compat fact "texture-png-only" is pending an official source; reported as warning only.
+# target: default (engine defaults)
 ```
 
 Validate (read-only; exit 0 here because the asset passes):
@@ -89,16 +110,17 @@ bun src/cli/index.ts validate /tmp/mc-asset-quickstart/blank.png
 # alpha: predicted cutout (opaque=60 transparent=196 partial=0)
 # profile: predicted profile generic has no Minecraft-specific restrictions.
 # warning [PENDING_SOURCE_PNG_ONLY] Compat fact "texture-png-only" is pending an official source; reported as warning only.
+# target: default (engine defaults)
 ```
 
 Machine-readable variants — `--json` moves the envelope to its own stream:
 
 ```sh
 bun src/cli/index.ts --json analyze /tmp/mc-asset-quickstart/blank.png
-# {"success":true,"result":{"dimensions":{"width":16,"height":16},"totalPixels":256,"colorCount":2,"alpha":{"predictedClassification":"cutout","opaquePixels":60,"transparentPixels":196,"partialAlphaPixels":0,"partialAlphaValues":[],"opaqueRatio":"0.2344","transparentRatio":"0.7656","partialAlphaRatio":"0.0000","predictedNote":"predicted classification from PNG bytes only; not the final in-game render result."},"dominantColors":[{"hex":"#00000000","r":0,"g":0,"b":0,"a":0,"count":196,"ratio":"0.7656"},{"hex":"#FF0000FF","r":255,"g":0,"b":0,"a":255,"count":60,"ratio":"0.2344"}],"profile":{"id":"generic","predictedDescription":"predicted profile generic has no Minecraft-specific restrictions."},"warnings":[{"code":"PENDING_SOURCE_PNG_ONLY","level":"warning","message":"Compat fact \"texture-png-only\" is pending an official source; reported as warning only."}]}
+# {"success":true,"result":{"dimensions":{"width":16,"height":16},"totalPixels":256,"colorCount":2,"alpha":{"predictedClassification":"cutout","opaquePixels":60,"transparentPixels":196,"partialAlphaPixels":0,"partialAlphaValues":[],"opaqueRatio":"0.2344","transparentRatio":"0.7656","partialAlphaRatio":"0.0000","predictedNote":"predicted classification from PNG bytes only; not the final in-game render result."},"dominantColors":[{"hex":"#00000000","r":0,"g":0,"b":0,"a":0,"count":196,"ratio":"0.7656"},{"hex":"#FF0000FF","r":255,"g":0,"b":0,"a":255,"count":60,"ratio":"0.2344"}],"profile":{"id":"generic","predictedDescription":"predicted profile generic has no Minecraft-specific restrictions."},"paletteCharacteristics":{"colorCount":2,"alphaLevels":2,"roles":[],"transparentPixels":196,"partialAlphaPixels":0},"pixelArtCharacteristics":{"resolution":{"width":16,"height":16},"aspect":"1:1","isolatedPixels":0,"semiTransparentPixels":0,"paletteSize":2,"tileFriendly":true},"recommended":{"quantize":{"colors":2},"cleanup":{"classes":[]},"resize":{"mode":"nearest"}},"warnings":[{"code":"PENDING_SOURCE_PNG_ONLY","level":"warning","message":"Compat fact \"texture-png-only\" is pending an official source; reported as warning only."}],"version":{},"target":"default (engine defaults)"}
 
 bun src/cli/index.ts --json validate /tmp/mc-asset-quickstart/blank.png
-# {"success":true,"result":{"verdict":"pass","profile":{"id":"generic","predictedDescription":"predicted profile generic has no Minecraft-specific restrictions."},"dimensions":{"width":16,"height":16},"totalPixels":256,"colorCount":2,"alpha":{"predictedClassification":"cutout","opaquePixels":60,"transparentPixels":196,"partialAlphaPixels":0,"partialAlphaValues":[],"opaqueRatio":"0.2344","transparentRatio":"0.7656","partialAlphaRatio":"0.0000","predictedNote":"predicted classification from PNG bytes only; not the final in-game render result."},"findings":[{"code":"PENDING_SOURCE_PNG_ONLY","level":"warning","message":"Compat fact \"texture-png-only\" is pending an official source; reported as warning only."}]}}
+# {"success":true,"result":{"verdict":"pass","profile":{"id":"generic","predictedDescription":"predicted profile generic has no Minecraft-specific restrictions."},"dimensions":{"width":16,"height":16},"totalPixels":256,"colorCount":2,"alpha":{"predictedClassification":"cutout","opaquePixels":60,"transparentPixels":196,"partialAlphaPixels":0,"partialAlphaValues":[],"opaqueRatio":"0.2344","transparentRatio":"0.7656","partialAlphaRatio":"0.0000","predictedNote":"predicted classification from PNG bytes only; not the final in-game render result."},"findings":[{"code":"PENDING_SOURCE_PNG_ONLY","level":"warning","message":"Compat fact \"texture-png-only\" is pending an official source; reported as warning only."}],"version":{},"target":"default (engine defaults)"}}
 ```
 
 ## Explicit paths: no implicit filenames, no silent overwrites
@@ -219,16 +241,63 @@ bun src/cli/index.ts import /tmp/mc-asset-quickstart/blank.png --source /tmp/mc-
 # ok import profile=generic applied=0 source=/tmp/mc-asset-quickstart/imported.mcpx
 ```
 
-## `import` and formats: PNG in, JPEG/WebP refused
+## `import` and formats: PNG-only import, multi-format commands
 
-The V0.1 decoder is PNG-only. JPEG/WebP bytes are rejected, not converted —
-a real multi-format decoder is V0.2+ work:
+`import` stays on the PNG-only decoder: JPEG/WebP bytes are rejected, not
+converted. V0.2's shared multi-format decoder now backs `transform`,
+`quantize`, `cleanup`, `palette`, `pixelize`, and `analyze`, which all read
+PNG, JPEG, and WebP; `recolor` and `variant` take an editable `.mcpx` source
+(see the V0.2 section below):
 
 ```sh
 bun src/cli/index.ts import /tmp/mc-asset-quickstart/fake.jpg --output /tmp/mc-asset-quickstart/fake.png
 # error [UNSUPPORTED_IMAGE_FORMAT] Input does not start with the PNG signature.
 # exit code: 5
 ```
+
+## V0.2 commands in practice
+
+The V0.2 engines reuse the V0.1 file rules: an explicit target is required,
+an existing target needs `--force`, missing parents need `--mkdir`, and every
+write is atomic. Geometry is one operation per call — two geometry flags, or
+a geometry flag together with `--selection`, is `ARGUMENT_CONFLICT`.
+
+```sh
+bun src/cli/index.ts transform /tmp/mc-asset-quickstart/blank.mcpx --flip h --output /tmp/mc-asset-quickstart/flipped.png
+# ok transform profile=generic applied=0 output=/tmp/mc-asset-quickstart/flipped.png
+
+bun src/cli/index.ts quantize /tmp/mc-asset-quickstart/blank.mcpx --colors 2 --output /tmp/mc-asset-quickstart/quantized.png
+# ok quantize profile=generic applied=0 output=/tmp/mc-asset-quickstart/quantized.png
+
+bun src/cli/index.ts cleanup /tmp/mc-asset-quickstart/blank.mcpx --output /tmp/mc-asset-quickstart/cleaned.png
+# ok cleanup profile=generic applied=0 output=/tmp/mc-asset-quickstart/cleaned.png
+```
+
+`cleanup` without `--fix` detects and reports only; fixing an alpha-affecting
+class additionally needs `--allow-render-pass-change` (`outlier` does not).
+
+`pixelize` runs a reference image through the fixed eleven-stage pipeline and
+always needs `--size`:
+
+```sh
+bun src/cli/index.ts pixelize /tmp/mc-asset-quickstart/blank.png --size 32 --preset item --output /tmp/mc-asset-quickstart/pixel.png
+# ok pixelize profile=generic applied=0 output=/tmp/mc-asset-quickstart/pixel.png
+```
+
+`variant` fans one `.mcpx` source out to one PNG plus one `.mcpx` per
+material, all inside an explicit `--output-dir` (a repeat run is
+byte-identical):
+
+```sh
+bun src/cli/index.ts variant /tmp/mc-asset-quickstart/blank.mcpx --materials iron,copper --output-dir /tmp/mc-asset-quickstart/variants --mkdir
+# ok variant profile=generic applied=0 outputDir=/tmp/mc-asset-quickstart/variants files=4
+# writes blank_iron.png, blank_iron.mcpx, blank_copper.png, blank_copper.mcpx
+```
+
+`palette extract`, `palette inspect`, `material list`, and `material show`
+produce reports only and refuse every file flag. `analyze` keeps its V0.1
+fields and adds `paletteCharacteristics`, `pixelArtCharacteristics`, and
+`recommended` (see the quickstart sample above); its output stays predicted.
 
 ## Batch operations (`--operations`)
 
@@ -257,45 +326,94 @@ translucent pass (`force_translucent`), so the effective classification
 needs the model JSON too. That check belongs to `validate-pack` (V0.5), not
 V0.1: never treat a V0.1 report as the in-game result.
 
-## Determinism scope (CI-limited, V0.1 only)
+## Determinism scope (CI-limited, V0.1 + V0.2)
 
-What V0.1 guarantees, and where it was checked:
+What the toolchain guarantees, and where it was checked:
 
 - Same canvas → byte-identical PNG. Verified locally: grid-render vs
   `.mcpx`-rebuild are identical bytes, and `--stdout` bytes match the file
   bytes. The encoder uses fixed parameters (8-bit, color type 6, filter 0,
   fixed deflate level/strategy in `src/io/png.ts`) with integer-only
   compositing — no timestamps, no randomness.
+- Same input plus same flags → byte-identical output for the V0.2 write
+  commands. `transform`, `quantize`, `cleanup`, `recolor`, `pixelize`, and
+  `variant` rerun byte-identically: locked in their spawn suites and in the
+  rerun case of `tests/conformance/cli-conformance.test.ts`. The eleven-stage
+  pixelize pipeline and the integer-only engines carry no timestamps and no
+  randomness.
 - Cross-runtime: CI runs a `node` job alongside the `bun` job
-  (`.github/workflows/ci.yml`); the shared golden/canonical/determinism
-  cases in `tests/**/*.node.ts` run under `node:test` with the same
-  assertions as the `bun:test` entries, plus guards that forbid
-  `Math.random`, transcendental `Math` functions in `src/`, and Bun-only
-  APIs in `src/`.
-- Scope limit: this covers V0.1 inputs and behaviors only. Nothing here
-  promises byte-stability for future formats, profiles, or operations.
+  (`.github/workflows/ci.yml`); the shared golden/canonical/determinism cases
+  in `tests/**/*.node.ts` run under `node:test` with the same assertions as
+  the `bun:test` entries. `scripts/compare-runtime.mjs` additionally compares
+  Bun (running the source CLI) against Node (running the bundle) byte for
+  byte: the V0.1 render/build chain and the V0.2 scenarios `transform`,
+  `quantize`, `pixelize` on JPEG and WebP, a four-file `variant` fan-out, and
+  canonical `analyze` JSON.
+- Static guards in CI forbid `Math.random` and transcendental `Math`
+  functions in `src/` (§100.2, §100.3), and Bun-only APIs in `src/` (§100.5).
+- Scope limit: this covers the checked V0.1 and V0.2 inputs, formats, and
+  flags only. JPEG decode is not claimed bit-exact across implementations,
+  and untested format variants stay unverified (see the gaps below).
 
-## Known gaps (honest list, V0.1)
+## Known gaps (honest list)
 
-- **JPEG/WebP**: rejected with `UNSUPPORTED_IMAGE_FORMAT` (exit 5).
-  Decoding them is V0.2+ work.
-- **No version-target flags**: only `--profile` exists. There is no
-  `--minecraft-version`, `--pack-format`, or `--preset` flag —
-  `validate blank.png --minecraft-version 26.3` fails with
-  `error: unknown option '--minecraft-version'` (exit 2). The engine already
-  carries packFormat-aware versioned facts (`src/profiles/versions.ts`),
-  but the CLI exposes no switching (§73 is future work).
+- **Raster format coverage is split**: `transform`, `quantize`, `cleanup`,
+  `palette`, `pixelize`, and `analyze` accept PNG/JPEG/WebP; `import` and
+  `validate` are still PNG-only (JPEG/WebP rejected with
+  `UNSUPPORTED_IMAGE_FORMAT`, exit 5); `recolor` and `variant` take an
+  editable `.mcpx` source. The decoder pins `jpeg-js@0.4.4` and
+  `@jsquash/webp@1.5.0` (libwebp via a wasm binary embedded as base64 so the
+  single-file bundle needs no sidecar), recorded in
+  `.project-doc/decoder-selection.md`.
+- **JPEG decode is not bit-exact against other implementations**, and its
+  dependency is dormant: `jpeg-js` has had no releases since 2022, so JPEG
+  goldens must stay pinned to this decoder (a bit-exact path would mean
+  swapping to `@jsquash/jpeg`).
+- **Format coverage beyond the fixtures is unverified**: progressive JPEG,
+  animated WebP, and ICC/EXIF color payloads were never tested, and
+  large-image performance and memory were never measured (the fixtures are
+  8×8).
+- **`pixelize` is a starter pipeline**: Crop, Background, Subject, Edge, and
+  Cluster are starter no-ops (full frame, verbatim alpha, subject in place,
+  emphasis 0, merge threshold 0), and the presets are starter parameter sets
+  — `item` 16 colors, `block` 12, `generic` 32 — all pending art-direction
+  review. Sizes other than a 16/32/64/128 square warn
+  (`NON_STANDARD_RESOLUTION`) but still write.
+- **`analyze`'s pixel-art fields are starter rules**: `tileFriendly` uses a
+  strict edge-equality wrapping rule pending review, `recommended.cleanup`
+  has no rule yet (always `[]`), and `paletteSize` is the distinct RGBA count
+  because raster intake has no authoring palette.
+- **The seven built-in materials are starter palettes**: `iron`, `copper`,
+  `oxidized_copper`, `gold`, `wood`, `stone`, `crystal` are project-owned hex
+  values pending art-direction review; `steel`/`leather`/`cloth` are not
+  built in. An unknown material is `INVALID_ARGUMENT` for now — a dedicated
+  error code is an open decision (§105.12).
+- **`pixel-aware` resize is name-only**: `--resize-mode pixel-aware` is
+  accepted by name and then refused with `INVALID_ARGUMENT`; `nearest`
+  (default) and `box` are the real modes. `resize`/`crop` have no top-level
+  aliases — both travel through `transform` — and geometry never enters the
+  `--operations` batch vocabulary (`INVALID_ARGUMENT`).
+- **`variant` writes two files per material**: `<basename>_<material>.png`
+  plus `.mcpx`, always under an explicit `--output-dir`. Listing the same
+  material twice in one `--materials` value is `ARGUMENT_CONFLICT` (a V0.2
+  reading, pending review).
+- **Closed V0.1 gaps**: layer/region manipulation is reachable through
+  `--operations` and the CLI, and `analyze` now reports a measured
+  `isolatedPixels` (the V0.1 "silent on isolated pixels" gap is retired);
+  there is still no anti-aliasing detection.
+- **Version targets are narrow**: `analyze`/`validate` accept
+  `--minecraft-version 26.3` or an integer `--resource-pack-version`; dotted
+  resource-pack versions such as `97.1` are `INVALID_ARGUMENT`, and the
+  multi-version fact layer is V0.5 work. `--preset` exists on `pixelize` only;
+  there is no `--pack-format`.
 - **`--version` prints the toolchain version** (`0.1.0`, commander-owned,
   exit 0) and nothing more; it does not select compat behavior.
-- **No isolated-pixel / anti-aliasing analysis or repair**: `analyze`
-  reports counts and distributions (`colorCount`, alpha histogram, dominant
-  colors) and never mutates pixels. Detection/cleanup heuristics are
-  recorded as future work only.
 - **`PENDING_SOURCE_PNG_ONLY` warning**: every analyze/validate report
   carries it, because the PNG-only texture fact still lacks an official
   source (§95). It is warning-only by construction and can never fail
   validation.
-- **Effective alpha needs `validate-pack` (V0.5)** — see above.
+- **Effective alpha needs `validate-pack` (V0.5)**, and later-version surface
+  stays unimplemented: no `tile`, `preview`, `animate`, or `mcp` command.
 
 ## Development
 
