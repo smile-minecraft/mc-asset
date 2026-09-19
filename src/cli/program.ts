@@ -23,6 +23,7 @@ import { type QuantizeOptions, runQuantize } from "./cmd-quantize.ts";
 import { type RecolorOptions, runRecolor } from "./cmd-recolor.ts";
 import { type RenderOptions, runRender } from "./cmd-render.ts";
 import { runTransform, type TransformOptions } from "./cmd-transform.ts";
+import { runVariant, type VariantOptions } from "./cmd-variant.ts";
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
 import { exitCodeForMcAssetError } from "./exit.ts";
 import { atomicWriteFile } from "./filesystem.ts";
@@ -675,6 +676,31 @@ export function buildProgram(): Command {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
 				const code = await runPixelizeCommand(
 					image,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("variant <source>")
+		.description("Recolor an editable .mcpx source into per-material variants.")
+		.option("--materials <list>", "Comma-separated builtin material ids.")
+		.option("--output-dir <path>", "Required explicit output directory.")
+		.option("--output <path>", "Rejected on variant (ARGUMENT_CONFLICT).")
+		.option("--force", "Allow overwriting existing variant files.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(
+			async (source: string, options: VariantOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runVariant(
+					source,
 					options,
 					globals.json === true,
 					realStreams(),
