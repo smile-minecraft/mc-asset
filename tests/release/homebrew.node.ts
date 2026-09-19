@@ -45,6 +45,26 @@ describe("homebrew formula (static contract, no build required)", () => {
 		);
 	});
 
+	it("formula pins the published v0.1.0 asset digest, no pending marker", () => {
+		const text = readFormula();
+		assert.ok(
+			text.includes(
+				"bdc941bce9eff148732398bb767d4b73f05c20a6ff4d6718b82a4317dba98881",
+			),
+			"formula sha256 must match the published v0.1.0 asset digest",
+		);
+		assert.ok(
+			!text.includes("PENDING_TAG_RECHECK"),
+			"formula must not carry the pending recheck marker",
+		);
+		assert.ok(
+			!text.includes(
+				"019a240cedbd50dc4076312eb19dffaca5054111d0ff90a68dcca7741a832dd7",
+			),
+			"formula must not carry the dry-run SHA",
+		);
+	});
+
 	it("formula runs on Node and installs the release layout", () => {
 		const text = readFormula();
 		assert.match(text, /depends_on\s+"node"/, "formula needs a node runtime");

@@ -11,9 +11,12 @@ GitHub Release. No private URLs, no tokens, no moving branches.
   (formula lands at `Formula/mc-asset.rb` there).
 - Release tarball URL pattern (pinned per version, never a branch):
   `https://github.com/smile-minecraft/mc-asset/releases/download/v<version>/mc-asset-<version>.tar.gz`
-- Current version: v0.1.0
-  (`mc-asset-0.1.0.tar.gz`; the `sha256` in the formula is re-verified
-  against the published tag asset before every tap update).
+- Current version: v0.1.0 (released; `mc-asset-0.1.0.tar.gz`
+  published on the v0.1.0 GitHub Release; the `sha256` in the formula
+  matches the published asset digest
+  (`bdc941bce9eff148732398bb767d4b73f05c20a6ff4d6718b82a4317dba98881`,
+  cross-checked against the release `.sha256` companion) and is
+  re-verified with `shasum -a 256` before every tap update).
 
 ## Install
 

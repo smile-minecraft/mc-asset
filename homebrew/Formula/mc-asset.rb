@@ -1,13 +1,12 @@
-# PENDING_TAG_RECHECK: the sha256 below was recomputed locally from
-# `bun run build` plus `node scripts/release-artifacts.mjs --dry-run --out <dir>`
-# (tarball 019a240cedbd50dc4076312eb19dffaca5054111d0ff90a68dcca7741a832dd7).
-# The release owner re-verifies it against the real v0.1.0 tag tarball
-# (`shasum -a 256 mc-asset-0.1.0.tar.gz`) before publishing the tap update.
+# v0.1.0 published asset: sha256 below matches the GitHub Release
+# tarball `mc-asset-0.1.0.tar.gz` (digest verified against the published
+# asset and its `.sha256` companion). Re-verify with
+# `shasum -a 256 mc-asset-0.1.0.tar.gz` before any tap update.
 class McAsset < Formula
   desc "Pixel-native Minecraft asset toolchain"
   homepage "https://github.com/smile-minecraft/mc-asset"
   url "https://github.com/smile-minecraft/mc-asset/releases/download/v0.1.0/mc-asset-0.1.0.tar.gz"
-  sha256 "019a240cedbd50dc4076312eb19dffaca5054111d0ff90a68dcca7741a832dd7"
+  sha256 "bdc941bce9eff148732398bb767d4b73f05c20a6ff4d6718b82a4317dba98881"
   license "MIT"
 
   depends_on "node"

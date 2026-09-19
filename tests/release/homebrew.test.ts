@@ -37,6 +37,17 @@ describe("homebrew formula (static)", () => {
 		expect(text).toMatch(/license\s+"MIT"/);
 	});
 
+	test("formula pins the published v0.1.0 asset digest, no pending marker", () => {
+		const text = readFormula();
+		expect(text).toContain(
+			"bdc941bce9eff148732398bb767d4b73f05c20a6ff4d6718b82a4317dba98881",
+		);
+		expect(text).not.toContain("PENDING_TAG_RECHECK");
+		expect(text).not.toContain(
+			"019a240cedbd50dc4076312eb19dffaca5054111d0ff90a68dcca7741a832dd7",
+		);
+	});
+
 	test("formula uses a Node runtime dependency, never Bun or checkout", () => {
 		const text = readFormula();
 		expect(text).toMatch(/depends_on\s+"node"/);
