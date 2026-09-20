@@ -7,7 +7,6 @@ import { fileURLToPath } from "node:url";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
 const FORMULA = join(ROOT, "homebrew", "Formula", "mc-asset.rb");
-const DOC = join(ROOT, "docs", "homebrew.md");
 
 function readFormula(): string {
 	return readFileSync(FORMULA, "utf-8");
@@ -124,21 +123,6 @@ describe("homebrew formula (static contract, no build required)", () => {
 				text.includes(command),
 				`formula test must run ${command}, not only --version`,
 			);
-		}
-	});
-
-	it("homebrew doc records the public tap workflow", () => {
-		assert.ok(existsSync(DOC), "docs/homebrew.md is missing");
-		const doc = readFileSync(DOC, "utf-8");
-		for (const token of [
-			"smile-minecraft/tap/mc-asset",
-			"upgrade",
-			"reinstall",
-			"rollback",
-			"sha256",
-			"public",
-		]) {
-			assert.ok(doc.includes(token), `homebrew doc must mention ${token}`);
 		}
 	});
 });

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Release staging helper (plain Node, builtins only).
-// Contract (see docs/release-contract.md):
+// Contract (see .project-doc/release-contract.md):
 //   - Reads the version from package.json (single source).
 //   - Stages a deterministic directory: dist/mc-asset.js, dist/index.js,
 //     bin/mc-asset.js, LICENSE, THIRD_PARTY_NOTICES.md, plus manifest.json.

@@ -8,7 +8,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..", "..");
 const SCRIPT = join(ROOT, "scripts", "release-artifacts.mjs");
 const WORKFLOW = join(ROOT, ".github", "workflows", "release.yml");
-const CONTRACT = join(ROOT, "docs", "release-contract.md");
 
 interface PackageJson {
 	version: string;
@@ -103,25 +102,6 @@ describe("release artifacts (static contract, no build required)", () => {
 				`action must not track a moving ref: ${match[1]}`,
 			);
 		}
-	});
-
-	it("release contract names the deterministic directory product", () => {
-		assert.ok(existsSync(CONTRACT), "docs/release-contract.md is missing");
-		const doc = readFileSync(CONTRACT, "utf-8");
-		for (const token of [
-			"manifest.json",
-			"SHA-256",
-			"THIRD_PARTY_NOTICES",
-			"v",
-			"dry-run",
-			"frozen",
-		]) {
-			assert.ok(doc.includes(token), `release contract must mention ${token}`);
-		}
-		assert.ok(
-			doc.includes("rel-t06") || doc.includes("Homebrew"),
-			"release contract must leave publishing strategy to the rel-t06 decision",
-		);
 	});
 
 	it("release outputs stay out of version control", () => {

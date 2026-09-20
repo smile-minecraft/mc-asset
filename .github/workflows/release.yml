@@ -51,7 +51,7 @@ jobs:
       - run: >
           gh release create "${GITHUB_REF_NAME}"
           --title "mc-asset ${GITHUB_REF_NAME}"
-          --notes "See docs/release-contract.md for the deterministic artifact contract."
+          --notes "Deterministic release artifact with a SHA-256 companion file."
           "dist/release/mc-asset-${GITHUB_REF_NAME#v}.tar.gz"
           "dist/release/mc-asset-${GITHUB_REF_NAME#v}.tar.gz.sha256"
         env:

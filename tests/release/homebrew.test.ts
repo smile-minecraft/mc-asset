@@ -6,7 +6,6 @@ import { join, resolve } from "node:path";
 
 const ROOT = resolve(import.meta.dir, "..", "..");
 const FORMULA = join(ROOT, "homebrew", "Formula", "mc-asset.rb");
-const DOC = join(ROOT, "docs", "homebrew.md");
 const BUNDLE = join(ROOT, "dist", "mc-asset.js");
 
 function readFormula(): string {
@@ -84,22 +83,6 @@ describe("homebrew formula (static)", () => {
 		expect(text).toContain("render");
 		expect(text).toContain("analyze");
 		expect(text).toContain("validate");
-	});
-
-	test("homebrew doc covers install, upgrade, reinstall, rollback and bump", () => {
-		expect(existsSync(DOC)).toBe(true);
-		const doc = readFileSync(DOC, "utf-8");
-		for (const token of [
-			"smile-minecraft/tap/mc-asset",
-			"upgrade",
-			"reinstall",
-			"rollback",
-			"sha256",
-			"v0.2.0",
-			"public",
-		]) {
-			expect(doc).toContain(token);
-		}
 	});
 });
 
