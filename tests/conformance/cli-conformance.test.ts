@@ -1222,3 +1222,466 @@ describe("conformance: V0.2 rerun determinism", () => {
 		}
 	}, 60_000);
 });
+
+describe("conformance: V0.3 §98 output guards", () => {
+	const PX_PNG = join(FIXTURES, "px-8x8.png");
+	const GEN_BASE = [
+		"generate",
+		"noise",
+		"--size",
+		"8",
+		"--palette",
+		"stone",
+		"--seed",
+		"7",
+	];
+
+	test("tile report-only needs no output; --preview without output is OUTPUT_REQUIRED", async () => {
+		// Plain tile is analysis-only (exit 0, zero files); only the
+		// --preview form writes a PNG, so only it carries the guard.
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const report = await runCli(["tile", PX_PNG]);
+			expect(report.code).toBe(0);
+			expect(stdoutText(report) + report.stderr).toContain("ok tile");
+			expect(await listAllFiles(dir)).toEqual([]);
+			const before = await listAllFiles(dir);
+			const refused = await runCli([
+				"tile",
+				PX_PNG,
+				"--preview",
+				"2x2",
+				"--json",
+			]);
+			expect(refused.code).toBe(2);
+			expect(stdoutText(refused) + refused.stderr).toContain("OUTPUT_REQUIRED");
+			expect(await listAllFiles(dir)).toEqual(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("generate without any output channel is OUTPUT_REQUIRED with zero files", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const before = await listAllFiles(dir);
+			const result = await runCli([...GEN_BASE, "--json"]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("OUTPUT_REQUIRED");
+			expect(await listAllFiles(dir)).toEqual(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("preview --scale without output is OUTPUT_REQUIRED with zero files", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const before = await listAllFiles(dir);
+			const result = await runCli([
+				"preview",
+				PX_PNG,
+				"--scale",
+				"2",
+				"--json",
+			]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("OUTPUT_REQUIRED");
+			expect(await listAllFiles(dir)).toEqual(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("tile: existing output needs --force; forced rerun matches", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const out = join(dir, "tile.png");
+			expect((await runCli(["tile", PX_PNG, "--output", out])).code).toBe(0);
+			const original = await readFile(out);
+			const before = await listAllFiles(dir);
+			const refused = await runCli(["tile", PX_PNG, "--output", out]);
+			expect(refused.code).toBe(4);
+			expect(stdoutText(refused) + refused.stderr).toContain("OUTPUT_EXISTS");
+			expect(await readFile(out)).toEqual(original);
+			expect(await listAllFiles(dir)).toEqual(before);
+			expect(
+				(await runCli(["tile", PX_PNG, "--output", out, "--force"])).code,
+			).toBe(0);
+			expect(await readFile(out)).toEqual(original);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("generate: existing output needs --force; forced rerun matches", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const out = join(dir, "gen.png");
+			expect((await runCli([...GEN_BASE, "--output", out])).code).toBe(0);
+			const original = await readFile(out);
+			const before = await listAllFiles(dir);
+			const refused = await runCli([...GEN_BASE, "--output", out, "--json"]);
+			expect(refused.code).toBe(4);
+			expect(stdoutText(refused) + refused.stderr).toContain("OUTPUT_EXISTS");
+			expect(await readFile(out)).toEqual(original);
+			expect(await listAllFiles(dir)).toEqual(before);
+			expect(
+				(await runCli([...GEN_BASE, "--output", out, "--force"])).code,
+			).toBe(0);
+			expect(await readFile(out)).toEqual(original);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("preview --scale: existing output needs --force; forced rerun matches", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const out = join(dir, "scaled.png");
+			expect(
+				(await runCli(["preview", PX_PNG, "--scale", "2", "--output", out]))
+					.code,
+			).toBe(0);
+			const original = await readFile(out);
+			const before = await listAllFiles(dir);
+			const refused = await runCli([
+				"preview",
+				PX_PNG,
+				"--scale",
+				"2",
+				"--output",
+				out,
+			]);
+			expect(refused.code).toBe(4);
+			expect(stdoutText(refused) + refused.stderr).toContain("OUTPUT_EXISTS");
+			expect(await readFile(out)).toEqual(original);
+			expect(await listAllFiles(dir)).toEqual(before);
+			expect(
+				(
+					await runCli([
+						"preview",
+						PX_PNG,
+						"--scale",
+						"2",
+						"--output",
+						out,
+						"--force",
+					])
+				).code,
+			).toBe(0);
+			expect(await readFile(out)).toEqual(original);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("tile: missing parents need --mkdir", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const nested = join(dir, "nope", "nested", "tile.png");
+			const refused = await runCli([
+				"tile",
+				PX_PNG,
+				"--output",
+				nested,
+				"--json",
+			]);
+			expect(refused.code).toBe(4);
+			expect(stdoutText(refused) + refused.stderr).toContain(
+				"FILESYSTEM_ERROR",
+			);
+			expect(await fileExists(join(dir, "nope"))).toBe(false);
+			const made = join(dir, "fresh", "nested", "tile.png");
+			expect(
+				(await runCli(["tile", PX_PNG, "--output", made, "--mkdir"])).code,
+			).toBe(0);
+			expect(await fileExists(made)).toBe(true);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("generate: missing parents need --mkdir", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const nested = join(dir, "nope", "nested", "gen.png");
+			const refused = await runCli([...GEN_BASE, "--output", nested, "--json"]);
+			expect(refused.code).toBe(4);
+			expect(stdoutText(refused) + refused.stderr).toContain(
+				"FILESYSTEM_ERROR",
+			);
+			expect(await fileExists(join(dir, "nope"))).toBe(false);
+			const made = join(dir, "fresh", "nested", "gen.png");
+			expect(
+				(await runCli([...GEN_BASE, "--output", made, "--mkdir"])).code,
+			).toBe(0);
+			expect(await fileExists(made)).toBe(true);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("preview --scale: missing parents need --mkdir", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const nested = join(dir, "nope", "nested", "scaled.png");
+			const refused = await runCli([
+				"preview",
+				PX_PNG,
+				"--scale",
+				"2",
+				"--output",
+				nested,
+				"--json",
+			]);
+			expect(refused.code).toBe(4);
+			expect(stdoutText(refused) + refused.stderr).toContain(
+				"FILESYSTEM_ERROR",
+			);
+			expect(await fileExists(join(dir, "nope"))).toBe(false);
+			const made = join(dir, "fresh", "nested", "scaled.png");
+			expect(
+				(
+					await runCli([
+						"preview",
+						PX_PNG,
+						"--scale",
+						"2",
+						"--output",
+						made,
+						"--mkdir",
+					])
+				).code,
+			).toBe(0);
+			expect(await fileExists(made)).toBe(true);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("tile: output aliasing the input is refused without touching it", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const work = join(dir, "work.png");
+			await writeFile(work, await readFile(PX_PNG));
+			const original = await readFile(work);
+			const literal = await runCli(["tile", work, "--output", work]);
+			expect(literal.code).toBe(2);
+			expect(stdoutText(literal) + literal.stderr).toContain(
+				"ARGUMENT_CONFLICT",
+			);
+			expect(await readFile(work)).toEqual(original);
+			// Dot-segment spellings of the same path fold to the same
+			// identity, so they are refused the same way.
+			const dotted = await runCli([
+				"tile",
+				work,
+				"--output",
+				`${dir}/./work.png`,
+			]);
+			expect(dotted.code).toBe(2);
+			expect(stdoutText(dotted) + dotted.stderr).toContain("ARGUMENT_CONFLICT");
+			expect(await readFile(work)).toEqual(original);
+			expect(await listAllFiles(dir)).toEqual(["work.png"]);
+			// Tile has no editable output: --source and --in-place stay
+			// undeclared options.
+			expect(
+				(await runCli(["tile", work, "--source", join(dir, "x.mcpx")])).code,
+			).toBe(2);
+			expect((await runCli(["tile", work, "--in-place"])).code).toBe(2);
+			expect(await readFile(work)).toEqual(original);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("generate declares no input file: --input and --in-place stay undeclared", async () => {
+		// Generate synthesizes from pattern/size/palette/seed, so an
+		// input/output identity can never arise; the adjacent surface is
+		// the undeclared pair, rejected before any file is touched.
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const before = await listAllFiles(dir);
+			const viaInput = await runCli([
+				...GEN_BASE,
+				"--output",
+				join(dir, "out.png"),
+				"--input",
+				"x",
+			]);
+			expect(viaInput.code).toBe(2);
+			const inPlace = await runCli([
+				...GEN_BASE,
+				"--output",
+				join(dir, "out.png"),
+				"--in-place",
+			]);
+			expect(inPlace.code).toBe(2);
+			expect(await listAllFiles(dir)).toEqual(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("preview --scale aliasing the input is refused without touching it", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const work = join(dir, "work.png");
+			await writeFile(work, await readFile(PX_PNG));
+			const original = await readFile(work);
+			const literal = await runCli([
+				"preview",
+				work,
+				"--scale",
+				"2",
+				"--output",
+				work,
+			]);
+			expect(literal.code).toBe(2);
+			expect(stdoutText(literal) + literal.stderr).toContain(
+				"ARGUMENT_CONFLICT",
+			);
+			expect(await readFile(work)).toEqual(original);
+			const dotted = await runCli([
+				"preview",
+				work,
+				"--scale",
+				"2",
+				"--output",
+				`${dir}/./work.png`,
+			]);
+			expect(dotted.code).toBe(2);
+			expect(stdoutText(dotted) + dotted.stderr).toContain("ARGUMENT_CONFLICT");
+			expect(await readFile(work)).toEqual(original);
+			expect(await listAllFiles(dir)).toEqual(["work.png"]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("preview report modes reject every file flag", async () => {
+		// --ascii and --palette-map are read-only reports: none of the
+		// file-targeting flags may appear alongside them.
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			for (const mode of ["--ascii", "--palette-map"]) {
+				for (const extra of [
+					["--output", join(dir, "report.bin")],
+					["--stdout"],
+					["--force"],
+					["--mkdir"],
+					["--in-place"],
+					["--input", PX_PNG],
+				]) {
+					const before = await listAllFiles(dir);
+					const result = await runCli([
+						"preview",
+						PX_PNG,
+						mode,
+						...extra,
+						"--json",
+					]);
+					expect(result.code).toBe(2);
+					expect(stdoutText(result) + result.stderr).toContain(
+						"INVALID_ARGUMENT",
+					);
+					expect(await listAllFiles(dir)).toEqual(before);
+				}
+			}
+			// --scale mode takes no --source, and preview owns no tile flag.
+			const viaSource = await runCli([
+				"preview",
+				PX_PNG,
+				"--scale",
+				"2",
+				"--source",
+				join(dir, "x.mcpx"),
+				"--json",
+			]);
+			expect(viaSource.code).toBe(2);
+			const viaPreview = await runCli([
+				"preview",
+				PX_PNG,
+				"--preview",
+				"4x4",
+				"--json",
+			]);
+			expect(viaPreview.code).toBe(2);
+			expect(await listAllFiles(dir)).toEqual([]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+});
+
+describe("conformance: V0.3 tile and preview report determinism", () => {
+	const PX_PNG = join(FIXTURES, "px-8x8.png");
+
+	test("tile report and tile PNG rerun identical, input untouched", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const work = join(dir, "work.png");
+			await writeFile(work, await readFile(PX_PNG));
+			const inputBefore = await readFile(work);
+			const firstReport = await runCli(["tile", work, "--json"]);
+			const secondReport = await runCli(["tile", work, "--json"]);
+			expect(firstReport.code).toBe(0);
+			expect(secondReport.code).toBe(0);
+			expect(stdoutText(secondReport)).toBe(stdoutText(firstReport));
+			const firstPng = join(dir, "tile-a.png");
+			const secondPng = join(dir, "tile-b.png");
+			expect((await runCli(["tile", work, "--output", firstPng])).code).toBe(0);
+			expect((await runCli(["tile", work, "--output", secondPng])).code).toBe(
+				0,
+			);
+			expect(await readFile(firstPng)).toEqual(await readFile(secondPng));
+			expect(await readFile(work)).toEqual(inputBefore);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("preview ascii, palette-map, and scale rerun identical", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const work = join(dir, "work.png");
+			await writeFile(work, await readFile(PX_PNG));
+			const inputBefore = await readFile(work);
+			const firstAscii = await runCli(["preview", work, "--ascii"]);
+			const secondAscii = await runCli(["preview", work, "--ascii"]);
+			expect(firstAscii.code).toBe(0);
+			expect(Buffer.from(secondAscii.stdout)).toEqual(
+				Buffer.from(firstAscii.stdout),
+			);
+			const firstMap = await runCli([
+				"preview",
+				work,
+				"--palette-map",
+				"--json",
+			]);
+			const secondMap = await runCli([
+				"preview",
+				work,
+				"--palette-map",
+				"--json",
+			]);
+			expect(firstMap.code).toBe(0);
+			expect(stdoutText(secondMap)).toBe(stdoutText(firstMap));
+			const firstPng = join(dir, "scale-a.png");
+			const secondPng = join(dir, "scale-b.png");
+			expect(
+				(await runCli(["preview", work, "--scale", "2", "--output", firstPng]))
+					.code,
+			).toBe(0);
+			expect(
+				(await runCli(["preview", work, "--scale", "2", "--output", secondPng]))
+					.code,
+			).toBe(0);
+			expect(await readFile(firstPng)).toEqual(await readFile(secondPng));
+			expect(await readFile(work)).toEqual(inputBefore);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+});

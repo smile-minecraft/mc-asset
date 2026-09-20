@@ -9,6 +9,10 @@
 //   - V0.2: pixelize PNG bytes (px-8x8.jpg and px-lossless.webp --size 16)
 //   - V0.2: variant fan-out (sword.mcpx iron,copper: 2 PNG + 2 mcpx)
 //   - V0.2: analyze JSON canonical bytes (px-8x8.png --json)
+//   - V0.3: generate PNG bytes + generate .mcpx text bytes
+//   - V0.3: tile JSON canonical bytes (px-8x8.png report mode)
+//   - V0.3: preview ascii JSON + palette-map JSON canonical bytes,
+//   - V0.3: preview --scale PNG bytes (px-8x8.png --scale 2)
 // Any difference exits non-zero so CI fails. stderr, timing, and absolute
 // paths never enter the comparison. Temp dirs are always cleaned up.
 import { spawnSync } from "node:child_process";
@@ -315,6 +319,86 @@ function main() {
 			"analyze-px8x8.json",
 			bunPxAnalyze.stdout,
 			nodePxAnalyze.stdout,
+		);
+
+		// V0.3 generate determinism: one fixed pattern/size/palette/seed
+		// gives byte-identical PNG plus re-serialized .mcpx text bytes on
+		// both runtimes (integer-only engine, seed-derived sampling).
+		const generateArgs = (dir) => [
+			"generate",
+			"noise",
+			"--size",
+			"8",
+			"--palette",
+			"stone",
+			"--seed",
+			"7",
+			"--output",
+			join(dir, "generate.png"),
+			"--source",
+			join(dir, "generate.mcpx"),
+		];
+		runBun(generateArgs(bunDir), "generate");
+		runNode(generateArgs(nodeDir), "generate");
+		compareFile(
+			"generate.png",
+			join(bunDir, "generate.png"),
+			join(nodeDir, "generate.png"),
+		);
+		compareFile(
+			"generate.mcpx",
+			join(bunDir, "generate.mcpx"),
+			join(nodeDir, "generate.mcpx"),
+		);
+
+		// V0.3 tile report mode writes no files; only the stdout JSON
+		// envelope enters the comparison, in canonical form.
+		const bunTile = runBun(["tile", PX_PNG_FIXTURE, "--json"], "tile");
+		const nodeTile = runNode(["tile", PX_PNG_FIXTURE, "--json"], "tile");
+		compareCanonicalJson("tile.json", bunTile.stdout, nodeTile.stdout);
+
+		// V0.3 preview read-only reports: ascii and palette-map envelopes
+		// in canonical form; the --scale PNG by bytes.
+		const bunAscii = runBun(
+			["preview", PX_PNG_FIXTURE, "--ascii", "--json"],
+			"preview-ascii",
+		);
+		const nodeAscii = runNode(
+			["preview", PX_PNG_FIXTURE, "--ascii", "--json"],
+			"preview-ascii",
+		);
+		compareCanonicalJson(
+			"preview-ascii.json",
+			bunAscii.stdout,
+			nodeAscii.stdout,
+		);
+		const bunMap = runBun(
+			["preview", PX_PNG_FIXTURE, "--palette-map", "--json"],
+			"preview-palette-map",
+		);
+		const nodeMap = runNode(
+			["preview", PX_PNG_FIXTURE, "--palette-map", "--json"],
+			"preview-palette-map",
+		);
+		compareCanonicalJson(
+			"preview-palette-map.json",
+			bunMap.stdout,
+			nodeMap.stdout,
+		);
+		const previewScaleArgs = (dir) => [
+			"preview",
+			PX_PNG_FIXTURE,
+			"--scale",
+			"2",
+			"--output",
+			join(dir, "preview-scale.png"),
+		];
+		runBun(previewScaleArgs(bunDir), "preview-scale");
+		runNode(previewScaleArgs(nodeDir), "preview-scale");
+		compareFile(
+			"preview-scale.png",
+			join(bunDir, "preview-scale.png"),
+			join(nodeDir, "preview-scale.png"),
 		);
 		process.stdout.write("compare-runtime: all outputs identical\n");
 	} finally {
