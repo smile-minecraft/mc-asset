@@ -28,7 +28,7 @@
 brew tap smile-minecraft/tap
 brew install smile-minecraft/tap/mc-asset
 mc-asset --version
-# 0.2.0
+# 0.3.0
 ```
 
 ### 透過原始碼安裝（Bun 或 Node.js）
@@ -39,7 +39,7 @@ cd mc-asset
 bun install --frozen-lockfile
 bun run build
 ./bin/mc-asset.js --version
-# 0.2.0
+# 0.3.0
 ```
 
 *系統需求*：已用 [Node.js](https://nodejs.org) 22 與 [Bun](https://bun.sh) 1.3 測試。`bun run build` 需要 Bun，`./bin/mc-asset.js` 需要 Node.js；只有 Bun 時，改執行 `bun ./bin/mc-asset.js`。
