@@ -11,8 +11,8 @@ import { validateDimension } from "./validate.ts";
  * ever invented. All arithmetic is integer, the only randomness is the
  * frozen xorshift32 stream derived from --seed, and output carries no
  * timestamps, so the same pattern/size/palette/seed/version is
- * byte-identical on every runtime. This module uses no Math.random and no
- * transcendental functions.
+ * byte-identical on every runtime. This module draws no ambient randomness
+ * and calls no transcendental functions.
  */
 
 /** Frozen CLI pattern names (docs §37 names map 1:1; blank becomes hyphen). */
