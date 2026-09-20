@@ -371,7 +371,8 @@ intake is PNG/JPEG/WebP/`.mcpx`, the same shared loader as `transform`.
 ### Flags added in V0.3
 
 ```text
---preview <2x2|4x4|8x8>   tile only; NxN repeat preview PNG; needs --output.
+--preview <2x2|4x4|8x8>   tile only; NxN repeat preview PNG; needs `--output`
+                          or `--stdout`.
 --edge-match <axis>       tile only; horizontal|vertical|both.
 --brightness-match <axis> tile only; horizontal|vertical|both.
 --size <N|WxH>            generate only; required; same rule as pixelize.
@@ -400,7 +401,7 @@ preview   <input> --ascii | --palette-map | --scale N
 
 - `tile` writes PNG only: it does not declare `--source` or `--in-place`.
   Omitting both `--output` and `--stdout` is a report-only run and creates
-  zero files. `--preview` without `--output` is OUTPUT_REQUIRED. Only
+  zero files. `--preview` without `--output` or `--stdout` is OUTPUT_REQUIRED. Only
   `--edge-match`/`--brightness-match` modify pixels, and only the written
   artifact.
 - `generate` has no input file: it does not declare `--input` or

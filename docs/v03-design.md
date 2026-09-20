@@ -69,7 +69,7 @@ V0.3 新增三個命令，名稱在 `docs/cli-surface.md` 的 V0.1 保留清單�
 ```text
 無 --output／--stdout        只做分析，輸出接縫與重複報告（人類或 --json），零檔案
 --output <png>               寫出單格 tile PNG（可選修正後）
---preview <NxN> --output     寫出 NxN 重複預覽 PNG（N ∈ {2,4,8}）；缺 --output 為 OUTPUT_REQUIRED
+--preview <NxN> --output     寫出 NxN 重複預覽 PNG（N ∈ {2,4,8}）；缺 --output／--stdout 為 OUTPUT_REQUIRED
 ```
 
 旗標：
@@ -84,7 +84,7 @@ V0.3 新增三個命令，名稱在 `docs/cli-surface.md` 的 V0.1 保留清單�
 ```
 
 - 未帶任何修正旗標時，`--output` 寫出的單格 tile 就是輸入像素的重新編碼，像素 byte 不變（本凍結；對應 docs §36 的 `tile stone.png --output ./stone_tile.png`）。tile 的產物固定是 PNG。
-- `--preview` 給定時，`--output` 的目標改成 NxN 重複預覽：把（修正後的）單格以 1:1 方式在 x、y 各貼 N 次，尺寸為 `W·N` × `H·N`，不做縮放。超過 §102 的 4096 上限是 `INVALID_DIMENSION`。
+- `--preview` 給定時，`--output`（或 `--stdout`）的目標改成 NxN 重複預覽：把（修正後的）單格以 1:1 方式在 x、y 各貼 N 次，尺寸為 `W·N` × `H·N`，不做縮放。超過 §102 的 4096 上限是 `INVALID_DIMENSION`。
 - `tile` 不宣告 `--source` 與 `--in-place`：沒有可編輯輸出，也不提供原地改寫。用到這兩個旗標是未知選項（exit 2）。
 - `--profile minecraft:block` 可用；`--output` 非 `.png` 時依 §34 是 `UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT`。
 
@@ -103,7 +103,7 @@ V0.3 新增三個命令，名稱在 `docs/cli-surface.md` 的 V0.1 保留清單�
       "vertical": { "raw": 390150, "pairs": 2, "score": "0.750000" },
       "corner": { "raw": 390150, "pairs": 2, "score": "0.750000" }
     },
-    "repeat": { "score": "0.250000", "periodX": 1, "periodY": 1 },
+    "repeat": { "score": "1.000000", "periodX": 1, "periodY": 1 },
     "corrections": [],
     "output": "stone_tile.png"
   }
@@ -115,7 +115,7 @@ V0.3 新增三個命令，名稱在 `docs/cli-surface.md` 的 V0.1 保留清單�
 - `output` 只在有寫檔時出現；`--stdout` 時帶 `stdout: true`；`repeat.periodX`／`periodY` 在該軸長度 ≤ 1 時是 `null`。
 - `profile` 固定回報；`--json` 未使用時，人類輸出是一行 `ok tile profile=… seam=… repeat=…` 加 warning 行。
 
-應測點：`tile fixture.png --output out.png` 在無修正旗標時輸出的像素等於輸入；`--preview 4x4 --output` 產生 `4W` × `4H`；`--preview 3x3`、`--preview` 缺 `--output`、`--source`、`--in-place` 各自被拒；`--json` 形狀凍結且重跑 byte-identical；修正旗標存在時 `corrected` 才出現。
+應測點：`tile fixture.png --output out.png` 在無修正旗標時輸出的像素等於輸入；`--preview 4x4 --output` 產生 `4W` × `4H`；`--preview 3x3`、`--preview` 缺 `--output`／`--stdout`、`--source`、`--in-place` 各自被拒；`--json` 形狀凍結且重跑 byte-identical；修正旗標存在時 `corrected` 才出現。
 
 ### `generate <pattern>`
 
@@ -275,10 +275,10 @@ repetition_score = max(軸相似度_x, 軸相似度_y)        ；皆無候選時
 
 ### Worked example
 
-同一個 2×2 棋盤：x 軸只有 s=1，全圖四對都是 `d(B,W)=195075`，`totalDist=780300`，`W×H×260100 = 1040400`，相似度 `1 - 0.75 = 0.25`；y 軸相同。因此：
+同一個 2×2 棋盤：x 軸只有 s=1，全圖四對都是 `d(B,W)=195075`，`totalDist=780300`，`W×H×260100 = 1040400`，相似度 `1 - 0.75 = 0.25`。y 軸在 s=1 時，每一列都與它環繞位移 1 對應的列相同，所有像素對的 d=0，`totalDist=0`，相似度 `1.0`。取兩軸相似度的最大值，分數為 `1.000000`：
 
 ```text
-repeat = { "score": "0.250000", "periodX": 1, "periodY": 1 }
+repeat = { "score": "1.000000", "periodX": 1, "periodY": 1 }
 ```
 
 應測點：上例的 score／period 逐值鎖定；單色圖在 s=1 的相似度為 1（分數 1.0）；1×1 canvas 的 periodX／periodY 為 `null` 且分數 0；平手時取最小 s；同輸入同分數。
@@ -412,7 +412,7 @@ JSON 形狀（本凍結）：
 
 ### tile preview 與 `tile --preview` 的關係
 
-docs §46 把「tile preview」列在 Preview 能力下，docs §36 則把 `--preview NxN` 放在 `tile`。兩者**是同一個功能**，只保留一個入口（§104.1 不保留同義詞）：重複預覽的權威入口是 `tile <input> --preview <NxN> --output <png>`（本凍結）。`preview` 不新增 tile 旗標，`preview` 的模式固定是 ASCII／palette map／scale。
+docs §46 把「tile preview」列在 Preview 能力下，docs §36 則把 `--preview NxN` 放在 `tile`。兩者**是同一個功能**，只保留一個入口（§104.1 不保留同義詞）：重複預覽的權威入口是 `tile <input> --preview <NxN>`（輸出至 `--output` 或 `--stdout`）（本凍結）。`preview` 不新增 tile 旗標，`preview` 的模式固定是 ASCII／palette map／scale。
 
 應測點：`preview --ascii` 的輸出能被 `render` 讀回且像素一致；`--palette-map` 形狀凍結；`--scale 2` 的尺寸與像素正確；`tile --preview` 與 `preview` 沒有重複的 tile 旗標。
 

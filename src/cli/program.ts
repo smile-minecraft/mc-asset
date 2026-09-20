@@ -22,6 +22,7 @@ import {
 import { type QuantizeOptions, runQuantize } from "./cmd-quantize.ts";
 import { type RecolorOptions, runRecolor } from "./cmd-recolor.ts";
 import { type RenderOptions, runRender } from "./cmd-render.ts";
+import { runTile, type TileOptions } from "./cmd-tile.ts";
 import { runTransform, type TransformOptions } from "./cmd-transform.ts";
 import { runVariant, type VariantOptions } from "./cmd-variant.ts";
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
@@ -708,6 +709,40 @@ export function buildProgram(): Command {
 				process.exitCode = code;
 			},
 		);
+
+	program
+		.command("tile <input>")
+		.description(
+			"Analyze block-texture seams and repetition; optionally write a corrected tile or an NxN preview PNG.",
+		)
+		.option("--preview <size>", "Repeat preview size: 2x2, 4x4, or 8x8.")
+		.option(
+			"--edge-match <axis>",
+			"Align seam edge pixels: horizontal, vertical, or both.",
+		)
+		.option(
+			"--brightness-match <axis>",
+			"Align seam edge brightness: horizontal, vertical, or both.",
+		)
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option("--input <path>", "Input path aliasing the positional input.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(async (input: string, options: TileOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runTile(
+				input,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
 
 	return program;
 }

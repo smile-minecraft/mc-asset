@@ -126,6 +126,25 @@ export {
 	listSelectedPixels,
 	resolveSelection,
 } from "./selection.ts";
+export type {
+	TileAxis,
+	TilePreview,
+	TileRepetitionReport,
+	TileSeamReport,
+	TileSeamScore,
+} from "./tile.ts";
+export {
+	applyBrightnessMatch,
+	applyEdgeMatch,
+	applyTileCorrections,
+	buildTilePreview,
+	formatTileScore,
+	parsePreviewSize,
+	parseTileAxis,
+	repetitionScore,
+	seamMetrics,
+	TILE_PAIR_MAX_DISTANCE,
+} from "./tile.ts";
 export type { PadOptions, ResizeMode } from "./transform.ts";
 export {
 	crop,
