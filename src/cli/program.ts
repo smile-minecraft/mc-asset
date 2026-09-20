@@ -10,6 +10,7 @@ import {
 	type OutputStreams,
 	routeStreams,
 } from "./channels.ts";
+import { type AnimateOptions, runAnimate } from "./cmd-animate.ts";
 import { type BuildOptions, runBuild } from "./cmd-build.ts";
 import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
 import { type GenerateOptions, runGenerate } from "./cmd-generate.ts";
@@ -814,6 +815,167 @@ export function buildProgram(): Command {
 				process.exitCode = code;
 			},
 		);
+
+	const animate = program
+		.command("animate")
+		.description(
+			"FrameSet animation: pack / unpack / reorder / resize / validate / preview.",
+		);
+	animate
+		.command("pack")
+		.description("Pack a frames directory into a sprite sheet PNG.")
+		.option("--frames-dir <dir>", "Frames directory (one .mcpx per frame).")
+		.option("--layout <layout>", "Sheet layout: vertical, horizontal, grid.")
+		.option("--columns <N>", "Grid column count (required with grid).")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(async (options: AnimateOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runAnimate(
+				"pack",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	animate
+		.command("unpack <sheet>")
+		.description("Unpack a sprite sheet PNG into a frames directory.")
+		.option("--layout <layout>", "Sheet layout: vertical, horizontal, grid.")
+		.option("--frame-size <size>", "Frame size: N or WxH.")
+		.option("--columns <N>", "Grid column count (required with grid).")
+		.option("--output-dir <path>", "Required explicit output directory.")
+		.option("--output <path>", "Rejected on unpack (ARGUMENT_CONFLICT).")
+		.option("--force", "Allow overwriting existing frame files.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(
+			async (sheet: string, options: AnimateOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runAnimate(
+					"unpack",
+					sheet,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+	animate
+		.command("reorder")
+		.description("Reorder a frames directory with an explicit permutation.")
+		.option("--frames-dir <dir>", "Frames directory (one .mcpx per frame).")
+		.option("--order <list>", "Permutation of [0, count), e.g. 2,0,1.")
+		.option("--output-dir <path>", "Required explicit output directory.")
+		.option("--output <path>", "Rejected on reorder (ARGUMENT_CONFLICT).")
+		.option("--force", "Allow overwriting existing frame files.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(async (options: AnimateOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runAnimate(
+				"reorder",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	animate
+		.command("resize")
+		.description("Resize every frame in a frames directory.")
+		.option("--frames-dir <dir>", "Frames directory (one .mcpx per frame).")
+		.option("--frame-size <size>", "Target frame size: N or WxH.")
+		.option(
+			"--resize-mode <mode>",
+			"Resize sampling (nearest, box). Default nearest.",
+		)
+		.option("--output-dir <path>", "Required explicit output directory.")
+		.option("--output <path>", "Rejected on resize (ARGUMENT_CONFLICT).")
+		.option("--force", "Allow overwriting existing frame files.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(async (options: AnimateOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runAnimate(
+				"resize",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	animate
+		.command("validate")
+		.description("Read-only geometry check of a frames directory.")
+		.option("--frames-dir <dir>", "Frames directory (one .mcpx per frame).")
+		.option("--output <path>", "Rejected: reports take no file flags.")
+		.option("--stdout", "Rejected: reports take no file flags.")
+		.option("--output-dir <path>", "Rejected: reports take no file flags.")
+		.option("--force", "Rejected: reports take no file flags.")
+		.option("--mkdir", "Rejected: reports take no file flags.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(async (options: AnimateOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runAnimate(
+				"validate",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	animate
+		.command("preview")
+		.description("Read-only animation structure report, or sheet ASCII.")
+		.option("--frames-dir <dir>", "Frames directory (one .mcpx per frame).")
+		.option("--layout <layout>", "Sheet layout: vertical, horizontal, grid.")
+		.option("--columns <N>", "Grid column count (required with grid).")
+		.option("--ascii", "Sheet pixels as a .grid-compatible ASCII document.")
+		.option("--output <path>", "Rejected: reports take no file flags.")
+		.option("--stdout", "Rejected: reports take no file flags.")
+		.option("--output-dir <path>", "Rejected: reports take no file flags.")
+		.option("--force", "Rejected: reports take no file flags.")
+		.option("--mkdir", "Rejected: reports take no file flags.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(async (options: AnimateOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runAnimate(
+				"preview",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
 
 	return program;
 }

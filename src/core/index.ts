@@ -41,6 +41,27 @@ export {
 	McAssetError,
 	resolveExitCode,
 } from "./errors.ts";
+export type {
+	AnimationLayout,
+	FrameSet,
+	FrameSetMetadata,
+	GeometryReport,
+	PackedSheet,
+} from "./frameset.ts";
+export {
+	createFrameSet,
+	describeFrameSet,
+	frameFileName,
+	packFrameSet,
+	parseAnimationLayout,
+	parseFrameOrder,
+	parseFrameSize,
+	parseGridColumns,
+	reorderFrames,
+	resizeFrameSet,
+	sheetDimensions,
+	unpackSheetToFrameSet,
+} from "./frameset.ts";
 export type { DuplicateLayerOptions } from "./layers.ts";
 export {
 	clearLayer,
