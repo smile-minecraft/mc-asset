@@ -276,7 +276,7 @@ describe("validate-pack command via spawn", () => {
 		}
 	}, 30_000);
 
-	test("dotted resource-pack version is exit 2 and never hardcoded", async () => {
+	test("dotted resource-pack version is accepted with a dotted target", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
 		try {
 			await writeCleanBaseline(dir);
@@ -286,8 +286,8 @@ describe("validate-pack command via spawn", () => {
 				"--resource-pack-version",
 				"97.1",
 			]);
-			expect(code).toBe(2);
-			expect(stdout + stderr).toContain("INVALID_ARGUMENT");
+			expect(code).toBe(0);
+			expect(stdout + stderr).toContain("resource-pack 97.1");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

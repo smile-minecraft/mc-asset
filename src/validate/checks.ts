@@ -35,7 +35,7 @@ export interface ValidateReport {
 
 export interface ValidateOptions {
 	profile?: string | undefined;
-	packFormat?: number | undefined;
+	packFormat?: string | undefined;
 	/**
 	 * Normalization notes from decodePng, forwarded to the analyze step so
 	 * the engine stays pure: it never touches the file or the decoder.

@@ -59,7 +59,7 @@ export interface PackReport {
 }
 
 export interface PackScanOptions {
-	packFormat?: number | undefined;
+	packFormat?: string | undefined;
 	target?: string | undefined;
 }
 
@@ -666,10 +666,12 @@ function checkAtlasCoverage(
 	options: PackScanOptions | undefined,
 	mcmetaDoc: unknown,
 ): void {
-	const packFormat = options?.packFormat ?? packFormatFromMcmeta(mcmetaDoc);
-	if (packFormat === undefined) {
+	const rawFormat = options?.packFormat ?? packFormatFromMcmeta(mcmetaDoc);
+	if (rawFormat === undefined) {
 		return;
 	}
+	const packFormat =
+		typeof rawFormat === "number" ? `${rawFormat}.0` : rawFormat;
 	const itemsAtlas = resolveVersionedFact(ITEMS_ATLAS_FACT, packFormat);
 	const placement = resolveVersionedFact(ITEM_ATLAS_PLACEMENT_FACT, packFormat);
 	if (itemsAtlas === undefined || placement === undefined) {

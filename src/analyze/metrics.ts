@@ -24,7 +24,7 @@ export const RATIO_DECIMALS = 4;
 
 export interface AnalyzeOptions {
 	profile?: string | undefined;
-	packFormat?: number | undefined;
+	packFormat?: string | undefined;
 	/**
 	 * Normalization notes from the decoder (gAMA / iCCP on the PNG path).
 	 * Passed in so the engine stays pure: it never touches the file or

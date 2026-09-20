@@ -67,7 +67,6 @@ export interface ValidateResult extends ValidateReport {
 	version: {
 		minecraftVersion?: string | undefined;
 		resourcePackVersion?: string | undefined;
-		packFormat?: number | undefined;
 	};
 	target: string;
 	mcmeta?: ValidateMcmetaSection | undefined;

@@ -26,7 +26,6 @@ export interface AnalyzeResult extends AnalyzeReport {
 	version: {
 		minecraftVersion?: string | undefined;
 		resourcePackVersion?: string | undefined;
-		packFormat?: number | undefined;
 	};
 	target: string;
 }

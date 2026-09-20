@@ -39,11 +39,11 @@ export interface PngOnlyValue {
 
 /**
  * §95 compatibility facts as version-interval data. Facts whose starting
- * packFormat is confirmed carry it in `since`; facts still waiting on a
- * version mapping (§95 table rows 1-2 and 6-8) leave `since` empty and only
- * ever produce warnings. A packFormat of 75 on the 1.21.11 rows repeats
- * the §95 structural example, not a verified version mapping, so later
- * steps must not treat it as a version boundary.
+ * packFormat is confirmed carry it in `since` as a dotted string; facts
+ * still waiting on a version mapping (§95 table rows 1-2 and 6-8) leave
+ * `since` empty and only ever produce warnings. A packFormat of "75.0" on
+ * the 1.21.11 rows repeats the §95 structural example, not a verified
+ * version mapping, so later steps must not treat it as a version boundary.
  */
 export const RESOURCE_PACK_FORMAT_FACT: VersionedFact<ResourcePackFormatValue> =
 	{
@@ -71,7 +71,7 @@ export const TRIM_PALETTE_FACT: VersionedFact<TrimPaletteValue> = {
 
 export const ITEMS_ATLAS_FACT: VersionedFact<ItemsAtlasValue> = {
 	fact: "items-atlas-separated",
-	since: { packFormat: 75 },
+	since: { packFormat: "75.0" },
 	value: { atlas: "items", mipmapped: false },
 	status: "verified",
 	source: "§95; Minecraft Java Edition 1.21.11 release notes",
@@ -80,7 +80,7 @@ export const ITEMS_ATLAS_FACT: VersionedFact<ItemsAtlasValue> = {
 
 export const ITEM_ATLAS_PLACEMENT_FACT: VersionedFact<AtlasPlacementValue> = {
 	fact: "item-same-atlas-block-blocks-atlas",
-	since: { packFormat: 75 },
+	since: { packFormat: "75.0" },
 	value: { itemSameAtlas: true, blockAtlas: "blocks" },
 	status: "verified",
 	source: "§95; Minecraft Java Edition 1.21.11 release notes",
@@ -89,7 +89,7 @@ export const ITEM_ATLAS_PLACEMENT_FACT: VersionedFact<AtlasPlacementValue> = {
 
 export const TEXTURE_MIPMAP_FACT: VersionedFact<TextureMipmapValue> = {
 	fact: "texture-mipmap-fields",
-	since: { packFormat: 75 },
+	since: { packFormat: "75.0" },
 	value: { fields: ["mipmap_strategy", "alpha_cutoff_bias"] },
 	status: "verified",
 	source: "§95; Minecraft Java Edition 1.21.11 release notes",
@@ -142,35 +142,74 @@ export const COMPAT_FACTS: VersionedFact<unknown>[] = [
 	PNG_ONLY_FACT,
 ];
 
-export function validatePackFormat(packFormat: number): number {
-	if (
-		typeof packFormat !== "number" ||
-		!Number.isInteger(packFormat) ||
-		packFormat < 1
-	) {
+/**
+ * Validate and normalize a dotted resource-pack format to major.minor
+ * (e.g. "75" becomes "75.0", "97.1" stays "97.1"). Only N or N.M digit
+ * forms with a major of at least 1 count; anything else ("abc", "0",
+ * "1.") is INVALID_ARGUMENT.
+ */
+export function normalizePackFormat(raw: string): string {
+	const trimmed = raw.trim();
+	const dotted = /^(\d+)\.(\d+)$/.exec(trimmed);
+	const whole = /^(\d+)$/.exec(trimmed);
+	if (dotted === null && whole === null) {
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"packFormat must be a positive integer.",
-			{ packFormat },
+			`packFormat must be N or N.M digits (for example "75" or "97.1").`,
+			{ packFormat: raw },
 		);
 	}
-	return packFormat;
+	const major = Number((dotted?.[1] ?? whole?.[1]) as string);
+	const minor = dotted === null ? 0 : Number(dotted[2] as string);
+	if (!Number.isSafeInteger(major) || major < 1) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			`packFormat must be N or N.M digits (for example "75" or "97.1").`,
+			{ packFormat: raw },
+		);
+	}
+	return `${major}.${minor}`;
+}
+
+function parsePackFormatTuple(value: string): [number, number] {
+	const match = /^(\d+)\.(\d+)$/.exec(value.trim());
+	if (match === null) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			`packFormat must be a normalized major.minor string (for example "75.0").`,
+			{ packFormat: value },
+		);
+	}
+	return [Number(match[1]), Number(match[2])];
+}
+
+/**
+ * Tuple-order comparison over (major, minor): numeric, never lexical, so
+ * "9.0" still sorts below "75.0". Shared by the CLI and the engine.
+ */
+export function comparePackFormats(a: string, b: string): number {
+	const [aMajor, aMinor] = parsePackFormatTuple(a);
+	const [bMajor, bMinor] = parsePackFormatTuple(b);
+	if (aMajor !== bMajor) {
+		return aMajor - bMajor;
+	}
+	return aMinor - bMinor;
 }
 
 export function isFactActive<Value>(
 	fact: VersionedFact<Value>,
-	packFormat: number,
+	packFormat: string,
 ): boolean {
-	validatePackFormat(packFormat);
+	normalizePackFormat(packFormat);
 	if (fact.since.packFormat === undefined) {
 		return false;
 	}
-	return packFormat >= fact.since.packFormat;
+	return comparePackFormats(packFormat, fact.since.packFormat) >= 0;
 }
 
 export function resolveVersionedFact<Value>(
 	fact: VersionedFact<Value>,
-	packFormat: number,
+	packFormat: string,
 ): Value | undefined {
 	if (!isFactActive(fact, packFormat)) {
 		return undefined;
@@ -182,7 +221,7 @@ export function resolveVersionedFact<Value>(
 }
 
 export function getItemAtlasPolicy(
-	packFormat: number,
+	packFormat: string,
 ): { preferredAtlas: "items"; mipmapped: false } | undefined {
 	const value = resolveVersionedFact(ITEMS_ATLAS_FACT, packFormat);
 	if (value === undefined) {

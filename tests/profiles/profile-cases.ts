@@ -20,13 +20,18 @@ import {
 	getAssetProfile,
 	listAssetProfileIds,
 } from "../../src/profiles/profiles.ts";
+import type { VersionedFact } from "../../src/profiles/types.ts";
 import {
 	COMPAT_FACTS,
+	comparePackFormats,
 	getItemAtlasPolicy,
+	ITEM_ATLAS_PLACEMENT_FACT,
 	ITEMS_ATLAS_FACT,
 	isFactActive,
+	normalizePackFormat,
 	pendingSourceWarnings,
 	resolveVersionedFact,
+	TEXTURE_MIPMAP_FACT,
 } from "../../src/profiles/versions.ts";
 
 /** Runner-agnostic assertion surface: bun:test and node:test entries adapt to this. */
@@ -250,35 +255,35 @@ export const MODEL_CASES: ModelCase[] = [
 		},
 	},
 	{
-		name: "versioned fact switches behavior across packFormat 75",
+		name: "versioned fact switches behavior across packFormat 75.0",
 		run: (check) => {
 			check.equal(
-				resolveVersionedFact(ITEMS_ATLAS_FACT, 74),
+				resolveVersionedFact(ITEMS_ATLAS_FACT, "74.0"),
 				undefined,
-				"74 predates the separate items atlas",
+				"74.0 predates the separate items atlas",
 			);
 			check.deepEqual(
-				resolveVersionedFact(ITEMS_ATLAS_FACT, 75),
+				resolveVersionedFact(ITEMS_ATLAS_FACT, "75.0"),
 				{ atlas: "items", mipmapped: false },
-				"75 activates the separate items atlas",
+				"75.0 activates the separate items atlas",
 			);
 			check.deepEqual(
-				getItemAtlasPolicy(75),
+				getItemAtlasPolicy("75.0"),
 				{ preferredAtlas: "items", mipmapped: false },
-				"policy at 75",
+				"policy at 75.0",
 			);
 			check.equal(
-				getItemAtlasPolicy(74),
+				getItemAtlasPolicy("74.0"),
 				undefined,
-				"no separate policy at 74",
+				"no separate policy at 74.0",
 			);
 			check.ok(COMPAT_FACTS.length >= 1, "version interval table is populated");
 			for (const fact of COMPAT_FACTS) {
 				check.ok(typeof fact.fact === "string", "fact name");
 				check.ok(
 					fact.since.packFormat === undefined ||
-						typeof fact.since.packFormat === "number",
-					"since.packFormat is a number or undetermined",
+						typeof fact.since.packFormat === "string",
+					"since.packFormat is a dotted string or undetermined",
 				);
 				check.ok(fact.value !== undefined, "value present");
 			}
@@ -304,7 +309,7 @@ export const MODEL_CASES: ModelCase[] = [
 			const expected: Array<{
 				fact: string;
 				status: "verified" | "pending-source";
-				since: number | undefined;
+				since: string | undefined;
 				sourcePart: string;
 			}> = [
 				{
@@ -322,19 +327,19 @@ export const MODEL_CASES: ModelCase[] = [
 				{
 					fact: "items-atlas-separated",
 					status: "verified",
-					since: 75,
+					since: "75.0",
 					sourcePart: "1.21.11 release notes",
 				},
 				{
 					fact: "item-same-atlas-block-blocks-atlas",
 					status: "verified",
-					since: 75,
+					since: "75.0",
 					sourcePart: "1.21.11 release notes",
 				},
 				{
 					fact: "texture-mipmap-fields",
 					status: "verified",
-					since: 75,
+					since: "75.0",
 					sourcePart: "1.21.11 release notes",
 				},
 				{
@@ -376,7 +381,7 @@ export const MODEL_CASES: ModelCase[] = [
 			}
 			for (const fact of COMPAT_FACTS) {
 				check.ok(
-					fact.since.packFormat !== 97.1,
+					fact.since.packFormat !== "97.1",
 					`${fact.fact}: 97.1 never enters since.packFormat`,
 				);
 			}
@@ -392,7 +397,7 @@ export const MODEL_CASES: ModelCase[] = [
 					continue;
 				}
 				if (undetermined) {
-					for (const target of [1, 75, 999]) {
+					for (const target of ["1.0", "75.0", "999.0"]) {
 						check.equal(
 							isFactActive(fact, target),
 							false,
@@ -400,7 +405,7 @@ export const MODEL_CASES: ModelCase[] = [
 						);
 					}
 				}
-				for (const target of [1, 75, 999]) {
+				for (const target of ["1.0", "75.0", "999.0"]) {
 					check.equal(
 						resolveVersionedFact(fact, target),
 						undefined,
@@ -438,23 +443,55 @@ export const MODEL_CASES: ModelCase[] = [
 		name: "fact activation boundary follows since.packFormat",
 		run: (check) => {
 			check.equal(
-				resolveVersionedFact(ITEMS_ATLAS_FACT, 1),
+				resolveVersionedFact(ITEMS_ATLAS_FACT, "1.0"),
 				undefined,
-				"packFormat 1 predates the fact",
+				"packFormat 1.0 predates the fact",
 			);
 			check.equal(
-				resolveVersionedFact(ITEMS_ATLAS_FACT, 74),
+				resolveVersionedFact(ITEMS_ATLAS_FACT, "74.0"),
 				undefined,
-				"74 stays below since 75",
+				"74.0 stays below since 75.0",
 			);
 			check.ok(
-				resolveVersionedFact(ITEMS_ATLAS_FACT, 75) !== undefined,
-				"75 activates the fact",
+				resolveVersionedFact(ITEMS_ATLAS_FACT, "75.0") !== undefined,
+				"75.0 activates the fact",
 			);
 			check.ok(
-				resolveVersionedFact(ITEMS_ATLAS_FACT, 999) !== undefined,
+				resolveVersionedFact(ITEMS_ATLAS_FACT, "999.0") !== undefined,
 				"later formats keep the fact",
 			);
+		},
+	},
+	{
+		name: "dotted pack formats compare by (major, minor) tuples",
+		run: (check) => {
+			check.equal(normalizePackFormat("75"), "75.0", "N normalizes to N.0");
+			check.equal(normalizePackFormat("97.1"), "97.1", "N.M stays as-is");
+			check.ok(comparePackFormats("75.0", "75.0") === 0, "equal formats");
+			check.ok(comparePackFormats("74.0", "75.0") < 0, "minor below");
+			check.ok(comparePackFormats("84.0", "75.0") > 0, "major above");
+			check.ok(comparePackFormats("97.1", "97.0") > 0, "minor above");
+			check.ok(comparePackFormats("9.0", "75.0") < 0, "numeric, not lexical");
+			check.ok(comparePackFormats("75.0", "999.0") < 0, "later stays above");
+		},
+	},
+	{
+		name: "1.21.11 facts stay active for all six supported versions",
+		run: (check) => {
+			for (const format of ["75.0", "84.0", "88.0", "97.1"]) {
+				const facts: VersionedFact<unknown>[] = [
+					ITEMS_ATLAS_FACT,
+					ITEM_ATLAS_PLACEMENT_FACT,
+					TEXTURE_MIPMAP_FACT,
+				];
+				for (const fact of facts) {
+					check.equal(
+						isFactActive(fact, format),
+						true,
+						`${fact.fact} active at ${format}`,
+					);
+				}
+			}
 		},
 	},
 	{

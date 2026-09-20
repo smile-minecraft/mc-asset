@@ -38,12 +38,13 @@ export type {
 export {
 	BLOCK_RENDER_PASS_FACT,
 	COMPAT_FACTS,
+	comparePackFormats,
 	getItemAtlasPolicy,
 	ITEMS_ATLAS_FACT,
 	isFactActive,
+	normalizePackFormat,
 	PNG_ONLY_FACT,
 	pendingSourceWarnings,
 	resolveVersionedFact,
 	TEXTURE_MIPMAP_FACT,
-	validatePackFormat,
 } from "./versions.ts";

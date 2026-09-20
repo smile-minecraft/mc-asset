@@ -1,6 +1,6 @@
 import { McAssetError } from "../core/errors.ts";
 import type { AssetProfile, AssetProfileId } from "./types.ts";
-import { getItemAtlasPolicy, validatePackFormat } from "./versions.ts";
+import { getItemAtlasPolicy, normalizePackFormat } from "./versions.ts";
 
 export const GENERIC_PROFILE: AssetProfile = {
 	id: "generic",
@@ -85,11 +85,11 @@ export function getAssetProfile(id: string): AssetProfile {
  */
 export function describeAssetProfilePredicted(
 	id: string,
-	packFormat?: number,
+	packFormat?: string,
 ): string {
 	const profile = getAssetProfile(id);
 	if (packFormat !== undefined) {
-		validatePackFormat(packFormat);
+		normalizePackFormat(packFormat);
 	}
 	if (profile.id === "minecraft:item") {
 		const policy =

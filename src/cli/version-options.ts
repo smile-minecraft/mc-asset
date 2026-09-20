@@ -1,26 +1,34 @@
 import { McAssetError } from "../core/errors.ts";
-import { validatePackFormat } from "../profiles/versions.ts";
+import { normalizePackFormat } from "../profiles/versions.ts";
 
 /**
  * Version-flag resolution for analyze/validate (§73, §95).
  *
- * Supported Minecraft target: Java Edition 26.3 with Resource Pack Format 97.1.
- * Maps --minecraft-version onto packFormat 75 facts, and accepts positive
- * integer --resource-pack-version values.
+ * Supported Minecraft targets run from Java Edition 1.21.11 through 26.3,
+ * each mapped onto its dotted resource-pack format. The engine packFormat
+ * is a normalized major.minor string ("75" input becomes "75.0"), and
+ * --resource-pack-version accepts N or N.M forms directly.
  */
 
-export const SUPPORTED_MINECRAFT_VERSIONS = ["26.3"] as const;
+export const SUPPORTED_MINECRAFT_VERSIONS = [
+	"1.21.11",
+	"26.1",
+	"26.1.1",
+	"26.1.2",
+	"26.2",
+	"26.3",
+] as const;
 
 export type SupportedMinecraftVersion =
 	(typeof SUPPORTED_MINECRAFT_VERSIONS)[number];
 
-/** Single-group mapping: 26.3 exercises the packFormat 75 facts. */
-const MINECRAFT_VERSION_PACK_FORMAT: Record<string, number> = {
-	"26.3": 75,
-};
-
-/** Resource Pack Format recorded alongside 26.3 in the §95 table. */
+/** Minecraft version onto dotted resource-pack format (design §2.1). */
 const MINECRAFT_VERSION_RESOURCE_PACK: Record<string, string> = {
+	"1.21.11": "75.0",
+	"26.1": "84.0",
+	"26.1.1": "84.0",
+	"26.1.2": "84.0",
+	"26.2": "88.0",
 	"26.3": "97.1",
 };
 
@@ -30,7 +38,7 @@ export interface VersionFlagOptions {
 }
 
 export interface ResolvedVersionTarget {
-	packFormat: number | undefined;
+	packFormat: string | undefined;
 	minecraftVersion: string | undefined;
 	resourcePackVersion: string | undefined;
 }
@@ -38,7 +46,6 @@ export interface ResolvedVersionTarget {
 export interface VersionReportShape {
 	minecraftVersion?: string | undefined;
 	resourcePackVersion?: string | undefined;
-	packFormat?: number | undefined;
 }
 
 function fail(message: string): never {
@@ -48,7 +55,7 @@ function fail(message: string): never {
 /**
  * Resolve at most one version flag to an engine packFormat plus the
  * display echo. No flags means engine defaults. Both flags together,
- * an unknown Minecraft version, or a non-integer resource-pack version
+ * an unknown Minecraft version, or a malformed resource-pack version
  * are INVALID_ARGUMENT; the existing exit wiring maps that to exit 2.
  */
 export function resolveVersionTarget(
@@ -62,30 +69,31 @@ export function resolveVersionTarget(
 		);
 	}
 	if (minecraftVersion !== undefined) {
-		const packFormat = MINECRAFT_VERSION_PACK_FORMAT[minecraftVersion];
-		if (packFormat === undefined) {
+		const resourcePack = MINECRAFT_VERSION_RESOURCE_PACK[minecraftVersion];
+		if (resourcePack === undefined) {
 			fail(
 				`Unsupported --minecraft-version "${minecraftVersion}". Supported: ${SUPPORTED_MINECRAFT_VERSIONS.join(", ")}.`,
 			);
 		}
-		const resourcePack = MINECRAFT_VERSION_RESOURCE_PACK[minecraftVersion];
 		return {
-			packFormat,
+			packFormat: resourcePack,
 			minecraftVersion,
 			resourcePackVersion: resourcePack,
 		};
 	}
 	if (resourcePackVersion !== undefined) {
-		if (!/^[0-9]+$/.test(resourcePackVersion.trim())) {
+		let packFormat: string;
+		try {
+			packFormat = normalizePackFormat(resourcePackVersion);
+		} catch {
 			fail(
-				`Invalid --resource-pack-version "${resourcePackVersion}". Takes a positive integer packFormat (for example "75"); dotted versions such as "97.1" arrive with the full version-fact layer, so target 26.3 via --minecraft-version instead.`,
+				`Invalid --resource-pack-version "${resourcePackVersion}". Takes N or N.M (for example "84" or "97.1").`,
 			);
 		}
-		const packFormat = validatePackFormat(Number(resourcePackVersion.trim()));
 		return {
 			packFormat,
 			minecraftVersion: undefined,
-			resourcePackVersion: resourcePackVersion.trim(),
+			resourcePackVersion: packFormat,
 		};
 	}
 	return {
@@ -106,9 +114,6 @@ export function versionReportShape(
 	if (target.resourcePackVersion !== undefined) {
 		shape.resourcePackVersion = target.resourcePackVersion;
 	}
-	if (target.packFormat !== undefined) {
-		shape.packFormat = target.packFormat;
-	}
 	return shape;
 }
 
@@ -127,9 +132,6 @@ export function formatVersionTarget(target: ResolvedVersionTarget): string {
 	}
 	if (target.resourcePackVersion !== undefined) {
 		parts.push(`resource-pack ${target.resourcePackVersion}`);
-	}
-	if (target.packFormat !== undefined) {
-		parts.push(`packFormat ${target.packFormat}`);
 	}
 	return parts.join(" / ");
 }

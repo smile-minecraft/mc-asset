@@ -211,12 +211,12 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--minecraft-version <version>",
-			"Target Minecraft version (e.g. 26.3).",
+			"Target Minecraft version (1.21.11 through 26.3).",
 			singleUseOption("--minecraft-version"),
 		)
 		.option(
 			"--resource-pack-version <version>",
-			"Target resource packFormat as a positive integer (e.g. 75).",
+			"Target resource-pack version as N or N.M (e.g. 84, 97.1).",
 			singleUseOption("--resource-pack-version"),
 		)
 		.action(
@@ -247,12 +247,12 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--minecraft-version <version>",
-			"Target Minecraft version (e.g. 26.3).",
+			"Target Minecraft version (1.21.11 through 26.3).",
 			singleUseOption("--minecraft-version"),
 		)
 		.option(
 			"--resource-pack-version <version>",
-			"Target resource packFormat as a positive integer (e.g. 75).",
+			"Target resource-pack version as N or N.M (e.g. 84, 97.1).",
 			singleUseOption("--resource-pack-version"),
 		)
 		.option(
@@ -283,12 +283,12 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--minecraft-version <version>",
-			"Target Minecraft version (e.g. 26.3).",
+			"Target Minecraft version (1.21.11 through 26.3).",
 			singleUseOption("--minecraft-version"),
 		)
 		.option(
 			"--resource-pack-version <version>",
-			"Target resource packFormat as a positive integer (e.g. 75).",
+			"Target resource-pack version as N or N.M (e.g. 84, 97.1).",
 			singleUseOption("--resource-pack-version"),
 		)
 		.action(

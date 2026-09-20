@@ -48,11 +48,12 @@ export interface AssetProfile {
 
 export interface VersionSince {
 	/**
-	 * Integer packFormat the fact starts from. Absent means the starting
+	 * Dotted resource-pack format the fact starts from (normalized
+	 * major.minor, e.g. "75.0"). Absent means the starting
 	 * version is undetermined: the fact never activates and only ever
 	 * produces a warning, never an enforcement value.
 	 */
-	packFormat?: number | undefined;
+	packFormat?: string | undefined;
 }
 
 export type FactStatus = "verified" | "pending-source";

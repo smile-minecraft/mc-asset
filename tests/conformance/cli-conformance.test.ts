@@ -2202,7 +2202,7 @@ describe("conformance: V0.5 validate-pack version and path guards", () => {
 		}
 	}, 30_000);
 
-	test("non-integer resource-pack version is INVALID_ARGUMENT with exit 2", async () => {
+	test("invalid resource-pack version is INVALID_ARGUMENT with exit 2", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
 		try {
 			const pack = await writeV05CleanPack(dir);
@@ -2211,7 +2211,7 @@ describe("conformance: V0.5 validate-pack version and path guards", () => {
 				"validate-pack",
 				pack,
 				"--resource-pack-version",
-				"97.1",
+				"abc",
 			]);
 			expect(result.code).toBe(2);
 			expect(stdoutText(result) + result.stderr).toContain("INVALID_ARGUMENT");

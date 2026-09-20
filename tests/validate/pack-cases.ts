@@ -44,11 +44,11 @@ async function withPackDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
 /**
  * Single-code isolation needs a determined version target: without a
  * version flag the engine reports PACK_VERSION_UNDETERMINED, which would
- * be a second code in every fixture. Engine cases pass packFormat 75.
+ * be a second code in every fixture. Engine cases pass packFormat "75.0".
  */
 const VERSIONED = {
-	packFormat: 75,
-	target: "resource-pack 75 / packFormat 75",
+	packFormat: "75.0",
+	target: "resource-pack 75.0",
 };
 
 export const PACK_CASES: PackCase[] = [
@@ -667,8 +667,8 @@ export const PACK_CASES: PackCase[] = [
 					atlasJson([]),
 				);
 				const report = await scanPack(dir, {
-					packFormat: 74,
-					target: "resource-pack 74 / packFormat 74",
+					packFormat: "74.0",
+					target: "resource-pack 74.0",
 				});
 				check.equal(report.verdict, "pass", "below-split skips atlas");
 				check.ok(

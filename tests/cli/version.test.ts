@@ -64,7 +64,6 @@ async function withPng(run: (input: string) => Promise<void>): Promise<void> {
 interface VersionShape {
 	minecraftVersion?: string;
 	resourcePackVersion?: string;
-	packFormat?: number;
 }
 
 function readVersion(result: Record<string, unknown>): VersionShape {
@@ -90,8 +89,9 @@ describe("version flags via spawn (Red: flags do not exist yet)", () => {
 			};
 			expect(envelope.success).toBe(true);
 			const version = readVersion(envelope.result);
-			expect(version.packFormat).toBe(75);
 			expect(version.minecraftVersion).toBe("26.3");
+			expect(version.resourcePackVersion).toBe("97.1");
+			expect("packFormat" in version).toBe(false);
 		});
 	}, 30_000);
 
@@ -121,7 +121,7 @@ describe("version flags via spawn (Red: flags do not exist yet)", () => {
 		});
 	}, 30_000);
 
-	test("analyze --resource-pack-version 75 reports packFormat 75", async () => {
+	test("analyze --resource-pack-version 75 normalizes to 75.0", async () => {
 		await withPng(async (input) => {
 			const { stdout, code } = await runCli([
 				"analyze",
@@ -136,7 +136,28 @@ describe("version flags via spawn (Red: flags do not exist yet)", () => {
 				result: Record<string, unknown>;
 			};
 			expect(envelope.success).toBe(true);
-			expect(readVersion(envelope.result).packFormat).toBe(75);
+			const version = readVersion(envelope.result);
+			expect(version.resourcePackVersion).toBe("75.0");
+			expect("packFormat" in version).toBe(false);
+		});
+	}, 30_000);
+
+	test("analyze --resource-pack-version 97.1 stays dotted", async () => {
+		await withPng(async (input) => {
+			const { stdout, code } = await runCli([
+				"analyze",
+				input,
+				"--json",
+				"--resource-pack-version",
+				"97.1",
+			]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: Record<string, unknown>;
+			};
+			expect(envelope.success).toBe(true);
+			expect(readVersion(envelope.result).resourcePackVersion).toBe("97.1");
 		});
 	}, 30_000);
 
@@ -159,7 +180,39 @@ describe("version flags via spawn (Red: flags do not exist yet)", () => {
 			};
 			expect(envelope.success).toBe(true);
 			expect(envelope.result.verdict).toBe("pass");
-			expect(readVersion(envelope.result).packFormat).toBe(75);
+			const version = readVersion(envelope.result);
+			expect(version.minecraftVersion).toBe("26.3");
+			expect(version.resourcePackVersion).toBe("97.1");
+		});
+	}, 30_000);
+
+	test("analyze human target lines follow the dotted echo shape", async () => {
+		await withPng(async (input) => {
+			const flagged = await runCli([
+				"analyze",
+				input,
+				"--minecraft-version",
+				"26.3",
+			]);
+			expect(flagged.code).toBe(0);
+			expect(flagged.stdout + flagged.stderr).toContain(
+				"target: minecraft 26.3 / resource-pack 97.1",
+			);
+			const dotted = await runCli([
+				"analyze",
+				input,
+				"--resource-pack-version",
+				"97.1",
+			]);
+			expect(dotted.code).toBe(0);
+			expect(dotted.stdout + dotted.stderr).toContain(
+				"target: resource-pack 97.1",
+			);
+			const plain = await runCli(["analyze", input]);
+			expect(plain.code).toBe(0);
+			expect(plain.stdout + plain.stderr).toContain(
+				"target: default (engine defaults)",
+			);
 		});
 	}, 30_000);
 
@@ -176,9 +229,9 @@ describe("version flags via spawn (Red: flags do not exist yet)", () => {
 		});
 	}, 30_000);
 
-	test("non-integer --resource-pack-version is INVALID_ARGUMENT", async () => {
+	test("malformed --resource-pack-version is INVALID_ARGUMENT", async () => {
 		await withPng(async (input) => {
-			for (const bad of ["97.1", "abc"]) {
+			for (const bad of ["abc", "0", "1."]) {
 				const { stdout, stderr, code } = await runCli([
 					"analyze",
 					input,
