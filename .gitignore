@@ -4,3 +4,4 @@ coverage/
 .opencode/
 .DS_Store
 *.tsbuildinfo
+.project-doc/
