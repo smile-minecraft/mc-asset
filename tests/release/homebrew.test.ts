@@ -30,21 +30,24 @@ describe("homebrew formula (static)", () => {
 		const text = readFormula();
 		expect(text).toContain("class McAsset < Formula");
 		expect(text).toContain(
-			"https://github.com/smile-minecraft/mc-asset/releases/download/v0.1.0/mc-asset-0.1.0.tar.gz",
+			"https://github.com/smile-minecraft/mc-asset/releases/download/v0.2.0/mc-asset-0.2.0.tar.gz",
 		);
-		expect(text).toContain("v0.1.0");
+		expect(text).toContain("v0.2.0");
 		expect(text).toMatch(/sha256\s+"[0-9a-f]{64}"/);
 		expect(text).toMatch(/license\s+"MIT"/);
 	});
 
-	test("formula pins the published v0.1.0 asset digest, no pending marker", () => {
+	test("formula pins the published v0.2.0 asset digest, no pending marker", () => {
 		const text = readFormula();
 		expect(text).toContain(
-			"bdc941bce9eff148732398bb767d4b73f05c20a6ff4d6718b82a4317dba98881",
+			"3cf7dd7690833cbce866ef717bd2ac2b6b056b7bc2215ba6acd7f2911ad15d81",
 		);
 		expect(text).not.toContain("PENDING_TAG_RECHECK");
 		expect(text).not.toContain(
 			"019a240cedbd50dc4076312eb19dffaca5054111d0ff90a68dcca7741a832dd7",
+		);
+		expect(text).not.toContain(
+			"bdc941bce9eff148732398bb767d4b73f05c20a6ff4d6718b82a4317dba98881",
 		);
 	});
 
@@ -92,7 +95,7 @@ describe("homebrew formula (static)", () => {
 			"reinstall",
 			"rollback",
 			"sha256",
-			"v0.1.0",
+			"v0.2.0",
 			"public",
 		]) {
 			expect(doc).toContain(token);

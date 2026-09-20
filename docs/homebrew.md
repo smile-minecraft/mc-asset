@@ -15,10 +15,10 @@ GitHub Release. No private URLs, no tokens, no moving branches.
   (formula lands at `Formula/mc-asset.rb` there).
 - Release tarball URL pattern (pinned per version, never a branch):
   `https://github.com/smile-minecraft/mc-asset/releases/download/v<version>/mc-asset-<version>.tar.gz`
-- Current version: v0.1.0 (released; `mc-asset-0.1.0.tar.gz`
-  published on the v0.1.0 GitHub Release; the `sha256` in the formula
+- Current version: v0.2.0 (released; `mc-asset-0.2.0.tar.gz`
+  published on the v0.2.0 GitHub Release; the `sha256` in the formula
   matches the published asset digest
-  (`bdc941bce9eff148732398bb767d4b73f05c20a6ff4d6718b82a4317dba98881`,
+  (`3cf7dd7690833cbce866ef717bd2ac2b6b056b7bc2215ba6acd7f2911ad15d81`,
   cross-checked against the release `.sha256` companion) and is
   re-verified with `shasum -a 256` before every tap update).
 
@@ -41,7 +41,7 @@ are not inside the tarball.
 Verify the download out of band:
 
 ```sh
-shasum -a 256 mc-asset-0.1.0.tar.gz
+shasum -a 256 mc-asset-0.2.0.tar.gz
 # must match the `sha256` line in homebrew/Formula/mc-asset.rb
 ```
 
