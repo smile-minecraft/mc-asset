@@ -50,10 +50,21 @@ function removeDir(dir: string): void {
 	rmSync(dir, { recursive: true, force: true });
 }
 
-function runRelease(args: string[]) {
+function cleanReleaseEnv(): Record<string, string | undefined> {
+	const env = { ...process.env };
+	delete env.GITHUB_REF;
+	delete env.RELEASE_TAG;
+	return env;
+}
+
+function runRelease(
+	args: string[],
+	env: Record<string, string | undefined> = cleanReleaseEnv(),
+) {
 	const result = spawnSync("node", [SCRIPT, ...args], {
 		cwd: ROOT,
 		encoding: "utf-8",
+		env,
 	});
 	return {
 		status: result.status ?? -1,
@@ -186,6 +197,7 @@ describe("release artifacts (deterministic staging)", () => {
 		const pkg = readPackage();
 		const dir = makeTempDir();
 		try {
+			// Isolated env: tag CI exports refs/tags/* which must not leak in here.
 			const refused = runRelease(["--out", join(dir, "refused")]);
 			expect(refused.status).not.toBe(0);
 			expect(refused.stderr + refused.stdout).toMatch(/tag|dry-run/i);
@@ -204,6 +216,24 @@ describe("release artifacts (deterministic staging)", () => {
 				`v${pkg.version}`,
 			]);
 			expect(explicit.status).toBe(0);
+		} finally {
+			removeDir(dir);
+		}
+	});
+
+	test("real mode resolves the tag from GITHUB_REF env fallback", () => {
+		const pkg = readPackage();
+		const expectedTag = `v${pkg.version}`;
+		const dir = makeTempDir();
+		const out = join(dir, "env-fallback");
+		try {
+			const run = runRelease(["--out", out], {
+				...process.env,
+				GITHUB_REF: `refs/tags/${expectedTag}`,
+			});
+			expect(run.status).toBe(0);
+			const { manifest } = readManifest(out, pkg.version);
+			expect(manifest.tag).toBe(expectedTag);
 		} finally {
 			removeDir(dir);
 		}
