@@ -579,3 +579,7 @@ failing pack verdict is exit 3, while a structural or invocation problem is exit
 Exit 5 keeps `RESOURCE_LIMIT_EXCEEDED`; `PACK_*` entries are finding codes carried
 inside the report, not thrown error codes. Their registration in the §99 registry
 is V0.5 implementation work (t02), not part of this frozen surface.
+
+## V0.6 note
+
+`mcp` ships with V0.6. The frozen sections above are unchanged.

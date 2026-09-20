@@ -2,7 +2,7 @@
 
 Pixel-native Minecraft asset toolchain. The V0.1 command set and the frozen
 V0.2, V0.3, V0.4, and V0.5 command sets all ship from this entry point, along
-with the V0.6 MCP server; `--version` still prints `0.1.0`
+with the V0.6 MCP server; `--version` still prints `0.2.0`
 (commander-owned).
 
 Entry point for development: `bun src/cli/index.ts`. For installation,
@@ -693,7 +693,7 @@ What the toolchain guarantees, and where it was checked:
   compatibility facts, but a fact whose version mapping is still undetermined
   never takes effect — warning only (see the V0.5 gaps below). `--preset`
   exists on `pixelize` only; there is no `--pack-format`.
-- **`--version` prints the toolchain version** (`0.1.0`, commander-owned,
+- **`--version` prints the toolchain version** (`0.2.0`, commander-owned,
   exit 0) and nothing more; it does not select compat behavior.
 - **`PENDING_SOURCE_PNG_ONLY` warning**: every analyze/validate report
   carries it, because the PNG-only texture fact still lacks an official
