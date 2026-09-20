@@ -16,6 +16,7 @@ import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
 import { type GenerateOptions, runGenerate } from "./cmd-generate.ts";
 import { type ImportOptions, runImport } from "./cmd-import.ts";
 import { type MaterialOptions, runMaterial } from "./cmd-material.ts";
+import { runMcp } from "./cmd-mcp.ts";
 import { type PaletteOptions, runPalette } from "./cmd-palette.ts";
 import {
 	type PixelizeCommandOptions,
@@ -1033,6 +1034,14 @@ export function buildProgram(): Command {
 				globals.json === true,
 				realStreams(),
 			);
+			process.exitCode = code;
+		});
+
+	program
+		.command("mcp")
+		.description("Start the MCP server over stdio (tool surface for agents).")
+		.action(async () => {
+			const code = await runMcp();
 			process.exitCode = code;
 		});
 

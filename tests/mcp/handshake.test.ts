@@ -1,0 +1,44 @@
+import { afterEach, describe, expect, test } from "bun:test";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+
+const EXPECTED_TOOLS = [
+	"analyze_asset",
+	"pixelize_asset",
+	"render_pixel_asset",
+	"apply_asset_operations",
+	"recolor_asset",
+	"create_variants",
+	"validate_asset",
+] as const;
+
+let client: Client | undefined;
+
+afterEach(async () => {
+	if (client !== undefined) {
+		const current = client;
+		client = undefined;
+		await current.close().catch(() => undefined);
+	}
+});
+
+describe("mcp handshake", () => {
+	test("initialize succeeds and tools/list exposes the frozen seven tools", async () => {
+		const transport = new StdioClientTransport({
+			command: "bun",
+			args: ["src/cli/index.ts", "mcp"],
+		});
+		client = new Client({ name: "mc-asset-test", version: "0.0.0" });
+		await client.connect(transport);
+		const listed = await client.listTools();
+		const names = listed.tools.map((tool) => tool.name).sort();
+		expect(names).toEqual([...EXPECTED_TOOLS].sort());
+		expect(listed.tools).toHaveLength(7);
+		for (const tool of listed.tools) {
+			expect(typeof tool.description).toBe("string");
+			expect(tool.description ?? "").not.toBe("");
+			const schema = tool.inputSchema as unknown as Record<string, unknown>;
+			expect(schema.type).toBe("object");
+		}
+	}, 30_000);
+});
