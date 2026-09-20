@@ -25,9 +25,9 @@ describe("homebrew formula (static contract, no build required)", () => {
 		);
 		assert.ok(
 			text.includes(
-				"https://github.com/smile-minecraft/mc-asset/releases/download/v0.2.0/mc-asset-0.2.0.tar.gz",
+				"https://github.com/smile-minecraft/mc-asset/releases/download/v0.3.0/mc-asset-0.3.0.tar.gz",
 			),
-			"formula url must pin the v0.2.0 tag tarball",
+			"formula url must pin the v0.3.0 tag tarball",
 		);
 		assert.match(
 			text,
@@ -44,13 +44,13 @@ describe("homebrew formula (static contract, no build required)", () => {
 		);
 	});
 
-	it("formula pins the published v0.2.0 asset digest, no pending marker", () => {
+	it("formula pins the published v0.3.0 asset digest, no pending marker", () => {
 		const text = readFormula();
 		assert.ok(
 			text.includes(
-				"3cf7dd7690833cbce866ef717bd2ac2b6b056b7bc2215ba6acd7f2911ad15d81",
+				"6e4f0c53a199be95b08aa97894d70307a0639425748f85a52238add73ac18d4c",
 			),
-			"formula sha256 must match the published v0.2.0 asset digest",
+			"formula sha256 must match the published v0.3.0 asset digest",
 		);
 		assert.ok(
 			!text.includes("PENDING_TAG_RECHECK"),

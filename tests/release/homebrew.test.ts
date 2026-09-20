@@ -29,17 +29,17 @@ describe("homebrew formula (static)", () => {
 		const text = readFormula();
 		expect(text).toContain("class McAsset < Formula");
 		expect(text).toContain(
-			"https://github.com/smile-minecraft/mc-asset/releases/download/v0.2.0/mc-asset-0.2.0.tar.gz",
+			"https://github.com/smile-minecraft/mc-asset/releases/download/v0.3.0/mc-asset-0.3.0.tar.gz",
 		);
-		expect(text).toContain("v0.2.0");
+		expect(text).toContain("v0.3.0");
 		expect(text).toMatch(/sha256\s+"[0-9a-f]{64}"/);
 		expect(text).toMatch(/license\s+"MIT"/);
 	});
 
-	test("formula pins the published v0.2.0 asset digest, no pending marker", () => {
+	test("formula pins the published v0.3.0 asset digest, no pending marker", () => {
 		const text = readFormula();
 		expect(text).toContain(
-			"3cf7dd7690833cbce866ef717bd2ac2b6b056b7bc2215ba6acd7f2911ad15d81",
+			"6e4f0c53a199be95b08aa97894d70307a0639425748f85a52238add73ac18d4c",
 		);
 		expect(text).not.toContain("PENDING_TAG_RECHECK");
 		expect(text).not.toContain(

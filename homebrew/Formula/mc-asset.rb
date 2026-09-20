@@ -1,12 +1,12 @@
-# v0.2.0 published asset: sha256 below matches the GitHub Release
-# tarball `mc-asset-0.2.0.tar.gz` (digest verified against the published
+# v0.3.0 published asset: sha256 below matches the GitHub Release
+# tarball `mc-asset-0.3.0.tar.gz` (digest verified against the published
 # asset and its `.sha256` companion). Re-verify with
-# `shasum -a 256 mc-asset-0.2.0.tar.gz` before any tap update.
+# `shasum -a 256 mc-asset-0.3.0.tar.gz` before any tap update.
 class McAsset < Formula
   desc "Pixel-native Minecraft asset toolchain"
   homepage "https://github.com/smile-minecraft/mc-asset"
-  url "https://github.com/smile-minecraft/mc-asset/releases/download/v0.2.0/mc-asset-0.2.0.tar.gz"
-  sha256 "3cf7dd7690833cbce866ef717bd2ac2b6b056b7bc2215ba6acd7f2911ad15d81"
+  url "https://github.com/smile-minecraft/mc-asset/releases/download/v0.3.0/mc-asset-0.3.0.tar.gz"
+  sha256 "6e4f0c53a199be95b08aa97894d70307a0639425748f85a52238add73ac18d4c"
   license "MIT"
 
   depends_on "node"
