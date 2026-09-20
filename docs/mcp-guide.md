@@ -1,5 +1,7 @@
 # MCP server guide (mc-asset)
 
+[English](mcp-guide.md) | [繁體中文](mcp-guide.zh-TW.md) | [简体中文](mcp-guide.zh-CN.md)
+
 `mc-asset mcp` starts a stdio MCP server: stdout carries only MCP JSON-RPC,
 diagnostics go to stderr, and the process ends when stdin closes. The frozen
 surface — seven tool names, their inputs, and the read/write contract — lives
@@ -15,7 +17,7 @@ inline; there is no `set_pixel` tool by design.
 ## Installing and registering the server
 
 The server ships inside the Homebrew-installed `mc-asset` binary, so install
-that first — `docs/homebrew.md` covers tap, install, upgrade, and rollback.
+that first (see the Installation section of the README for the Homebrew tap).
 
 Then add the `mc-asset` entry to the global OpenCode config
 (`~/.config/opencode/opencode.jsonc`) as an MCP server:
@@ -219,7 +221,7 @@ File-rule failures to expect:
   result carries `pngBase64` (PNG) or `mcpxText` (`.mcpx`) instead of writing
   a file. This is decided per artifact: giving only `outputPngPath` writes the
   PNG and still returns the `.mcpx` text inline.
-- **The surface is the V0.1–V0.2 engine set.** `tile`, `generate`, `preview`,
+- **The surface covers core engine tools.** `tile`, `generate`, `preview`,
   `animate`, `validate-pack`, and version targeting stay on the CLI for now.
 - **`validate_asset` checks a single PNG.** Pack-level and atlas-aware
   validation lives in `validate-pack` on the CLI.
