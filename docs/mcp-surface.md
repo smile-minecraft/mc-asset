@@ -13,8 +13,8 @@ Tool names are frozen. Earlier drafts called the batch-edit tool
 v0.7 adds twelve tools (`import_asset` through `validate_pack_asset`;
 `palette_asset`, `material_asset`, `preview_asset`, and `animate_asset`
 merge CLI subcommands into a `mode` field) for full CLI parity. Their
-names and input shapes are frozen here; the running server registers
-them in the next step.
+names and input shapes are frozen here; the running server exposes
+all nineteen tools.
 
 Capability base: full CLI parity — intake and source build, spatial
 transforms, palette and quantization, the deterministic pixelize

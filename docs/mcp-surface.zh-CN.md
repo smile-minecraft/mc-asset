@@ -6,7 +6,7 @@
 
 工具名称已冻结。早期草稿把批处理编辑工具称为 `edit_asset`，冻结后的名称是 `apply_asset_operations`。
 
-v0.7 新增十二个工具（`import_asset` 到 `validate_pack_asset`；`palette_asset`、`material_asset`、`preview_asset`、`animate_asset` 把 CLI 子命令合并为 `mode` 字段），达成与 CLI 完全对等。名称与输入形状在此冻结；运行中的服务器将在下一步注册它们。
+v0.7 新增十二个工具（`import_asset` 到 `validate_pack_asset`；`palette_asset`、`material_asset`、`preview_asset`、`animate_asset` 把 CLI 子命令合并为 `mode` 字段），达成与 CLI 完全对等。名称与输入形状在此冻结；运行中的服务器已提供全部十九个工具。
 
 能力基础：与 CLI 完全对等——素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证。
 

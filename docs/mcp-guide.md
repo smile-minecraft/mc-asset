@@ -4,7 +4,7 @@
 
 `mc-asset mcp` starts a stdio MCP server: stdout carries only MCP JSON-RPC,
 diagnostics go to stderr, and the process ends when stdin closes. The frozen
-surface — seven tool names, their inputs, and the read/write contract — lives
+surface — nineteen tool names, their inputs, and the read/write contract — lives
 in `docs/mcp-surface.md`; the input fields are frozen in `src/mcp/schema.ts`.
 This guide covers registration, one verbatim capture per tool, the error
 model, and the limits.
@@ -41,7 +41,7 @@ The captures below were taken against the installed build with the MCP client
 SDK, from a demo working directory; every path in them is relative to that
 directory.
 
-## The seven tools
+## The nineteen tools
 
 ### analyze_asset
 
@@ -176,6 +176,226 @@ Result (verbatim):
 {"verdict":"pass","profile":{"id":"generic","predictedDescription":"predicted profile generic has no Minecraft-specific restrictions."},"dimensions":{"width":8,"height":8},"totalPixels":64,"colorCount":64,"findings":[{"code":"PARTIAL_ALPHA_CAUSES_TRANSLUCENT_RENDERING","level":"warning","message":"predicted translucent: 1 partial-alpha pixel(s) use the translucent render pass; left as-is with no auto-fix."}]}
 ```
 
+### import_asset
+
+Imports a raster image into the engine: PNG, JPEG, or WebP in, plus an
+optional batch. With no output paths the PNG bytes and the `.mcpx` text
+are both embedded in the result.
+
+Call:
+
+```json
+{"inputPath":"px-8x8.png"}
+```
+
+Result (verbatim; `pngBase64` and the `.mcpx` palette and grid are
+truncated — the full palette holds all 64 colors, `0`–`T0002`):
+
+```text
+{"profile":"generic","applied":0,"operations":[],"warnings":[],"pngBase64":"iVBORw0KGgoAAAANSUhEUgAAAAgAAAAI… (truncated) …","mcpxText":"mcpx 1\n\n[canvas]\nwidth = 8\nheight = 8\n\n[palette]\n0 = #03ED20FF\n… 63 more palette entries (1–T0002) …\n\n[layer base]\nvisible = true\nopacity = 1.000\n\n[grid tokens]\no 7 F N V d l u\n… 7 more grid rows …"}
+```
+
+### build_asset
+
+Rebuilds an editable `.mcpx` source into PNG bytes and/or built source.
+`sourcePath` must end in `.mcpx` — a raster source is
+`INVALID_ARGUMENT`. An optional batch runs first.
+
+Call:
+
+```json
+{"sourcePath":"sword.mcpx"}
+```
+
+Result (verbatim; `pngBase64` is truncated):
+
+```text
+{"profile":"generic","applied":0,"operations":[],"warnings":[],"pngBase64":"iVBORw0KGgoAAAANSUhEUgAAAAQAAAAE… (truncated) …","mcpxText":"mcpx 1\n\n[canvas]\nwidth = 4\nheight = 4\n\n[palette]\n. = #00000000\nR = #FF0000FF\nG = #00FF00FF\n\n[layer base]\nvisible = true\nopacity = 1.000\n\n[grid]\n.RR.\nRGGR\nRGGR\n.RR.\n"}
+```
+
+### transform_asset
+
+Applies one geometry operation (`flip`, `rotate`, …) to a raster image
+or `.mcpx`, with an optional selection. Exactly one geometry flag is
+required: two is `ARGUMENT_CONFLICT`, none is `INVALID_ARGUMENT`.
+
+Call:
+
+```json
+{"inputPath":"sword.mcpx","flip":"h"}
+```
+
+Result (verbatim; `pngBase64` is truncated):
+
+```text
+{"profile":"generic","applied":0,"operations":[],"warnings":[],"geometry":"flip:h","width":4,"height":4,"pngBase64":"iVBORw0KGgoAAAANSUhEUgAAAAQAAAAE… (truncated) …","mcpxText":"mcpx 1\n\n[canvas]\nwidth = 4\nheight = 4\n\n[palette]\n. = #00000000\nR = #FF0000FF\nG = #00FF00FF\n\n[layer base]\nvisible = true\nopacity = 1.000\n\n[grid]\n.RR.\nRGGR\nRGGR\n.RR.\n"}
+```
+
+### quantize_asset
+
+Reduces a raster image or `.mcpx` to a required color count, with an
+optional selection. The result reports `colors`, `colorCount`, and
+`modifiedPixels`.
+
+Call:
+
+```json
+{"inputPath":"px-8x8.png","colors":4}
+```
+
+Result (verbatim; `pngBase64` is truncated):
+
+```text
+{"profile":"generic","applied":0,"operations":[],"warnings":[],"colors":4,"colorCount":4,"modifiedPixels":64,"pngBase64":"iVBORw0KGgoAAAANSUhEUgAAAAgAAAAI… (truncated) …","mcpxText":"mcpx 1\n\n[canvas]\nwidth = 8\nheight = 8\n\n[palette]\n0 = #2A6353E7\n1 = #5D8787FF\n2 = #B9417FFF\n3 = #C0C0B0FF\n\n[layer base]\nvisible = true\nopacity = 1.000\n\n[grid]\n20002222\n00002222\n00011233\n00111333\n01113333\n11133330\n11333320\n11322220\n"}
+```
+
+### cleanup_asset
+
+Detects (and optionally fixes) pixel defects in a raster image or
+`.mcpx`. With no `fix` class this is a detect-only run:
+`modifiedPixels` is 0 and nothing changes. A `fix` class without
+render-pass authorization is `INVALID_ARGUMENT`.
+
+Call:
+
+```json
+{"inputPath":"sword.mcpx"}
+```
+
+Result (verbatim; `pngBase64` is truncated):
+
+```text
+{"profile":"generic","applied":0,"operations":[],"warnings":[],"detected":{"isolated":0,"noise":0,"cluster":0,"fringe":0,"outlier":0,"hole":0,"aa":0},"fixed":{"isolated":0,"noise":0,"cluster":0,"fringe":0,"outlier":0,"hole":0,"aa":0},"modifiedPixels":0,"pngBase64":"iVBORw0KGgoAAAANSUhEUgAAAAQAAAAE… (truncated) …","mcpxText":"mcpx 1\n\n[canvas]\nwidth = 4\nheight = 4\n\n[palette]\n. = #00000000\nR = #FF0000FF\nG = #00FF00FF\n\n[layer base]\nvisible = true\nopacity = 1.000\n\n[grid]\n.RR.\nRGGR\nRGGR\n.RR.\n"}
+```
+
+### palette_asset
+
+Read-only color report over an image. `extract` lists the unique
+colors; `inspect` reports distribution, roles, and contrast. `mode` is
+required.
+
+Call:
+
+```json
+{"mode":"extract","inputPath":"sword.mcpx"}
+```
+
+Result (verbatim):
+
+```text
+{"mode":"extract","profile":"generic","colorCount":3,"entries":[{"id":"color-0","color":"#00000000"},{"id":"color-1","color":"#FF0000FF"},{"id":"color-2","color":"#00FF00FF"}]}
+```
+
+### material_asset
+
+Read-only builtin-material report. `list` names every material; `show`
+plus `name` returns one definition with its color ramps. An unknown
+name is `INVALID_ARGUMENT`.
+
+Call:
+
+```json
+{"mode":"list"}
+```
+
+Result (verbatim):
+
+```text
+{"mode":"list","profile":"generic","materials":["iron","copper","oxidized_copper","gold","wood","stone","crystal"]}
+```
+
+### tile_asset
+
+Seam and edge report over a raster image or `.mcpx`, with optional
+match axes. With `preview` (e.g. `2x2`) the tiled preview PNG is
+embedded as `pngBase64`.
+
+Call:
+
+```json
+{"inputPath":"px-8x8.png","preview":"2x2"}
+```
+
+Result (verbatim; `pngBase64` is truncated):
+
+```text
+{"profile":"generic","width":8,"height":8,"preview":"2x2","seam":{"horizontal":{"raw":422822,"pairs":8,"score":"0.203202"},"vertical":{"raw":494206,"pairs":8,"score":"0.237508"},"corner":{"raw":100918,"pairs":2,"score":"0.193998"}},"repeat":{"score":"0.930164","periodX":1,"periodY":1},"corrections":[],"warnings":[],"pngBase64":"iVBORw0KGgoAAAANSUhEUgAAABAAAAAQ… (truncated) …"}
+```
+
+### generate_asset
+
+Synthesizes a deterministic procedural texture from `pattern` plus
+`size` plus `palette` plus `seed`; no input file. With no output paths
+the PNG bytes and the `.mcpx` text are both embedded.
+
+Call:
+
+```json
+{"pattern":"checker","size":"16","palette":"iron","seed":7}
+```
+
+Result (verbatim; `pngBase64` and the grid are truncated — the full
+`.mcpx` holds the two-color palette and all 16 grid rows):
+
+```text
+{"profile":"generic","applied":0,"operations":[],"warnings":[],"pattern":"checker","seed":7,"width":16,"height":16,"palette":"iron","pngBase64":"iVBORw0KGgoAAAANSUhEUgAAABAAAAAQ… (truncated) …","mcpxText":"mcpx 1\n\n[canvas]\nwidth = 16\nheight = 16\n\n[palette]\n0 = #1A1D21FF\n1 = #EEF2F6FF\n\n[layer base]\nvisible = true\nopacity = 1.000\n\n[grid]\n1110001110001110\n1110001110001110\n1110001110001110\n… 13 more grid rows …"}
+```
+
+### preview_asset
+
+Read-only previews in one `mode`: `ascii` and `palette-map` return
+reports, while `scale` and `nine-slice` can write a PNG to an explicit
+path. The call below is the `ascii` report over `sword.mcpx`.
+
+Call:
+
+```json
+{"inputPath":"sword.mcpx","mode":"ascii"}
+```
+
+Result (verbatim):
+
+```text
+{"mode":"ascii","profile":"generic","width":4,"height":4,"ascii":["[palette]",". = #00000000","R = #FF0000FF","G = #00FF00FF","","[grid]",".RR.","RGGR","RGGR",".RR."],"palette":{".":"#00000000","R":"#FF0000FF","G":"#00FF00FF"},"warnings":[]}
+```
+
+### animate_asset
+
+Animation sheets in one `mode`: `pack` builds a sheet from a frames
+directory, `unpack` / `reorder` / `resize` write frames under an
+explicit output directory, and `validate` / `preview` are read-only.
+Without an output path the packed sheet is embedded as `pngBase64`.
+
+Call:
+
+```json
+{"mode":"pack","framesDir":"v04-anim-frames","layout":"vertical"}
+```
+
+Result (verbatim; `pngBase64` is truncated):
+
+```text
+{"mode":"pack","profile":"generic","frameCount":2,"frameWidth":4,"frameHeight":4,"layout":"vertical","width":4,"height":8,"warnings":[],"pngBase64":"iVBORw0KGgoAAAANSUhEUgAAAAQAAAAI… (truncated) …"}
+```
+
+### validate_pack_asset
+
+Read-only verdict over a whole resource pack root; never writes. An
+optional `resourcePackVersion` selects the compatibility target. A
+`fail` verdict is a normal result, not an error.
+
+Call:
+
+```json
+{"packPath":"clean-pack","resourcePackVersion":"75"}
+```
+
+Result (verbatim):
+
+```text
+{"command":"validate-pack","path":"clean-pack","target":"resource-pack 75.0","verdict":"pass","findings":[],"version":{"resourcePackVersion":"75.0"}}
+```
+
 ## How failures come back
 
 A tool failure sets `isError: true`, and the payload is a JSON string in
@@ -221,15 +441,23 @@ File-rule failures to expect:
   result carries `pngBase64` (PNG) or `mcpxText` (`.mcpx`) instead of writing
   a file. This is decided per artifact: giving only `outputPngPath` writes the
   PNG and still returns the `.mcpx` text inline.
-- **The surface covers core engine tools.** `tile`, `generate`, `preview`,
-  `animate`, `validate-pack`, and version targeting stay on the CLI for now.
+- **Full CLI parity.** The nineteen tools cover intake and source build,
+  transforms, palette and quantization, the deterministic pixelize
+  pipeline, procedural generation, tiles and previews, animation sheets,
+  and single-asset plus whole-pack validation; version targeting travels
+  through `analyze_asset`, `validate_asset`, and `validate_pack_asset`
+  via `minecraftVersion` / `resourcePackVersion`.
 - **`validate_asset` checks a single PNG.** Pack-level and atlas-aware
-  validation lives in `validate-pack` on the CLI.
+  validation is `validate_pack_asset`.
 - **Determinism was checked for the demo inputs.** Same input plus same
   arguments produced identical results; only the demo `px-8x8.png` /
-  `sword.mcpx` inputs were exercised, so other formats stay unverified.
+  `sword.mcpx` / `v04-anim-frames/` inputs and a clean pack were
+  exercised, so other formats stay unverified.
 - **Runtime.** The MCP path uses only `node:` imports, so the bundled `dist`
   runs under plain Node; CI's `node` job uses Node 22. No minimum Node version
   is declared (there is no `engines` field).
 - **Not exercised here**: `mcmetaPath`, `region`, `atomic: false`, JPEG/WebP
-  inputs, `WxH` sizes, and any error path other than the one captured above.
+  inputs, `WxH` sizes, the uncaptured `mode` branches (`palette`
+  `inspect`, `material` `show`, `preview` `palette-map` / `scale` /
+  `nine-slice`, `animate` `unpack` / `reorder` / `resize` / `validate` /
+  `preview`), and any error path other than the one captured above.
