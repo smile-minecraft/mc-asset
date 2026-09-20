@@ -3821,3 +3821,164 @@ V0.3 三個命令全部適用 §57、§98、§100：
 ## 106.8 待決項目
 
 規格無法推定、且會影響對外行為的細節，列於 `docs/v03-design.md` 的待決清單，不在此自行補齊。其中直接影響命令表面或預設行為的有：十個 pattern 的演算法與取色方式、PRNG 的具體選型、`tile --output`（無 `--preview`）的單格語意、`repetition_score` 的精確定義與搜尋成本上限、`corner seam` 的像素對、`--brightness-match` 是否要求分數下降、palette 檔的格式、`preview --ascii` 是否輸出完整 `.grid`、`clustered-noise` 的連字號命名，以及是否提供 `--in-place`／`--source`。
+
+---
+
+# 107. V0.4 語意與介面凍結
+
+V0.4 的範圍見 §87。命令表面（名稱、旗標、輸入輸出、exit code）以 `docs/cli-surface.md` 為準；語意、layout 選型與取捨理由的細節以 `docs/v04-design.md` 為準。本節記錄規範性結論，三者衝突時以本節為準。
+
+規格只給了 FrameSet 介面、pack／unpack 方向、layout 名稱與 mcmeta 的檢查項目（§42、§43、§46、§47、§48、§49、§50）；其餘細節記於 `docs/v04-design.md`，無法推定的列於 §107.9。
+
+## 107.1 命令表面
+
+V0.4 新增一個命令 `animate`，名稱已在 product docs §48 的 command tree 與 `docs/cli-surface.md` 的 V0.1 保留清單中出現。其餘能力掛在既有命令上，不開同義入口（§104.1）：
+
+| 表面 | 種類 | 輸入 | 輸出 | exit code |
+|---|---|---|---|---|
+| `animate pack` | 新命令 | frames 目錄（每 frame 一個 `.mcpx`） | PNG sprite sheet | 0/2/4/5 |
+| `animate unpack <sheet.png>` | 新命令 | PNG sprite sheet | frames 目錄 | 0/2/4/5 |
+| `animate reorder` | 新命令 | frames 目錄 | frames 目錄 | 0/2/4/5 |
+| `animate resize` | 新命令 | frames 目錄 | frames 目錄 | 0/2/4/5 |
+| `animate validate` | 新命令 | frames 目錄（+ `--mcmeta`） | 唯讀報告 | 0/2/3/4/5 |
+| `animate preview` | 新命令 | frames 目錄 | 唯讀報告，或 stdout ASCII | 0/2/4/5 |
+| `preview --nine-slice` | 既有命令新模式 | PNG + `--mcmeta` | 唯讀報告，或 PNG | 0/2/4/5 |
+| `validate --mcmeta <path>` | 既有命令新旗標 | PNG + `.mcmeta` | 唯讀報告 | 0/2/3/4/5 |
+| `--profile minecraft:gui` | 既有旗標新值 | — | — | — |
+| `--profile minecraft:particle` | 既有旗標新值 | — | — | — |
+| `--preset gui`／`--preset particle` | 既有旗標新值 | — | — | — |
+
+```text
+輸出守衛         MUST 遵守 §57、§98：顯式輸出、OUTPUT_EXISTS、--mkdir、
+                 同目錄暫存加 rename、不得推導檔名或建立預設目錄
+animate 不宣告   --source、--in-place（animation 不進 .mcpx，§51；輸出是目錄）
+animate validate 唯讀，不接受任何檔案旗標
+```
+
+## 107.2 FrameSet
+
+§48 的介面即為規範：
+
+```ts
+interface FrameSet {
+  frames: PixelCanvas[]
+  frameWidth: number
+  frameHeight: number
+  metadata?: FrameSetMetadata
+}
+```
+
+```text
+每 frame          本身就是一個 PixelCanvas（§48）
+Animation         MUST NOT 被塞進單一 PixelCanvas（§48）
+.mcpx v1          MUST NOT 保存 animation；一個 `.mcpx` 等於一個 PixelCanvas（§51）
+count             MUST ≥ 1，空 FrameSet 為 INVALID_ANIMATION_FRAME
+frame 尺寸        每個 frame 的尺寸 MUST 等於 frameWidth × frameHeight；
+                  不一致以 INVALID_ANIMATION_FRAME 拒絕，不得默默縮放
+metadata          選填；V0.4 只原樣保留與回報，不解析成行為
+```
+
+CLI 的持久表示：frames 目錄，每個 frame 是一個單一 PixelCanvas 的 `.mcpx`；目錄列舉 MUST 先排序（§100.3），順序為檔名 byte 升冪。
+
+## 107.3 Animation Engine
+
+依 §49，Engine 支援 `vertical`／`horizontal`／`grid` 三種 layout；`vertical` 是常見 workflow 但不是唯一 layout。
+
+```text
+layout              MUST 顯式；沒有預設（§49）
+pack                FrameSet → sprite sheet；frame 以 1:1 貼入，不縮放
+unpack              sprite sheet → FrameSet；--frame-size 必填
+sheet 尺寸（本凍結） vertical: width = frameWidth，height = frameHeight × count
+                    horizontal: width = frameWidth × count，height = frameHeight
+                    grid: rows = ceil(count / columns)，
+                          width = frameWidth × columns，height = frameHeight × rows
+grid 空 cell        MUST 為 transparent（#00000000，§8）
+unpack 不相容       sheet 維度無法被 layout／frame 尺寸整除為 INVALID_ANIMATION_FRAME
+尺寸上限            超出 §102 為 INVALID_DIMENSION；記憶體超限為 RESOURCE_LIMIT_EXCEEDED
+resize              唯一改變 frame 尺寸的入口；預設 nearest、可選 box、
+                    pixel-aware 以 INVALID_ARGUMENT 拒絕（§105.3）；整數運算（§32）
+reorder             --order MUST 是 [0, count) 的全排列，MUST NOT 改變 frame 像素
+preview             MUST NOT 寫出 PNG；--ascii 走 preview --ascii 的序列化；--layout MUST 顯式
+```
+
+## 107.4 mcmeta 讀取與驗證
+
+依 §46、§50、§81：
+
+```text
+讀取範圍        texture metadata：mipmap_strategy、alpha_cutoff_bias
+                animation metadata：frametime、interpolate、width、height、frames[]
+mc-asset        MUST NOT 生成、修改或格式化 .mcmeta（§39、§46、§50）
+validate        --mcmeta 顯式；缺省時不做 mcmeta 檢查，也不推導同名 sibling
+frame geometry  MUST 由 PNG 尺寸與 frame 尺寸推導
+frame index     mcmeta 的每個 frame index MUST ∈ [0, frameCount)，否則 INVALID_ANIMATION_FRAME
+frame dims/count MUST 與推導值一致
+錯誤位置        error.details.path，例如 animation.frames[2].index
+mipmap（§47）   texture alpha（§40 的 predicted classification）、mipmap_strategy、
+                alpha_cutoff_bias 以結構化資訊呈現；cutout + mean mipmap 為 warning
+值域解讀        規格未列值域；無法確認者只給 warning，不當 error（§95）
+```
+
+## 107.5 minecraft:gui Profile
+
+依 §42，GUI Profile 理解 gui atlas、exact sprite bounds、alpha、stretch、tile、nine_slice。sprite 的 `.mcmeta` 可指定 `stretch`／`tile`／`nine_slice`；nine-slice 可指定 border。
+
+```text
+stretch／tile／nine_slice   理解並回報；三者互斥
+border                      解析 nine_slice 的 border { left, top, right, bottom }
+stretch_inner               MAY 解析回報，MUST NOT 套用；明確排除在 V0.4 外（§42）
+nine-slice preview          preview --nine-slice --mcmeta，報告或 1:1 preview PNG
+border 幾何                 left + right ≤ width 且 top + bottom ≤ height，否則 finding 為 error
+輸出                        minecraft:gui 僅 PNG；非 .png 為 UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT（§34）
+stretch preview／tile preview 不在 V0.4
+```
+
+`preview --nine-slice` 是 `preview` 的模式集合在 V0.4 的版本延伸：§106.6 描述的是 V0.3 不把 tile preview 併入 `preview`；本節依 §87 加入 `--nine-slice`，以本節為準。
+
+## 107.6 minecraft:particle Profile
+
+依 §43，Particle Profile 重視 alpha、small-size readability、frame consistency、atlas reference。
+
+```text
+尺寸          MUST NOT 強制所有 particle 相同尺寸；不得以尺寸不一致為由拒絕
+alpha         沿用 §40 的 predicted classification
+Particle JSON 由 Agent 產生；mc-asset MUST NOT 生成、修改或驗證其 schema
+atlas         V0.4 只標示 predicted／未驗證；完整 atlas 驗證屬 V0.5（§88）
+輸出          minecraft:particle 僅 PNG（§34）
+```
+
+## 107.7 pixelize preset
+
+product docs §30 與 §87：`--preset` 於既有 `item`／`block`／`generic` 之外新增 `gui`／`particle`。
+
+```text
+preset          MUST 是顯式、具名、可列印的參數組，MUST NOT 是隱藏啟發式
+管線順序        MUST 維持 §105.6 的十一階段，preset 只填參數
+--preset 與 --profile 角色不同（§37）：前者決定怎麼處理圖片，後者決定素材用途
+輸出            minecraft:gui／minecraft:particle 僅 PNG（§34）
+具體數值        屬 starter／待決（§107.9）
+```
+
+## 107.8 共同約束
+
+V0.4 全部新表面適用 §57、§98；`animate` 另適用 §100。
+
+```text
+無隱式輸出    缺輸出時 OUTPUT_REQUIRED，且零檔案（§57）
+覆寫政策      OUTPUT_EXISTS／--force（§98.2）
+父目錄        FILESYSTEM_ERROR／--mkdir（§98.3）
+原子寫入      同目錄暫存加 rename（§98.4）
+整數優先      影響像素的運算以整數完成（§100.1）
+禁超越函式    MUST NOT 用 Math.cbrt／pow／exp／sin 於影響像素的計算（§100.2）
+禁隨機        MUST NOT 用 Math.random；V0.4 預設路徑不含亂數（§100.3）
+全序排序      不得依賴不穩定排序或物件鍵序；目錄列舉先排序（§100.3）
+無時間戳      輸出內容 MUST NOT 含時間戳（§100.3）
+報告浮點      以固定小數位序列化（§100.3）
+跨 runtime    同 input／參數／版本 MUST 跨 macOS／Linux 與 Bun／Node byte-identical（§100.4、§100.5）
+```
+
+exit code：`animate` 寫檔類為 0/2/4/5；`animate validate` 與 `validate`（含 `--mcmeta`）為 0/2/3/4/5（含 §98 的 filesystem 與既有 unsupported 情形）；`preview --nine-slice` 為 0/2/4/5。`exit 3` 仍只由 validate 家族使用；`INVALID_ANIMATION_FRAME`／`INVALID_MCMETA` 為 exit 2。
+
+## 107.9 待決項目
+
+規格無法推定、且會影響對外行為的細節，列於 `docs/v04-design.md` 的待決清單，不在此自行補齊。直接影響命令表面或預設行為的有：frames 目錄是否接受 `.png` frame 與非 `.mcpx` 檔的處置、mcmeta 欄位的值域與組合語意、GUI scaling 的 mcmeta 鍵路徑、是否自動偵測同名 `.mcmeta`、grid 的預設欄數、nine-slice preview 的放大方式與 guide 色、`stretch_inner` 的行為、particle small-size readability 與 frame consistency 的規則、GUI scaling 與 palette metadata 的檢查規則、atlas reference 驗證、gui／particle preset 的數值、`animate preview` 的豐富形式、`animate` 的命令形狀與 unpack frame 格式、`FrameSetMetadata` 的內容，以及 `animate preview --ascii` 的尺寸上限。

@@ -418,3 +418,100 @@ preview   <input> --ascii | --palette-map | --scale N
 Exit 3 stays reserved for `validate`. `UNSUPPORTED_IMAGE_FORMAT` and
 `RESOURCE_LIMIT_EXCEEDED` remain exit 5; `UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT`
 applies to a `minecraft:*` `--output` that is not `.png`.
+
+## V0.4 commands (frozen)
+
+Semantics, interface decisions, and rationale live in `docs/v04-design.md` and
+`project-detail.md` §107; the flag/IO/exit table is here. Every V0.4 surface
+reuses the V0.1 file rules above where it writes files: explicit
+`--output`/`--stdout`/`--output-dir` (OUTPUT_REQUIRED), OUTPUT_EXISTS unless
+`--force`, `--mkdir`, per-file atomic writes, and no default filenames or
+directories (§57, §98).
+
+| Command | Input | Output | Exit |
+|---|---|---|---|
+| `animate pack` | frames directory (one `.mcpx` per frame) | PNG sprite sheet | 0/2/4/5 |
+| `animate unpack <sheet.png>` | PNG sprite sheet | frames directory (one `.mcpx` per frame) | 0/2/4/5 |
+| `animate reorder` | frames directory | frames directory | 0/2/4/5 |
+| `animate resize` | frames directory | frames directory | 0/2/4/5 |
+| `animate validate` | frames directory (+ `--mcmeta`) | report only | 0/2/3/4/5 |
+| `animate preview` | frames directory | report only, or ASCII on stdout | 0/2/4/5 |
+| `preview <input> --nine-slice` | PNG + `--mcmeta` | report only, or PNG | 0/2/4/5 |
+| `validate <asset> --mcmeta <path>` | PNG + `.mcmeta` | report only | 0/2/3/4/5 |
+
+### Flags added in V0.4
+
+```text
+--frames-dir <dir>        animate pack/reorder/resize/validate/preview only; the
+                          FrameSet on disk: one `.mcpx` PixelCanvas per frame,
+                          ordered by byte-lexicographic filename (§100.3).
+--output-dir <dir>        animate unpack/reorder/resize only; required; the frame
+                          output directory. `--output` on those modes is
+                          ARGUMENT_CONFLICT.
+--layout <vertical|horizontal|grid>
+                          animate pack/unpack/preview; required for all three;
+                          no default (§49).
+--columns <N>             animate layout grid only; required with grid; positive
+                          integer.
+--frame-size <N|WxH>      animate unpack/resize; required; same parse as pixelize.
+--order <i,j,...>         animate reorder only; required; a permutation of
+                          [0, count).
+--resize-mode <nearest|box>
+                          animate resize only; default nearest; pixel-aware is
+                          INVALID_ARGUMENT (§105.3).
+--mcmeta <path>           animate unpack/validate and preview --nine-slice;
+                          explicit mcmeta path; a sibling file is never derived.
+--nine-slice              preview only; a report, or a PNG preview with the border
+                          guide lines when `--output`/`--stdout` is given;
+                          requires `--mcmeta`.
+--preset gui|particle     pixelize only; extends the V0.2 preset set (§30, §87).
+```
+
+### Per-command surfaces
+
+```text
+animate   pack     --frames-dir <dir> --layout l [--columns N] [--output png] [--stdout] <file flags>
+          unpack   <sheet.png> --layout l --frame-size N|WxH [--columns N] [--mcmeta path]
+                   --output-dir <dir> <file flags>
+          reorder  --frames-dir <dir> --order i,j,... --output-dir <dir> <file flags>
+          resize   --frames-dir <dir> --frame-size N|WxH [--resize-mode m]
+                   --output-dir <dir> <file flags>
+          validate --frames-dir <dir> [--mcmeta path] [--profile name] [--json]
+          preview  --frames-dir <dir> --layout l [--columns N] [--ascii]
+                   [--profile name] [--json]
+preview   <input> --nine-slice --mcmeta <path> [--output png] [--stdout] <file flags>
+```
+
+`<file flags>` = `--output`, `--stdout`, `--force`, `--mkdir`, `--profile`,
+`--json`; the multi-file animate modes replace `--output` with `--output-dir`.
+
+- `animate` declares neither `--source` nor `--in-place`: animation never enters
+  `.mcpx` (§51) and a FrameSet output is a directory, so there is no in-place
+  target. Both fail as unknown options (exit 2).
+- `animate pack` without `--layout`, a `grid` layout without `--columns`,
+  `unpack` without `--frame-size`, and `reorder` without `--order` are
+  INVALID_ARGUMENT. Missing output flags is OUTPUT_REQUIRED and creates zero
+  files.
+- `animate validate` is read-only and rejects every file flag. A failing verdict
+  is exit 3; a structural error (`INVALID_ANIMATION_FRAME`, `INVALID_MCMETA`) is
+  exit 2.
+- `preview` takes exactly one mode flag among `--ascii`, `--palette-map`,
+  `--scale`, `--nine-slice`: none is INVALID_ARGUMENT, two or more is
+  ARGUMENT_CONFLICT. `--nine-slice` without `--mcmeta` is INVALID_ARGUMENT;
+  `--ascii`/`--palette-map` still reject every file flag; `--scale` still needs
+  `--output` or `--stdout`.
+- `validate --mcmeta` reads the texture and animation mcmeta sections and checks
+  frame geometry, index, dimensions, and count; it never writes or rewrites JSON
+  (§39, §46, §50). Without `--mcmeta` no mcmeta check runs and no sibling
+  `.mcmeta` is derived.
+- `--profile` extends the V0.1 set with `minecraft:gui` and
+  `minecraft:particle`; `--preset` extends the V0.2 set with `gui` and
+  `particle`. Both new profiles keep the PNG-only output rule (§34): a
+  non-`.png` `--output` is UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT.
+
+Exit 3 stays reserved for `validate`, including `animate validate` (both can also
+raise the V0.1 filesystem and unsupported cases, so their full set is
+0/2/3/4/5). Exit 5 keeps
+`UNSUPPORTED_IMAGE_FORMAT`, `RESOURCE_LIMIT_EXCEEDED`, and
+`UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT`; `INVALID_ANIMATION_FRAME` and
+`INVALID_MCMETA` are exit 2.
