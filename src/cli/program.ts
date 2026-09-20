@@ -27,6 +27,10 @@ import { type RecolorOptions, runRecolor } from "./cmd-recolor.ts";
 import { type RenderOptions, runRender } from "./cmd-render.ts";
 import { runTile, type TileOptions } from "./cmd-tile.ts";
 import { runTransform, type TransformOptions } from "./cmd-transform.ts";
+import {
+	runValidatePack,
+	type ValidatePackCommandOptions,
+} from "./cmd-validate-pack.ts";
 import { runVariant, type VariantOptions } from "./cmd-variant.ts";
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
 import { exitCodeForMcAssetError } from "./exit.ts";
@@ -263,6 +267,38 @@ export function buildProgram(): Command {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
 				const code = await runValidate(
 					asset,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("validate-pack <path>")
+		.description(
+			"Validate a resource pack directory and print a read-only verdict (exit 3 when the pack fails).",
+		)
+		.option(
+			"--minecraft-version <version>",
+			"Target Minecraft version (V0.1: 26.3 only).",
+			singleUseOption("--minecraft-version"),
+		)
+		.option(
+			"--resource-pack-version <version>",
+			"Target resource packFormat as a positive integer (V0.1: 75).",
+			singleUseOption("--resource-pack-version"),
+		)
+		.action(
+			async (
+				path: string,
+				options: ValidatePackCommandOptions,
+				command: Command,
+			) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runValidatePack(
+					path,
 					options,
 					globals.json === true,
 					realStreams(),

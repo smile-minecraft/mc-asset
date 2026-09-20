@@ -11,3 +11,9 @@ export {
 	validateCanvas,
 	validateReport,
 } from "./checks.ts";
+export type {
+	PackFinding,
+	PackReport,
+	PackScanOptions,
+} from "./pack.ts";
+export { scanPack } from "./pack.ts";

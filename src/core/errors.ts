@@ -36,6 +36,20 @@ export type ErrorCode =
 	| "UNSUPPORTED_IMAGE_FORMAT"
 	| "UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT"
 	| "RESOURCE_LIMIT_EXCEEDED"
+	| "PACK_INVALID_JSON"
+	| "PACK_MISSING_TEXTURE"
+	| "PACK_MISSING_ASSET"
+	| "PACK_WRONG_PATH"
+	| "PACK_NAMESPACE_PROBLEM"
+	| "PACK_CASE_MISMATCH"
+	| "PACK_ORPHAN_TEXTURE"
+	| "PACK_INVALID_ANIMATION_SHEET"
+	| "PACK_INVALID_IMAGE_DIMENSION"
+	| "PACK_BROKEN_REFERENCE"
+	| "PACK_TEXTURE_NOT_IN_ATLAS"
+	| "PACK_INVALID_IMAGE_DATA"
+	| "PACK_INVALID_FILENAME"
+	| "PACK_VERSION_UNDETERMINED"
 	| "TRANSACTION_FAILED";
 
 export type FixedErrorCode = Exclude<ErrorCode, "TRANSACTION_FAILED">;
@@ -75,6 +89,25 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	UNSUPPORTED_IMAGE_FORMAT: 5,
 	UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT: 5,
 	RESOURCE_LIMIT_EXCEEDED: 5,
+	// V0.5 pack findings (v05-design §42 table). These codes travel inside
+	// the validate-pack report; a failing verdict throws VALIDATION_FAILED.
+	// They are registered here so the §99 registry stays the single exit
+	// authority. PACK_TEXTURE_NOT_IN_ATLAS is reserved for the atlas
+	// check that lands separately; the warning-level codes never fail.
+	PACK_INVALID_JSON: 3,
+	PACK_MISSING_TEXTURE: 3,
+	PACK_MISSING_ASSET: 3,
+	PACK_WRONG_PATH: 3,
+	PACK_NAMESPACE_PROBLEM: 3,
+	PACK_CASE_MISMATCH: 3,
+	PACK_ORPHAN_TEXTURE: 3,
+	PACK_INVALID_ANIMATION_SHEET: 3,
+	PACK_INVALID_IMAGE_DIMENSION: 3,
+	PACK_BROKEN_REFERENCE: 3,
+	PACK_TEXTURE_NOT_IN_ATLAS: 3,
+	PACK_INVALID_IMAGE_DATA: 3,
+	PACK_INVALID_FILENAME: 3,
+	PACK_VERSION_UNDETERMINED: 3,
 };
 
 export function isErrorCode(value: unknown): value is ErrorCode {
