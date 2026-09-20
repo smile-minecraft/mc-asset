@@ -191,6 +191,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>] [-
 - Validation exit behavior: Exit 0 on pass; Exit 3 (`VALIDATION_FAILED`) when validation checks fail; Exit 2 on invocation syntax error; Exit 4 on filesystem error.
 - Version targeting: `--minecraft-version` accepts `1.21.11`, `26.1`, `26.1.1`, `26.1.2`, `26.2`, `26.3` (mapped to resource-pack `75.0`, `84.0`, `84.0`, `84.0`, `88.0`, `97.1`); `--resource-pack-version` accepts `N` or `N.M` (e.g. `84`, `97.1`) and normalizes to `major.minor`. The two flags are mutually exclusive, and omitting both keeps engine defaults.
 - Version echo: human reports print `target: minecraft <v> / resource-pack <f>`, `target: resource-pack <f>`, or `target: default (engine defaults)`; `--json` carries `version: { minecraftVersion?, resourcePackVersion? }` with normalized dotted strings.
+- No-flag resolution: `validate-pack` without a version flag reads the root `pack.mcmeta` for `pack.max_format`, then `pack.min_format`, then legacy `pack.pack_format` (integer, `[major, minor]` array, or dotted string, normalized to `major.minor`); the resolved target prints as `pack.mcmeta resource-pack <f>`. `supported_formats` is ignored for targeting, and with no usable value the scan warns once (`PACK_VERSION_UNDETERMINED`) and applies no default.
 
 ---
 

@@ -2358,7 +2358,8 @@ describe("conformance: V0.5 validate-pack verdict and determinism", () => {
 	}, 60_000);
 
 	test("no flags without pack.mcmeta warns only and never defaults", async () => {
-		// Without a version flag or a pack.mcmeta pack_format, the
+		// Without a version flag or a usable pack.mcmeta min_format/max_format
+		// (or legacy pack_format), the version-dependent checks stay skipped:
 		// version-dependent checks stay skipped: one warning-level
 		// PACK_VERSION_UNDETERMINED finding, exit 0, no invented target.
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));

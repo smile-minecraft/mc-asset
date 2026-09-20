@@ -9,6 +9,7 @@ import { decodePng } from "../io/png.ts";
 import {
 	ITEM_ATLAS_PLACEMENT_FACT,
 	ITEMS_ATLAS_FACT,
+	normalizePackFormat,
 	resolveVersionedFact,
 } from "../profiles/versions.ts";
 import {
@@ -39,8 +40,9 @@ import {
  * only run while the items/split facts resolve for the effective
  * packFormat, and an undefined or partially understood atlas always skips
  * instead of accusing. The root pack.mcmeta parses for INVALID_JSON and,
- * with no version flag, lends its pack.pack_format as the scan target
- * (read-only, no default).
+ * with no version flag, lends its resolved resource-pack format
+ * (max_format, then min_format, then legacy pack_format) as the scan
+ * target (read-only, no default).
  */
 
 export interface PackFinding {
@@ -96,7 +98,7 @@ const encoder = new TextEncoder();
 
 /** Frozen PACK_VERSION_UNDETERMINED wording: no default is ever applied. */
 const VERSION_UNDETERMINED_MESSAGE =
-	"no version flag was given and pack.mcmeta carries no usable pack.pack_format; version-dependent checks were skipped with no default applied.";
+	"no version flag was given and pack.mcmeta carries no usable min_format/max_format or pack_format; version-dependent checks were skipped with no default applied.";
 
 /** Byte-lexicographic string order, identical on every runtime. */
 function compareBytes(a: string, b: string): number {
@@ -132,11 +134,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Read-only pack.pack_format lookup over an already-parsed pack.mcmeta.
- * Only a positive integer counts; anything else (missing key, dotted
- * label, other shapes) leaves the version undetermined.
+ * Read-only resource-pack format lookup over an already-parsed pack.mcmeta.
+ * Resolution order is max_format, then min_format, then legacy pack_format;
+ * legacy supported_formats is accepted but never selects the target. Each
+ * candidate accepts a positive integer (to "N.0"), an exact [major, minor]
+ * pair (to "N.M"), or a dotted string via normalizePackFormat. A malformed
+ * value is ignored and resolution falls through to the next field, never
+ * throwing, so only a dotted major.minor string ever returns.
  */
-function packFormatFromMcmeta(doc: unknown): number | undefined {
+function resourcePackFormatFromMcmeta(doc: unknown): string | undefined {
 	if (!isRecord(doc)) {
 		return undefined;
 	}
@@ -144,11 +150,52 @@ function packFormatFromMcmeta(doc: unknown): number | undefined {
 	if (!isRecord(pack)) {
 		return undefined;
 	}
-	const format = pack.pack_format;
-	if (typeof format !== "number" || !Number.isInteger(format) || format < 1) {
-		return undefined;
+	for (const key of ["max_format", "min_format", "pack_format"] as const) {
+		const dotted = normalizeMcmetaFormatValue(pack[key]);
+		if (dotted !== undefined) {
+			return dotted;
+		}
 	}
-	return format;
+	return undefined;
+}
+
+/**
+ * Normalize one pack.mcmeta format value to dotted major.minor.
+ * Anything malformed (wrong type, non-positive major, ragged array,
+ * unparsable string) returns undefined so the caller falls through.
+ */
+function normalizeMcmetaFormatValue(value: unknown): string | undefined {
+	if (typeof value === "number") {
+		if (!Number.isInteger(value) || value < 1) {
+			return undefined;
+		}
+		return `${value}.0`;
+	}
+	if (Array.isArray(value)) {
+		if (value.length !== 2) {
+			return undefined;
+		}
+		const [major, minor] = value;
+		if (
+			typeof major !== "number" ||
+			typeof minor !== "number" ||
+			!Number.isInteger(major) ||
+			!Number.isInteger(minor) ||
+			major < 1 ||
+			minor < 0
+		) {
+			return undefined;
+		}
+		return `${major}.${minor}`;
+	}
+	if (typeof value === "string") {
+		try {
+			return normalizePackFormat(value);
+		} catch {
+			return undefined;
+		}
+	}
+	return undefined;
 }
 
 async function collectPackFiles(packRoot: string): Promise<string[]> {
@@ -666,12 +713,11 @@ function checkAtlasCoverage(
 	options: PackScanOptions | undefined,
 	mcmetaDoc: unknown,
 ): void {
-	const rawFormat = options?.packFormat ?? packFormatFromMcmeta(mcmetaDoc);
-	if (rawFormat === undefined) {
+	const packFormat =
+		options?.packFormat ?? resourcePackFormatFromMcmeta(mcmetaDoc);
+	if (packFormat === undefined) {
 		return;
 	}
-	const packFormat =
-		typeof rawFormat === "number" ? `${rawFormat}.0` : rawFormat;
 	const itemsAtlas = resolveVersionedFact(ITEMS_ATLAS_FACT, packFormat);
 	const placement = resolveVersionedFact(ITEM_ATLAS_PLACEMENT_FACT, packFormat);
 	if (itemsAtlas === undefined || placement === undefined) {
@@ -757,7 +803,8 @@ export async function scanPack(
 		}
 	}
 	// The root pack.mcmeta parses for INVALID_JSON and, with no version
-	// flag, lends its pack.pack_format as the scan target. The file is
+	// flag, lends its resolved resource-pack format (max_format, then
+	// min_format, then legacy pack_format) as the scan target. The file is
 	// only read, never written; an unusable value keeps the version
 	// undetermined with no default applied.
 	let mcmetaDoc: unknown;
@@ -814,14 +861,15 @@ export async function scanPack(
 		);
 	}
 	// Version target: an explicit flag always wins. With no flag the engine
-	// reads pack.pack_format from the root pack.mcmeta; a missing or
+	// reads the resolved resource-pack format from the root pack.mcmeta
+	// (max_format, then min_format, then legacy pack_format); a missing or
 	// unusable value warns once and skips version-dependent checks with
 	// no default version ever applied.
 	let effectiveTarget = options?.target ?? "default (engine defaults)";
 	if (options?.packFormat === undefined) {
-		const fromMcmeta = packFormatFromMcmeta(mcmetaDoc);
+		const fromMcmeta = resourcePackFormatFromMcmeta(mcmetaDoc);
 		if (fromMcmeta !== undefined) {
-			effectiveTarget = `pack.mcmeta packFormat ${fromMcmeta}`;
+			effectiveTarget = `pack.mcmeta resource-pack ${fromMcmeta}`;
 		} else {
 			push(
 				state.findings,

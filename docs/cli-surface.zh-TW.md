@@ -191,6 +191,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>] [-
 - 驗證的狀態碼：通過為 0；驗證檢查失敗為 3（`VALIDATION_FAILED`）；呼叫語法錯誤為 2；檔案系統錯誤為 4。
 - 版本指定：`--minecraft-version` 接受 `1.21.11`、`26.1`、`26.1.1`、`26.1.2`、`26.2`、`26.3`（對應資源包 `75.0`、`84.0`、`84.0`、`84.0`、`88.0`、`97.1`）；`--resource-pack-version` 接受 `N` 或 `N.M`（例如 `84`、`97.1`），會正規化為 `major.minor`。兩個旗標互斥，都不給則維持引擎預設。
 - 版本回顯：人類可讀報告印出 `target: minecraft <v> / resource-pack <f>`、`target: resource-pack <f>` 或 `target: default (engine defaults)`；`--json` 攜帶 `version: { minecraftVersion?, resourcePackVersion? }`，皆為正規化後的 dotted 字串。
+- 無旗標時的解析：不帶版本旗標的 `validate-pack` 會讀取根目錄 `pack.mcmeta`，依序取 `pack.max_format`、`pack.min_format`、舊制 `pack.pack_format`（整數、`[major, minor]` 陣列或 dotted 字串，皆正規化為 `major.minor`）；解析出的目標印為 `pack.mcmeta resource-pack <f>`。`supported_formats` 不參與目標選擇；沒有可用值時只警告一次（`PACK_VERSION_UNDETERMINED`），不套用任何預設。
 
 ---
 

@@ -108,13 +108,186 @@ export const PACK_CASES: PackCase[] = [
 					!codesOf(report).includes("PACK_VERSION_UNDETERMINED"),
 					"no undetermined warning when pack_format is usable",
 				);
-				check.ok(
-					(report.target ?? "").includes("75"),
-					"report target carries the pack_format",
+				check.equal(
+					report.target,
+					"pack.mcmeta resource-pack 75.0",
+					"report target echoes the resolved dotted format",
 				);
 				check.ok(
 					!JSON.stringify(report).includes("97.1"),
 					"no hardcoded 97.1 default in the report",
+				);
+			});
+		},
+	},
+	{
+		name: "pack.mcmeta max_format wins over min_format and legacy pack_format",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writeCleanBaseline(dir);
+				await writePackFile(
+					dir,
+					"pack.mcmeta",
+					modelJson({
+						pack: {
+							pack_format: 75,
+							min_format: 84,
+							max_format: 88,
+							description: "range",
+						},
+					}),
+				);
+				const report = await scanPack(dir, {});
+				check.equal(
+					report.target,
+					"pack.mcmeta resource-pack 88.0",
+					"range resolves to max_format",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_VERSION_UNDETERMINED"),
+					"no undetermined warning when max_format is usable",
+				);
+			});
+		},
+	},
+	{
+		name: "pack.mcmeta min_format is the fallback with no max_format",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writeCleanBaseline(dir);
+				await writePackFile(
+					dir,
+					"pack.mcmeta",
+					modelJson({
+						pack: { min_format: 84, description: "min only" },
+					}),
+				);
+				const report = await scanPack(dir, {});
+				check.equal(
+					report.target,
+					"pack.mcmeta resource-pack 84.0",
+					"min-only resolves to min_format",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_VERSION_UNDETERMINED"),
+					"no undetermined warning when min_format is usable",
+				);
+			});
+		},
+	},
+	{
+		name: "pack.mcmeta integer, array, and dotted-string forms normalize",
+		run: async (check) => {
+			const variants: Array<{
+				name: string;
+				pack: Record<string, unknown>;
+				expected: string;
+			}> = [
+				{
+					name: "integer max_format",
+					pack: { max_format: 88, description: "t" },
+					expected: "pack.mcmeta resource-pack 88.0",
+				},
+				{
+					name: "array max_format",
+					pack: { max_format: [97, 1], description: "t" },
+					expected: "pack.mcmeta resource-pack 97.1",
+				},
+				{
+					name: "dotted-string max_format",
+					pack: { max_format: "84.0", description: "t" },
+					expected: "pack.mcmeta resource-pack 84.0",
+				},
+				{
+					name: "whole-string min_format",
+					pack: { min_format: "75", description: "t" },
+					expected: "pack.mcmeta resource-pack 75.0",
+				},
+				{
+					name: "dotted legacy pack_format string",
+					pack: { pack_format: "97.1", description: "t" },
+					expected: "pack.mcmeta resource-pack 97.1",
+				},
+				{
+					name: "legacy pack_format integer",
+					pack: { pack_format: 75, description: "t" },
+					expected: "pack.mcmeta resource-pack 75.0",
+				},
+			];
+			for (const variant of variants) {
+				await withPackDir(async (dir) => {
+					await writeCleanBaseline(dir);
+					await writePackFile(
+						dir,
+						"pack.mcmeta",
+						modelJson({ pack: variant.pack }),
+					);
+					const report = await scanPack(dir, {});
+					check.equal(
+						report.target,
+						variant.expected,
+						`${variant.name} normalizes to dotted`,
+					);
+					check.ok(
+						!codesOf(report).includes("PACK_VERSION_UNDETERMINED"),
+						`${variant.name} has no undetermined warning`,
+					);
+				});
+			}
+		},
+	},
+	{
+		name: "pack.mcmeta malformed values fall through to the next field",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writeCleanBaseline(dir);
+				await writePackFile(
+					dir,
+					"pack.mcmeta",
+					modelJson({
+						pack: {
+							max_format: "bogus",
+							min_format: [84],
+							pack_format: 75,
+							description: "t",
+						},
+					}),
+				);
+				const report = await scanPack(dir, {});
+				check.equal(
+					report.target,
+					"pack.mcmeta resource-pack 75.0",
+					"malformed max/min fall through to legacy pack_format",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_VERSION_UNDETERMINED"),
+					"no undetermined warning after fall-through",
+				);
+			});
+		},
+	},
+	{
+		name: "pack.mcmeta supported_formats never selects the target",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writeCleanBaseline(dir);
+				await writePackFile(
+					dir,
+					"pack.mcmeta",
+					modelJson({
+						pack: { description: "t" },
+						supported_formats: { min_inclusive: 75, max_inclusive: 88 },
+					}),
+				);
+				const report = await scanPack(dir, {});
+				check.ok(
+					codesOf(report).includes("PACK_VERSION_UNDETERMINED"),
+					"supported_formats alone leaves the version undetermined",
+				);
+				check.equal(
+					report.target,
+					"default (engine defaults)",
+					"no target is borrowed from supported_formats",
 				);
 			});
 		},
@@ -128,10 +301,22 @@ export const PACK_CASES: PackCase[] = [
 					body: modelJson({ pack: { description: "t" } }),
 				},
 				{
-					name: "dotted label",
-					body: modelJson({ pack: { pack_format: "97.1" } }),
+					name: "zero max_format with zero min and pack_format",
+					body: modelJson({
+						pack: { max_format: 0, min_format: 0, pack_format: 0 },
+					}),
 				},
-				{ name: "zero", body: modelJson({ pack: { pack_format: 0 } }) },
+				{
+					name: "bad shapes everywhere",
+					body: modelJson({
+						pack: {
+							max_format: "bogus",
+							min_format: [84],
+							pack_format: "nope",
+							description: "t",
+						},
+					}),
+				},
 				{ name: "no pack section", body: modelJson({ note: "t" }) },
 			];
 			for (const variant of variants) {
@@ -154,7 +339,7 @@ export const PACK_CASES: PackCase[] = [
 					);
 					check.equal(
 						undetermined?.message,
-						"no version flag was given and pack.mcmeta carries no usable pack.pack_format; version-dependent checks were skipped with no default applied.",
+						"no version flag was given and pack.mcmeta carries no usable min_format/max_format or pack_format; version-dependent checks were skipped with no default applied.",
 						`${variant.name} frozen wording`,
 					);
 					check.ok(

@@ -375,7 +375,7 @@ describe("validate-pack command via spawn", () => {
 			};
 			expect(envelope.success).toBe(true);
 			expect(envelope.result.verdict).toBe("pass");
-			expect(envelope.result.target).toContain("75");
+			expect(envelope.result.target).toBe("pack.mcmeta resource-pack 75.0");
 			expect(
 				envelope.result.findings.some(
 					(f) => f.code === "PACK_VERSION_UNDETERMINED",
@@ -383,6 +383,103 @@ describe("validate-pack command via spawn", () => {
 			).toBe(false);
 			expect(stdout).not.toContain("97.1");
 			expect(await treeHash(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("no flags resolves min_format/max_format to max with a dotted target", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		try {
+			await writeCleanBaseline(dir);
+			await writePackFile(
+				dir,
+				"pack.mcmeta",
+				modelJson({
+					pack: { min_format: 84, max_format: [88, 0], description: "range" },
+				}),
+			);
+			const { stdout, code } = await runCli(["validate-pack", dir, "--json"]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: {
+					verdict: string;
+					target: string;
+					findings: Array<{ code: string; level: string }>;
+				};
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.target).toBe("pack.mcmeta resource-pack 88.0");
+			expect(
+				envelope.result.findings.some(
+					(f) => f.code === "PACK_VERSION_UNDETERMINED",
+				),
+			).toBe(false);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("no flags resolves a dotted pack_format string with no warning", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		try {
+			await writeCleanBaseline(dir);
+			await writePackFile(
+				dir,
+				"pack.mcmeta",
+				modelJson({ pack: { pack_format: "97.1", description: "dotted" } }),
+			);
+			const { stdout, code } = await runCli(["validate-pack", dir, "--json"]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: {
+					verdict: string;
+					target: string;
+					findings: Array<{ code: string; level: string }>;
+				};
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.target).toBe("pack.mcmeta resource-pack 97.1");
+			expect(
+				envelope.result.findings.some(
+					(f) => f.code === "PACK_VERSION_UNDETERMINED",
+				),
+			).toBe(false);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("no flags with an unusable mcmeta warns with the min/max wording", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		try {
+			await writeCleanBaseline(dir);
+			await writePackFile(
+				dir,
+				"pack.mcmeta",
+				modelJson({
+					pack: { max_format: "bogus", min_format: [84], pack_format: 0 },
+				}),
+			);
+			const { stdout, code } = await runCli(["validate-pack", dir, "--json"]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: {
+					verdict: string;
+					findings: Array<{ code: string; level: string; message: string }>;
+				};
+			};
+			expect(envelope.success).toBe(true);
+			const undetermined = envelope.result.findings.find(
+				(f) => f.code === "PACK_VERSION_UNDETERMINED",
+			);
+			expect(undetermined?.level).toBe("warning");
+			expect(undetermined?.message).toBe(
+				"no version flag was given and pack.mcmeta carries no usable min_format/max_format or pack_format; version-dependent checks were skipped with no default applied.",
+			);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
