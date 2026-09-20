@@ -12,6 +12,7 @@ import {
 } from "./channels.ts";
 import { type BuildOptions, runBuild } from "./cmd-build.ts";
 import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
+import { type GenerateOptions, runGenerate } from "./cmd-generate.ts";
 import { type ImportOptions, runImport } from "./cmd-import.ts";
 import { type MaterialOptions, runMaterial } from "./cmd-material.ts";
 import { type PaletteOptions, runPalette } from "./cmd-palette.ts";
@@ -743,6 +744,39 @@ export function buildProgram(): Command {
 			);
 			process.exitCode = code;
 		});
+
+	program
+		.command("generate <pattern>")
+		.description(
+			"Synthesize a deterministic pattern swatch from a palette and seed.",
+		)
+		.option("--size <size>", "Required canvas size: N or WxH.")
+		.option(
+			"--palette <name|path>",
+			"Required builtin material id or .mcpx palette path.",
+		)
+		.option("--seed <int>", "Required integer seed in [0, 4294967295].")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--source <path>", "Write the editable .mcpx source file.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(
+			async (pattern: string, options: GenerateOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runGenerate(
+					pattern,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
 
 	return program;
 }

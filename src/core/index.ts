@@ -96,6 +96,21 @@ export {
 	parsePixelizeSize,
 	runPixelize,
 } from "./pixelize.ts";
+export type {
+	GeneratePatternName,
+	GenerateProceduralOptions,
+	GenerateProceduralResult,
+} from "./procedural.ts";
+export {
+	createXorshift32,
+	GENERATE_PATTERNS,
+	GENERATE_SEED_MAX,
+	GENERATE_SEED_MIN,
+	generateProcedural,
+	orderPaletteColors,
+	parseGeneratePattern,
+	parseGenerateSeed,
+} from "./procedural.ts";
 export type { QuantizeResult } from "./quantizer.ts";
 export {
 	assertMcpxPaletteCapacity,
