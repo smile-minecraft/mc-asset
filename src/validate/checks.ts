@@ -5,6 +5,7 @@ import {
 } from "../analyze/metrics.ts";
 import type { PixelCanvas } from "../core/types.ts";
 import type { PngWarning } from "../io/png.ts";
+import { validateDiskFilename } from "./resource-location.ts";
 
 /**
  * Basic validate engine (V0.1). Pure and read-only: an analyze report plus
@@ -103,6 +104,26 @@ function checkFilename(
 }
 
 /**
+ * §108.6 stem-level filename check. Minecraft profiles only (§44 leaves
+ * generic unrestricted): an uppercase stem is PACK_CASE_MISMATCH, a stem
+ * outside the conservative set is PACK_INVALID_FILENAME, both error. The
+ * gate reuses the §34 profile list on purpose: widening it to gui/particle
+ * would newly fail previously-passing assets and is out of scope here.
+ */
+function checkResourceFilename(
+	profileId: string,
+	filename: string | undefined,
+): ValidateFinding[] {
+	if (filename === undefined) {
+		return [];
+	}
+	if (!MINECRAFT_PROFILES.includes(profileId)) {
+		return [];
+	}
+	return validateDiskFilename(filename);
+}
+
+/**
  * Palette-size note. Warning-only by construction: see
  * PALETTE_SIZE_WARN_THRESHOLD for why this number is not a rule.
  */
@@ -138,6 +159,7 @@ export function validateReport(
 ): ValidateReport {
 	const findings: ValidateFinding[] = [
 		...checkFilename(report.profile.id, options.filename),
+		...checkResourceFilename(report.profile.id, options.filename),
 		...checkPaletteSize(report.colorCount),
 	];
 	for (const warning of report.warnings) {

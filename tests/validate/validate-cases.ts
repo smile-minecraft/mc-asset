@@ -96,11 +96,18 @@ export const VALIDATE_CASES: ValidateCase[] = [
 			});
 			check.equal(report.verdict, "fail", "uppercase extension fails");
 			const errors = report.findings.filter((f) => f.level === "error");
-			check.equal(errors.length, 1, "exactly one error");
-			check.equal(
-				(errors[0] as { code: string }).code,
-				"FILENAME_EXTENSION_NOT_PNG",
+			// V0.5 baseline: the stem-level rule adds PACK_CASE_MISMATCH next
+			// to the frozen FILENAME_EXTENSION_NOT_PNG, so one file now
+			// carries two errors instead of one.
+			check.equal(errors.length, 2, "extension plus stem errors");
+			const errorCodes = errors.map((f) => (f as { code: string }).code);
+			check.ok(
+				errorCodes.includes("FILENAME_EXTENSION_NOT_PNG"),
 				"filename error code",
+			);
+			check.ok(
+				errorCodes.includes("PACK_CASE_MISMATCH"),
+				"stem case error code",
 			);
 		},
 	},

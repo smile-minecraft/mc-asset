@@ -121,6 +121,82 @@ describe("validate command via spawn", () => {
 		}
 	}, 30_000);
 
+	test("validate Sword.png under minecraft:item fails with PACK_CASE_MISMATCH", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-validate-"));
+		try {
+			const input = join(dir, "Sword.png");
+			await writeFile(input, makePngBytes());
+			const { stdout, code } = await runCli([
+				"validate",
+				input,
+				"--profile",
+				"minecraft:item",
+				"--json",
+			]);
+			expect(code).toBe(3);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				error: { code: string };
+				result: {
+					verdict: string;
+					findings: Array<{ code: string; level: string }>;
+				};
+			};
+			expect(envelope.success).toBe(false);
+			expect(envelope.error.code).toBe("VALIDATION_FAILED");
+			expect(envelope.result.verdict).toBe("fail");
+			expect(
+				envelope.result.findings.some(
+					(f) => f.code === "PACK_CASE_MISMATCH" && f.level === "error",
+				),
+			).toBe(true);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("validate sword.png under minecraft:item still passes", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-validate-"));
+		try {
+			const input = join(dir, "sword.png");
+			await writeFile(input, makePngBytes());
+			const { stdout, code } = await runCli([
+				"validate",
+				input,
+				"--profile",
+				"minecraft:item",
+				"--json",
+			]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: { verdict: string };
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.verdict).toBe("pass");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("validate Sword.png under generic never fails on case", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-validate-"));
+		try {
+			const input = join(dir, "Sword.png");
+			await writeFile(input, makePngBytes());
+			const { stdout, code } = await runCli(["validate", input, "--json"]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: { verdict: string };
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.verdict).toBe("pass");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
 	test("non-png bytes are a tool failure (exit 5), never exit 3", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-validate-"));
 		try {
