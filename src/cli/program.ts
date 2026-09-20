@@ -20,6 +20,7 @@ import {
 	type PixelizeCommandOptions,
 	runPixelizeCommand,
 } from "./cmd-pixelize.ts";
+import { type PreviewOptions, runPreview } from "./cmd-preview.ts";
 import { type QuantizeOptions, runQuantize } from "./cmd-quantize.ts";
 import { type RecolorOptions, runRecolor } from "./cmd-recolor.ts";
 import { type RenderOptions, runRender } from "./cmd-render.ts";
@@ -770,6 +771,42 @@ export function buildProgram(): Command {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
 				const code = await runGenerate(
 					pattern,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("preview <input>")
+		.description(
+			"Preview an image as a .grid-compatible ASCII document, a palette map report, or a scaled PNG.",
+		)
+		.option(
+			"--ascii",
+			"Report the flattened canvas as a .grid-compatible ASCII document.",
+		)
+		.option("--palette-map", "Report the palette map JSON.")
+		.option(
+			"--scale <N>",
+			"Integer nearest-neighbor upscale factor; needs --output or --stdout.",
+		)
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option("--input <path>", "Input path aliasing the positional input.")
+		.option(
+			"--profile <name>",
+			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+		)
+		.action(
+			async (input: string, options: PreviewOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runPreview(
+					input,
 					options,
 					globals.json === true,
 					realStreams(),
