@@ -4,12 +4,24 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { VERSION } from "../index.ts";
 import {
 	handleAnalyzeAsset,
+	handleAnimateAsset,
 	handleApplyAssetOperations,
+	handleBuildAsset,
+	handleCleanupAsset,
 	handleCreateVariants,
+	handleGenerateAsset,
+	handleImportAsset,
+	handleMaterialAsset,
+	handlePaletteAsset,
 	handlePixelizeAsset,
+	handlePreviewAsset,
+	handleQuantizeAsset,
 	handleRecolorAsset,
 	handleRenderPixelAsset,
+	handleTileAsset,
+	handleTransformAsset,
 	handleValidateAsset,
+	handleValidatePackAsset,
 } from "./handlers.ts";
 import { type McpToolName, TOOL_INPUT_SCHEMAS } from "./schema.ts";
 import { MCP_TOOLS } from "./tools.ts";
@@ -87,6 +99,102 @@ export function createMcpServer(): McpServer {
 			inputSchema: TOOL_INPUT_SCHEMAS.validate_asset,
 		},
 		handleValidateAsset,
+	);
+	server.registerTool(
+		"import_asset",
+		{
+			description: toolDescription("import_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.import_asset,
+		},
+		handleImportAsset,
+	);
+	server.registerTool(
+		"build_asset",
+		{
+			description: toolDescription("build_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.build_asset,
+		},
+		handleBuildAsset,
+	);
+	server.registerTool(
+		"transform_asset",
+		{
+			description: toolDescription("transform_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.transform_asset,
+		},
+		handleTransformAsset,
+	);
+	server.registerTool(
+		"quantize_asset",
+		{
+			description: toolDescription("quantize_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.quantize_asset,
+		},
+		handleQuantizeAsset,
+	);
+	server.registerTool(
+		"cleanup_asset",
+		{
+			description: toolDescription("cleanup_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.cleanup_asset,
+		},
+		handleCleanupAsset,
+	);
+	server.registerTool(
+		"palette_asset",
+		{
+			description: toolDescription("palette_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.palette_asset,
+		},
+		handlePaletteAsset,
+	);
+	server.registerTool(
+		"material_asset",
+		{
+			description: toolDescription("material_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.material_asset,
+		},
+		handleMaterialAsset,
+	);
+	server.registerTool(
+		"tile_asset",
+		{
+			description: toolDescription("tile_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.tile_asset,
+		},
+		handleTileAsset,
+	);
+	server.registerTool(
+		"generate_asset",
+		{
+			description: toolDescription("generate_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.generate_asset,
+		},
+		handleGenerateAsset,
+	);
+	server.registerTool(
+		"preview_asset",
+		{
+			description: toolDescription("preview_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.preview_asset,
+		},
+		handlePreviewAsset,
+	);
+	server.registerTool(
+		"animate_asset",
+		{
+			description: toolDescription("animate_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.animate_asset,
+		},
+		handleAnimateAsset,
+	);
+	server.registerTool(
+		"validate_pack_asset",
+		{
+			description: toolDescription("validate_pack_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.validate_pack_asset,
+		},
+		handleValidatePackAsset,
 	);
 	return server;
 }
