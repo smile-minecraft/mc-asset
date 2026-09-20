@@ -151,7 +151,7 @@ export async function runGenerate(
 			});
 		}
 		// File-target preflight runs before any stdout artifact byte, so a
-		// refusal keeps stdout empty (same TOCTOU note as the V0.1 path).
+		// refusal keeps stdout empty.
 		await preflightArtifactTargets(targets, { mkdir: options.mkdir });
 		if (pngBytes !== undefined && targets.pngStdout) {
 			emitArtifact(pngBytes, streams, route);

@@ -210,7 +210,7 @@ export async function runTile(
 		replaceLayerPixels(artifactCanvas, layer.id, artifactPixels);
 		const pngBytes = encodePng(artifactCanvas);
 		// File-target preflight runs before any stdout artifact byte, so a
-		// refusal keeps stdout empty (same TOCTOU note as the V0.1 path).
+		// refusal keeps stdout empty.
 		await preflightArtifactTargets(targets, {
 			inputPath,
 			inPlace: undefined,

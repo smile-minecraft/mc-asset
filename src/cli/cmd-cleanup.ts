@@ -146,7 +146,7 @@ export async function runCleanup(
 			});
 		}
 		// File-target preflight runs before any stdout artifact byte, so a
-		// conflict keeps stdout empty (same TOCTOU note as the V0.1 path).
+		// conflict keeps stdout empty.
 		await preflightArtifactTargets(targets, {
 			inputPath,
 			inPlace: options.inPlace,

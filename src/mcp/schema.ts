@@ -35,13 +35,13 @@ const minecraftVersionField = z
 	.string()
 	.min(1)
 	.optional()
-	.describe("Target Minecraft version (V0.1: 26.3 only).");
+	.describe("Target Minecraft version (e.g. 26.3).");
 
 const resourcePackVersionField = z
 	.string()
 	.min(1)
 	.optional()
-	.describe("Target resource packFormat as a positive integer (V0.1: 75).");
+	.describe("Target resource packFormat as a positive integer (e.g. 75).");
 
 const outputPngField = z
 	.string()

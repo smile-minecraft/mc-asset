@@ -170,7 +170,7 @@ export function buildProgram(): Command {
 	const program = new Command();
 	program
 		.name("mc-asset")
-		.description("Pixel-native Minecraft asset toolchain (V0.1 CLI skeleton).")
+		.description("Pixel-native Minecraft asset toolchain.")
 		.version(VERSION)
 		.option(
 			"--json",
@@ -211,12 +211,12 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--minecraft-version <version>",
-			"Target Minecraft version (V0.1: 26.3 only).",
+			"Target Minecraft version (e.g. 26.3).",
 			singleUseOption("--minecraft-version"),
 		)
 		.option(
 			"--resource-pack-version <version>",
-			"Target resource packFormat as a positive integer (V0.1: 75).",
+			"Target resource packFormat as a positive integer (e.g. 75).",
 			singleUseOption("--resource-pack-version"),
 		)
 		.action(
@@ -247,12 +247,12 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--minecraft-version <version>",
-			"Target Minecraft version (V0.1: 26.3 only).",
+			"Target Minecraft version (e.g. 26.3).",
 			singleUseOption("--minecraft-version"),
 		)
 		.option(
 			"--resource-pack-version <version>",
-			"Target resource packFormat as a positive integer (V0.1: 75).",
+			"Target resource packFormat as a positive integer (e.g. 75).",
 			singleUseOption("--resource-pack-version"),
 		)
 		.option(
@@ -283,12 +283,12 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--minecraft-version <version>",
-			"Target Minecraft version (V0.1: 26.3 only).",
+			"Target Minecraft version (e.g. 26.3).",
 			singleUseOption("--minecraft-version"),
 		)
 		.option(
 			"--resource-pack-version <version>",
-			"Target resource packFormat as a positive integer (V0.1: 75).",
+			"Target resource packFormat as a positive integer (e.g. 75).",
 			singleUseOption("--resource-pack-version"),
 		)
 		.action(

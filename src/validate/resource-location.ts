@@ -1,9 +1,9 @@
 import type { ValidateFinding } from "./checks.ts";
 
 /**
- * Resource Location Validator (V0.5, §108.3). Single implementation point
+ * Resource Location Validator (§108.3). Single implementation point
  * for every resource location rule: the single-file `validate` filename
- * check and the future `validate-pack` scan import from here, never from a
+ * check and `validate-pack` scan import from here, never from a
  * second copy of the character sets. Pure and read-only: strings in,
  * findings out. No I/O, no timestamps, no randomness.
  *

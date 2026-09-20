@@ -2,22 +2,11 @@ import { McAssetError } from "../core/errors.ts";
 import { validatePackFormat } from "../profiles/versions.ts";
 
 /**
- * V0.1 version-flag resolution for analyze/validate (§73, §95).
+ * Version-flag resolution for analyze/validate (§73, §95).
  *
- * The spec verifies a single Minecraft target: Java Edition 26.3 with
- * Resource Pack Format 97.1 (§95 table, source
- * "Minecraft Wiki `Template:Resource pack format`"). The engine keeps one
- * version group keyed by integer packFormat 75 (the §95 structural example
- * `{ fact, since: { packFormat }, value }`), so V0.1 maps the sole
- * supported `--minecraft-version` onto that group and accepts integer
- * `--resource-pack-version` values through the existing
- * `validatePackFormat` check. Dotted resource-pack versions (including
- * "97.1" itself) stay unsupported until the full version-fact layer lands:
- * they are not positive integers, so they fail here with INVALID_ARGUMENT
- * instead of being silently truncated. Multi-group splits and atlas/pack
- * validators are later work; the no-flag pack.mcmeta fallback
- * (pack.pack_format as target, warning with no default otherwise) lives
- * in the validate-pack engine, never here.
+ * Supported Minecraft target: Java Edition 26.3 with Resource Pack Format 97.1.
+ * Maps --minecraft-version onto packFormat 75 facts, and accepts positive
+ * integer --resource-pack-version values.
  */
 
 export const SUPPORTED_MINECRAFT_VERSIONS = ["26.3"] as const;
@@ -25,7 +14,7 @@ export const SUPPORTED_MINECRAFT_VERSIONS = ["26.3"] as const;
 export type SupportedMinecraftVersion =
 	(typeof SUPPORTED_MINECRAFT_VERSIONS)[number];
 
-/** V0.1 single-group mapping: 26.3 exercises the packFormat 75 facts. */
+/** Single-group mapping: 26.3 exercises the packFormat 75 facts. */
 const MINECRAFT_VERSION_PACK_FORMAT: Record<string, number> = {
 	"26.3": 75,
 };
@@ -76,7 +65,7 @@ export function resolveVersionTarget(
 		const packFormat = MINECRAFT_VERSION_PACK_FORMAT[minecraftVersion];
 		if (packFormat === undefined) {
 			fail(
-				`Unsupported --minecraft-version "${minecraftVersion}". V0.1 supports: ${SUPPORTED_MINECRAFT_VERSIONS.join(", ")}.`,
+				`Unsupported --minecraft-version "${minecraftVersion}". Supported: ${SUPPORTED_MINECRAFT_VERSIONS.join(", ")}.`,
 			);
 		}
 		const resourcePack = MINECRAFT_VERSION_RESOURCE_PACK[minecraftVersion];
@@ -89,7 +78,7 @@ export function resolveVersionTarget(
 	if (resourcePackVersion !== undefined) {
 		if (!/^[0-9]+$/.test(resourcePackVersion.trim())) {
 			fail(
-				`Invalid --resource-pack-version "${resourcePackVersion}". V0.1 takes a positive integer packFormat (for example "75"); dotted versions such as "97.1" arrive with the full version-fact layer, so target 26.3 via --minecraft-version instead.`,
+				`Invalid --resource-pack-version "${resourcePackVersion}". Takes a positive integer packFormat (for example "75"); dotted versions such as "97.1" arrive with the full version-fact layer, so target 26.3 via --minecraft-version instead.`,
 			);
 		}
 		const packFormat = validatePackFormat(Number(resourcePackVersion.trim()));

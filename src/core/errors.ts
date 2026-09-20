@@ -89,7 +89,7 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	UNSUPPORTED_IMAGE_FORMAT: 5,
 	UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT: 5,
 	RESOURCE_LIMIT_EXCEEDED: 5,
-	// V0.5 pack findings (v05-design §42 table). These codes travel inside
+	// Pack findings. These codes travel inside
 	// the validate-pack report; a failing verdict throws VALIDATION_FAILED.
 	// They are registered here so the §99 registry stays the single exit
 	// authority. PACK_TEXTURE_NOT_IN_ATLAS is reserved for the atlas

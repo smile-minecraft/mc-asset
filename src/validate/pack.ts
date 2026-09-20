@@ -24,7 +24,7 @@ import {
 } from "./resource-location.ts";
 
 /**
- * validate-pack scan engine (V0.5 starter). Read-only end to end: the
+ * validate-pack scan engine. Read-only end to end: the
  * pack tree is enumerated and parsed, never written. One bad file never
  * stops the scan; every defect becomes a finding and an error-level
  * finding fails the verdict.
@@ -66,7 +66,7 @@ export interface PackScanOptions {
 /** Guard before any parsing starts: an absurd tree is exit 5, not a verdict. */
 const MAX_PACK_FILES = 50000;
 
-/** Canonical finding order inside one file (v05-design §42 table order). */
+/** Canonical finding order inside one file. */
 const FINDING_ORDER: Readonly<Record<string, number>> = {
 	PACK_INVALID_JSON: 0,
 	PACK_INVALID_FILENAME: 1,

@@ -6,7 +6,7 @@ import type { RGBA } from "./types.ts";
  * same `--colors` always produce the same palette and pixels on every
  * runtime. No transcendental functions, no randomness, no timestamps.
  *
- * Frozen rules (docs/v02-design.md "Quantizer"):
+ * Frozen rules:
  * - Split plane: the widest integer channel range in the bucket. Channel
  *   scan order is r, g, b, a; the first strictly-widest channel wins ties.
  * - Cut point: median by pixel count; an even total takes the smaller side:

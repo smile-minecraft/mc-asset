@@ -8,7 +8,7 @@ import type { PngWarning } from "../io/png.ts";
 import { validateDiskFilename } from "./resource-location.ts";
 
 /**
- * Basic validate engine (V0.1). Pure and read-only: an analyze report plus
+ * Basic validate engine. Pure and read-only: an analyze report plus
  * check rules fold into a verdict. The canvas is only read through the
  * analyze step, never written. No I/O, no timestamps, no randomness.
  */
@@ -53,7 +53,7 @@ export interface ValidateReportOptions {
 }
 
 /**
- * V0.1 pixel-art hygiene heuristic, warning-only. There is no Minecraft
+ * Pixel-art hygiene heuristic, warning-only. There is no Minecraft
  * rule behind this number: textures are RGBA8 with no palette cap, so a
  * large distinct-color count only suggests the asset may not be
  * hand-authored pixel art. It MUST NOT fail validation.
@@ -135,13 +135,13 @@ function checkPaletteSize(colorCount: number): ValidateFinding[] {
 		{
 			code: "PALETTE_SIZE_LARGE",
 			level: "warning",
-			message: `distinct color count ${colorCount} exceeds the V0.1 pixel-art hygiene note of ${PALETTE_SIZE_WARN_THRESHOLD}; not a Minecraft rule, the asset remains loadable.`,
+			message: `distinct color count ${colorCount} exceeds the pixel-art hygiene note of ${PALETTE_SIZE_WARN_THRESHOLD}; not a Minecraft rule, the asset remains loadable.`,
 		},
 	];
 }
 
 /**
- * Fold one analyze report plus the V0.1 basic checks into a verdict.
+ * Fold one analyze report plus the basic checks into a verdict.
  * Analyze warnings (partial alpha, block resolution, pending-source,
  * gAMA / iCCP notes) merge verbatim with their warning level kept, so a
  * §95 pending-source entry can never become an error here. The verdict

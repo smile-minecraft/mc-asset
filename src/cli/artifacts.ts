@@ -570,9 +570,8 @@ export function emitCommandSuccess(
 	result: CommandResult,
 ): void {
 	if (globalJson) {
-		// Command-specific fields ride flat beside the frozen V0.1 keys so
+		// Command-specific fields ride flat beside the common keys so
 		// agents read result.colors / result.detected without unwrapping.
-		// V0.1 callers pass no details and emit exactly the old shape.
 		const { details, ...rest } = result;
 		emitEnvelope(successEnvelope({ ...rest, ...details }), streams, route);
 		return;
