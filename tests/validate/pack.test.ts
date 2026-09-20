@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PACK_CASES, type PackCaseCheck } from "./pack-cases.ts";
 import {
+	atlasJson,
 	makePngBytes,
 	modelJson,
 	writeCleanBaseline,
@@ -140,6 +141,54 @@ describe("validate-pack command via spawn", () => {
 			expect(envelope.result.verdict).toBe("fail");
 			const found = envelope.result.findings.map((f) => f.code).sort();
 			expect(found).toEqual(["PACK_INVALID_JSON", "PACK_MISSING_TEXTURE"]);
+			expect(await treeHash(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("texture outside its atlas exits 3 with NOT_IN_ATLAS, inputs kept", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		try {
+			await writePackFile(
+				dir,
+				"assets/minecraft/models/block/stone.json",
+				modelJson({ textures: { all: "minecraft:block/stone" } }),
+			);
+			await writePackFile(
+				dir,
+				"assets/minecraft/textures/block/stone.png",
+				makePngBytes(),
+			);
+			await writePackFile(
+				dir,
+				"assets/minecraft/atlases/blocks.json",
+				atlasJson([]),
+			);
+			const before = await treeHash(dir);
+			const { stdout, code } = await runCli([
+				"validate-pack",
+				dir,
+				"--resource-pack-version",
+				"75",
+				"--json",
+			]);
+			expect(code).toBe(3);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				error: { code: string };
+				result: {
+					verdict: string;
+					findings: Array<{ code: string; level: string; path?: string }>;
+				};
+			};
+			expect(envelope.success).toBe(false);
+			expect(envelope.error.code).toBe("VALIDATION_FAILED");
+			expect(envelope.result.verdict).toBe("fail");
+			expect(envelope.result.findings.map((f) => f.code)).toEqual([
+				"PACK_TEXTURE_NOT_IN_ATLAS",
+			]);
+			expect(envelope.result.findings[0]?.level).toBe("error");
 			expect(await treeHash(dir)).toBe(before);
 		} finally {
 			await rm(dir, { recursive: true, force: true });

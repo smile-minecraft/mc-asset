@@ -63,6 +63,11 @@ export function modelJson(body: unknown): string {
 	return JSON.stringify(body);
 }
 
+/** Atlas definition file body: the engine only reads `sources`. */
+export function atlasJson(sources: unknown): string {
+	return JSON.stringify({ sources });
+}
+
 /** Clean baseline: one model referencing one texture. */
 export async function writeCleanBaseline(packRoot: string): Promise<void> {
 	await writePackFile(

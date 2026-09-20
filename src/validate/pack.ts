@@ -6,6 +6,16 @@ import {
 	extractAnimationSection,
 } from "../core/mcmeta.ts";
 import { decodePng } from "../io/png.ts";
+import {
+	ITEM_ATLAS_PLACEMENT_FACT,
+	ITEMS_ATLAS_FACT,
+	resolveVersionedFact,
+} from "../profiles/versions.ts";
+import {
+	atlasCoverageFor,
+	parseAtlasDefinitions,
+	requiredAtlasForModel,
+} from "./atlas.ts";
 import type { ValidateFindingLevel } from "./checks.ts";
 import {
 	parseResourceLocation,
@@ -23,9 +33,14 @@ import {
  * `parent` and `textures` references, texture PNG decode and dimensions,
  * sibling `.png.mcmeta` animation geometry, disk filename and namespace
  * checks through the shared resource-location engine. Atlas sources
- * (PACK_TEXTURE_NOT_IN_ATLAS) stay reserved and are never emitted here;
- * the root pack.mcmeta parses for INVALID_JSON and, with no version flag,
- * lends its pack.pack_format as the scan target (read-only, no default).
+ * (`assets/<namespace>/atlases/*.json`) distinguish "texture exists but
+ * never entered the required atlas" (PACK_TEXTURE_NOT_IN_ATLAS, error)
+ * from "texture file missing" (PACK_MISSING_TEXTURE): the atlas verdicts
+ * only run while the items/split facts resolve for the effective
+ * packFormat, and an undefined or partially understood atlas always skips
+ * instead of accusing. The root pack.mcmeta parses for INVALID_JSON and,
+ * with no version flag, lends its pack.pack_format as the scan target
+ * (read-only, no default).
  */
 
 export interface PackFinding {
@@ -250,6 +265,12 @@ interface ScanState {
 	errorFiles: Set<string>;
 	referencedTextures: Set<string>;
 	modelRels: string[];
+	atlasRefs: Array<{
+		modelRel: string;
+		field: string;
+		value: string;
+		target: string;
+	}>;
 }
 
 /** Per-file checks that need no cross-file view. Order matches FINDING_ORDER. */
@@ -603,6 +624,7 @@ function checkTextureReference(
 	const target = resolveTextureRel(value);
 	if (knownFiles.has(target)) {
 		state.referencedTextures.add(target);
+		state.atlasRefs.push({ modelRel: rel, field, value, target });
 		return;
 	}
 	const folded = lowerIndex.get(target.toLowerCase());
@@ -626,6 +648,60 @@ function checkTextureReference(
 		rel,
 	);
 	state.errorFiles.add(rel);
+}
+
+/**
+ * Atlas verdicts over texture references that resolved to real files.
+ * Missing files already carry PACK_MISSING_TEXTURE and never reach this
+ * pass, so the two §53 errors stay mutually exclusive. The required atlas
+ * names and the version gate both come from the items/split facts: below
+ * the split, or with no determinable version, every verdict skips. Item
+ * models share one required atlas (the items value), which is exactly the
+ * same-atlas constraint; block models take the blocks value. An undefined
+ * or partially understood atlas answers `unknown` and skips, never
+ * accuses, and a defective texture file never drags a second code along.
+ */
+function checkAtlasCoverage(
+	state: ScanState,
+	options: PackScanOptions | undefined,
+	mcmetaDoc: unknown,
+): void {
+	const packFormat = options?.packFormat ?? packFormatFromMcmeta(mcmetaDoc);
+	if (packFormat === undefined) {
+		return;
+	}
+	const itemsAtlas = resolveVersionedFact(ITEMS_ATLAS_FACT, packFormat);
+	const placement = resolveVersionedFact(ITEM_ATLAS_PLACEMENT_FACT, packFormat);
+	if (itemsAtlas === undefined || placement === undefined) {
+		return;
+	}
+	if (placement.itemSameAtlas !== true) {
+		return;
+	}
+	const parsed = parseAtlasDefinitions(state.docs);
+	for (const ref of state.atlasRefs) {
+		if (state.errorFiles.has(ref.target)) {
+			continue;
+		}
+		const required = requiredAtlasForModel(ref.modelRel, {
+			itemAtlas: itemsAtlas.atlas,
+			blockAtlas: placement.blockAtlas,
+		});
+		if (required === undefined) {
+			continue;
+		}
+		if (atlasCoverageFor(parsed, required, ref.target) !== "not-covered") {
+			continue;
+		}
+		push(
+			state.findings,
+			"PACK_TEXTURE_NOT_IN_ATLAS",
+			"error",
+			`"${ref.field}" "${ref.value}" in "${ref.modelRel}" resolves to "${ref.target}" which is not stitched into the "${required}" atlas.`,
+			ref.modelRel,
+		);
+		state.errorFiles.add(ref.modelRel);
+	}
 }
 
 /**
@@ -653,6 +729,7 @@ export async function scanPack(
 		errorFiles: new Set(),
 		referencedTextures: new Set(),
 		modelRels: [],
+		atlasRefs: [],
 	};
 	for (const rel of rels) {
 		if (rel === "pack.mcmeta") {
@@ -705,6 +782,7 @@ export async function scanPack(
 	for (const rel of state.modelRels) {
 		checkModelReferences(rel, knownFiles, lowerIndex, state);
 	}
+	checkAtlasCoverage(state, options, mcmetaDoc);
 	// Orphan is warning-only over lowercase-.png textures that decoded
 	// cleanly, and it skips files that already carry an error, so one
 	// defect never drags a second code along.
