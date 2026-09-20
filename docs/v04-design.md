@@ -556,28 +556,28 @@ validate（含 --mcmeta）                 0 / 2 / 3 / 4 / 5
 | 項目 | 為什麼無法推定 | 需要什麼 | 現況 |
 |---|---|---|---|
 | frames 目錄接受 `.png` frame 嗎 | §48 只說 frame 是 PixelCanvas，§51 只排除 animation 進 `.mcpx` | 是否接受 PNG 作為 frame 輸入 | V0.4 凍結為只讀寫 `.mcpx` frame |
-| frames 目錄內非 `.mcpx` 檔的處置 | 規格未提 | 忽略或拒絕 | V0.4 未定；待決 |
-| mcmeta 欄位的值域與組合語意 | §46 只列欄位名，沒有值域；§47 只給一個例子 | 各欄位的合法值與 warning 組合 | V0.4 原樣回報、只給 warning；值域解讀待決 |
+| frames 目錄內非 `.mcpx` 檔的處置 | 規格未提 | 忽略或拒絕 | 實作忽略非 `.mcpx` 檔並附 `NON_MCPX_IGNORED` warning；是否改為拒絕仍待決（實作判讀；待複核） |
+| mcmeta 欄位的值域與組合語意 | §46 只列欄位名，沒有值域；§47 只給一個例子 | 各欄位的合法值與 warning 組合 | V0.4 原樣回報、只給 warning；值域解讀待決；實作在推導 layout 時以 vertical 優先，mipmap 只在 cutout 加 mean 時給 warning、其他策略原樣透傳，`unpack --mcmeta` 對尺寸不符／不可整除／index 越界／顯式 count 不符一律以 `INVALID_ANIMATION_FRAME`（exit 2、零寫入）拒絕（實作判讀；待複核） |
 | GUI scaling 的 mcmeta 鍵路徑 | §42 只給 `stretch`／`tile`／`nine_slice`／`border` 名稱 | 精確 key path 與型別 | 以名稱定位；鍵路徑待相容層查證（§95） |
 | 是否自動偵測同名 `.mcmeta` | §50 例子是 `texture.png.mcmeta`，但 §18 要求顯式路徑 | 是否允許推導 sibling | V0.4 一律顯式 `--mcmeta`；自動偵測待決 |
-| grid layout 的預設欄數或自動排版 | §49 只列 layout 名稱 | 是否提供自動 grid | V0.4 強制顯式 `--columns`；維持或改動待決 |
+| grid layout 的預設欄數或自動排版 | §49 只列 layout 名稱 | 是否提供自動 grid | V0.4 強制顯式 `--columns`；維持或改動待決；實作的 grid unpack 不修剪尾列透明空 cell（pack→unpack 的幀數可能變多），非 grid layout 帶 `--columns` 則靜默忽略（實作判讀；待複核） |
 | nine-slice preview 的放大方式 | §42 未定 preview 形狀 | 是否讓 `--scale` 併用 | V0.4 固定 1:1 |
 | preview guide 的顏色與線寬 | 規格未定 | 是否固定色或可配置 | 凍結為 `#FF00FFFF` 1px；是否可配置待決 |
 | `stretch preview`／`tile preview` | §42 列為「未來」 | 是否屬 V0.4 | 明確不在 V0.4 |
-| `stretch_inner` 的行為 | §42 說「後續版本」 | 何時實作與語意 | 明確排除在 V0.4 外；只解析回報 |
+| `stretch_inner` 的行為 | §42 說「後續版本」 | 何時實作與語意 | 明確排除在 V0.4 外；只解析回報；實作於 `true` 時附 warning、不套用（實作判讀；待複核） |
 | particle small-size readability 規則 | §43 只有方向 | 可測的規則或門檻 | V0.4 只呈現結構化資訊；規則待決 |
 | particle frame consistency 規則 | §43 只有名稱 | 一致性判準 | 沿用 Animation 幾何驗證；專屬規則待決 |
-| GUI scaling 驗證規則 | §46 只列「GUI scaling」 | 判準與門檻 | V0.4 只做 border 幾何；scaling 判準待決 |
+| GUI scaling 驗證規則 | §46 只列「GUI scaling」 | 判準與門檻 | V0.4 只做 border 幾何；scaling 判準待決；實作對無 scaling 給 type=none 並附 warning、非 nine_slice 給 warning 且無 regions，border 溢位為 error finding、不產 regions、preview PNG 照寫（線超出範圍時跳過）（實作判讀；待複核） |
 | palette metadata 檢查 | §46 只列名稱 | 要檢查什麼 | 未定義；待決 |
 | atlas reference 驗證 | §43 列為 particle 重點，但 atlas 屬 V0.5（§88） | 何時做 | V0.4 只標 predicted；V0.5 實作 |
-| `pixelize` gui／particle preset 的數值 | docs §30 只有方向 | 各 preset 的參數值 | 先以 starter 落地並標 pending art-direction review |
+| `pixelize` gui／particle preset 的數值 | docs §30 只有方向 | 各 preset 的參數值 | 先以 starter 落地並標 pending art-direction review；實作 gui colors=16、particle colors=24，cleanup=outlier、edge=cluster=0（實作判讀；待複核） |
 | `animate preview` 的豐富形式 | §39 只有「preview animation」 | filmstrip／時間軸等輸出 | V0.4 只有結構報告與 sheet ASCII |
 | `animate` 用 subcommand 或旗標 | 規格未定 CLI 形狀 | 命令形狀 | 凍結為 subcommand；維持或改動待決 |
 | unpack 輸出 frame 的格式 | §48 未定 frame 的檔形式 | `.mcpx` 或 PNG | V0.4 凍結為 `.mcpx` |
 | `FrameSetMetadata` 的內容 | §48 只給型別名 | 有哪些欄位、是否影響行為 | V0.4 原樣保留、不解析 |
 | `animate preview --ascii` 的尺寸上限 | 規格未定；token 成本是實務問題 | 上限值或降級策略 | 沿用 `preview --ascii` 的政策；上限待決 |
 
-「現況」一欄只記本凍結的判定，不代表任何項目已定案；未提到的細節仍以各節敘述為準。
+「現況」一欄只記實作實況，不代表任何項目已定案；未提到的細節仍以各節敘述為準。
 
 ---
 

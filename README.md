@@ -1,8 +1,8 @@
 # mc-asset
 
 Pixel-native Minecraft asset toolchain. The V0.1 command set and the frozen
-V0.2 and V0.3 command sets all ship from this entry point; `--version` still
-prints `0.1.0` (commander-owned).
+V0.2, V0.3, and V0.4 command sets all ship from this entry point; `--version`
+still prints `0.1.0` (commander-owned).
 
 Entry point for development: `bun src/cli/index.ts`. For installation,
 `mc-asset` ships through Homebrew — see `docs/homebrew.md` and
@@ -44,6 +44,24 @@ exit codes in `docs/cli-surface.md`):
 | `tile <input>` | PNG/JPEG/WebP/`.mcpx` | Report only, or PNG (single corrected tile / NxN repeat preview) |
 | `generate <pattern>` | None (palette from built-in material name or `.mcpx`) | PNG and/or `.mcpx` |
 | `preview <input>` | PNG/JPEG/WebP/`.mcpx` | Report only (`--ascii`/`--palette-map`), or PNG (`--scale`) |
+
+V0.4 adds one command, `animate`, plus frozen extensions to existing commands
+(semantics in `docs/v04-design.md`, flags and exit codes in
+`docs/cli-surface.md`):
+
+| Command | Input | Output |
+|---|---|---|
+| `animate pack` | Frames directory (one `.mcpx` per frame) | PNG sprite sheet |
+| `animate unpack <sheet.png>` | PNG sprite sheet | Frames directory (one `.mcpx` per frame) |
+| `animate reorder` | Frames directory | Frames directory |
+| `animate resize` | Frames directory | Frames directory |
+| `animate validate` | Frames directory (+ `--mcmeta`) | Report only |
+| `animate preview` | Frames directory | Report only, or ASCII on stdout |
+
+The V0.4 extensions to existing commands: `preview --nine-slice` (a fourth
+preview mode that requires `--mcmeta`), `validate --mcmeta <path>`,
+`--profile minecraft:gui` / `minecraft:particle`, and
+`pixelize --preset gui` / `particle`.
 
 ## Prerequisites
 
@@ -171,7 +189,8 @@ Related path rules (flag list verified via `render --help`):
   `error [ARGUMENT_CONFLICT] --force and --in-place must not be combined.`
   (exit 2).
 - `--profile` accepts `generic` (default), `minecraft:item`,
-  `minecraft:block`. Minecraft profiles export PNG only: a non-`.png`
+  `minecraft:block`, and — since V0.4 — `minecraft:gui` /
+  `minecraft:particle`. Minecraft profiles export PNG only: a non-`.png`
   output path is `UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT`.
 - Every file target is existence-checked before the first byte lands
   anywhere, and writes are atomic (temp file + rename).
@@ -266,6 +285,11 @@ bun src/cli/index.ts import /tmp/mc-asset-quickstart/fake.jpg --output /tmp/mc-a
 # error [UNSUPPORTED_IMAGE_FORMAT] Input does not start with the PNG signature.
 # exit code: 5
 ```
+
+V0.4 keeps that split and adds `animate`, whose frames are `.mcpx` and whose
+sprite sheet is PNG — animation never enters `.mcpx` (§51). `preview
+--nine-slice` and `validate --mcmeta` read a PNG plus an explicitly given
+`.mcmeta` path; neither derives a sibling file.
 
 ## V0.2 commands in practice
 
@@ -381,6 +405,44 @@ That document is `.grid`-compatible: save it and feed it straight back to
 measurement is an authoring tool — it reports, and with explicit correction
 flags writes PNG, but never writes back to a `.mcpx`.
 
+## V0.4 commands in practice
+
+`animate` reuses the V0.1 file rules: an explicit target is required where it
+writes, an existing target needs `--force`, missing parents need `--mkdir`, and
+every write is atomic. Frames live on disk as a directory of one `.mcpx` per
+frame, ordered by byte-lexicographic filename; `--layout` is required for
+`pack`/`unpack`/`preview` and has no default. The extensions to existing
+commands follow the same rules: `preview --nine-slice` requires `--mcmeta`, and
+`validate --mcmeta` reads a PNG plus an explicit `.mcmeta`.
+
+The transcript below keeps the real outputs but uses bare command names
+instead of the full `bun src/cli/index.ts` entry prefix:
+
+```text
+$ animate pack --frames-dir frames --layout vertical --output sheet.png
+ok animate mode=pack profile=generic frames=2 layout=vertical size=4x8 output=sheet.png
+
+$ animate unpack sheet.png --layout vertical --frame-size 4x4 --output-dir out --mkdir
+ok animate mode=unpack profile=generic frames=2 layout=vertical outputDir=out
+
+$ validate sheet.png --mcmeta sheet.mcmeta
+verdict: pass
+dimensions: 4x8
+colors: 2
+alpha: predicted solid (opaque=32 transparent=0 partial=0)
+profile: predicted profile generic has no Minecraft-specific restrictions.
+mcmeta: sheet.mcmeta texture(strategy=mean bias=0 predicted=solid) animation(frames=2 size=4x4 layout=vertical)
+mipmap: strategy=mean bias=0 predicted=solid
+warning [PENDING_SOURCE_PNG_ONLY] Compat fact "texture-png-only" is pending an official source; reported as warning only.
+target: default (engine defaults)
+
+$ preview px.png --nine-slice --mcmeta nine.mcmeta
+ok preview profile=generic mode=nine-slice size=8x8 scaling=nine_slice
+
+$ preview px.png --nine-slice --mcmeta nine.mcmeta --json
+{"success":true,"result":{"command":"preview","mode":"nine-slice","profile":"generic","width":8,"height":8,"mcmeta":"nine.mcmeta","scaling":{"type":"nine_slice"},"findings":[],"nineSlice":{"border":{"left":2,"top":2,"right":2,"bottom":2},"stretchInner":false},"regions":{"topLeft":{"x":0,"y":0,"width":2,"height":2},"top":{"x":2,"y":0,"width":4,"height":2},"topRight":{"x":6,"y":0,"width":2,"height":2},"left":{"x":0,"y":2,"width":2,"height":4},"center":{"x":2,"y":2,"width":4,"height":4},"right":{"x":6,"y":2,"width":2,"height":4},"bottomLeft":{"x":0,"y":6,"width":2,"height":2},"bottom":{"x":2,"y":6,"width":4,"height":2},"bottomRight":{"x":6,"y":6,"width":2,"height":2}}}}
+```
+
 ## Batch operations (`--operations`)
 
 Pixel/rect/line/fill edits travel through `--operations <path>` on
@@ -408,7 +470,7 @@ translucent pass (`force_translucent`), so the effective classification
 needs the model JSON too. That check belongs to `validate-pack` (V0.5), not
 V0.1: never treat a V0.1 report as the in-game result.
 
-## Determinism scope (CI-limited, V0.1 + V0.2 + V0.3)
+## Determinism scope (CI-limited, V0.1 + V0.2 + V0.3 + V0.4)
 
 What the toolchain guarantees, and where it was checked:
 
@@ -429,6 +491,10 @@ What the toolchain guarantees, and where it was checked:
   `tests/conformance/cli-conformance.test.ts`. `generate` produces identical
   bytes for the same seed across Bun and Node, because its only randomness is
   a fixed xorshift32 stream derived from `--seed`.
+- Same input plus same flags → byte-identical output for the V0.4 commands as
+  well. `animate pack` and `validate --mcmeta` rerun byte-identically, locked in
+  the V0.4 determinism cases of `tests/conformance/cli-conformance.test.ts`
+  (eight V0.4 guard-matrix cases plus two V0.4 determinism cases).
 - Cross-runtime: CI runs a `node` job alongside the `bun` job
   (`.github/workflows/ci.yml`); the shared golden/canonical/determinism cases
   in `tests/**/*.node.ts` run under `node:test` with the same assertions as
@@ -438,11 +504,17 @@ What the toolchain guarantees, and where it was checked:
   `quantize`, `pixelize` on JPEG and WebP, a four-file `variant` fan-out, and
   canonical `analyze` JSON. The V0.3 scenarios add `generate` PNG and `.mcpx`
   bytes, the `tile` report JSON, and the three `preview` modes (`--ascii`,
-  `--palette-map`, and `--scale` PNG).
+  `--palette-map`, and `--scale` PNG). The V0.4 scenarios add four more: the
+  `animate pack` sheet (`668bf78b…`, 204 B), the two unpacked frame files
+  (`ffed8046…` / `71c28eab…`, 136 B each, matching the committed fixtures), the
+  `validate --mcmeta` canonical report (`2d33ded5…`, 1111 B), and the
+  `preview --nine-slice` canonical JSON (`4f6d1f7b…`, 685 B). The comparison
+  reports all 26 compared items OK and identical across Bun and Node; CI run
+  35494750478 succeeded on both the `bun` and `node` jobs.
 - Static guards in CI forbid `Math.random` and transcendental `Math`
   functions in `src/` (§100.2, §100.3), and Bun-only APIs in `src/` (§100.5).
-- Scope limit: this covers the checked V0.1, V0.2, and V0.3 inputs, formats,
-  and flags only. JPEG decode is not claimed bit-exact across
+- Scope limit: this covers the checked V0.1, V0.2, V0.3, and V0.4 inputs,
+  formats, and flags only. JPEG decode is not claimed bit-exact across
   implementations, and untested format variants stay unverified (see the
   gaps below).
 
@@ -506,8 +578,33 @@ What the toolchain guarantees, and where it was checked:
   source (§95). It is warning-only by construction and can never fail
   validation.
 - **Effective alpha needs `validate-pack` (V0.5)**, and later-version surface
-  stays unimplemented: no `animate`, `validate-pack`, or `mcp` command
-  (V0.4–V0.6).
+  stays unimplemented: no `validate-pack` or `mcp` command (V0.5–V0.6).
+- **The V0.4 `animate` and mcmeta readings are starter behavior pending
+  review**: frame derivation prefers `vertical` when the mcmeta layout is
+  ambiguous; `unpack --mcmeta` is conservative (a size mismatch, a
+  non-divisible sheet, an out-of-range frame index, or a mismatch with an
+  explicit count is `INVALID_ANIMATION_FRAME`, exit 2, zero writes); mipmap
+  only warns for cutout plus `mean` and passes every other strategy through
+  unchanged; non-`.mcpx` entries in a frames directory are ignored with a
+  `NON_MCPX_IGNORED` warning; a grid `unpack` does not trim a trailing
+  transparent cell row, so a `pack`/`unpack` round-trip can yield more frames
+  than the original; and `--columns` on a non-grid layout is silently ignored.
+- **GUI scaling's mcmeta key path is unverified**: V0.4 locates
+  `stretch`/`tile`/`nine_slice`/`border`/`stretch_inner` by name; the exact
+  key path and value types await the compat-layer check (§95).
+- **`stretch_inner` is parsed and reported but never applied** (§42): a
+  `stretch_inner: true` in the mcmeta yields a warning only.
+- **`preview --nine-slice` is fixed at 1:1**: there is no `--scale`
+  combination yet, the border guide is the fixed color `#FF00FFFF` at 1px, and
+  a border that overflows the sprite is an error finding with no regions while
+  the preview PNG is still written (a guide line outside the sprite is
+  skipped); findings never raise exit 3. These readings are pending review.
+- **Particle atlas reference stays predicted**: full atlas validation is V0.5
+  work (§88), so `--profile minecraft:particle` marks the atlas reference as
+  predicted only.
+- **`pixelize --preset gui` / `particle` are starter parameter sets** pending
+  art-direction review (gui 16 colors, particle 24; cleanup `outlier`; edge and
+  cluster 0), on the same footing as the V0.2 presets.
 - **The ten procedural patterns are a starter**: `generate`'s pattern
   algorithms and color sampling are deterministic — goldens pin the 8×8
   seed-7 stone output for every pattern — but the algorithms and the color
