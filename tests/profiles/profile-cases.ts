@@ -290,22 +290,24 @@ export const MODEL_CASES: ModelCase[] = [
 		},
 	},
 	{
-		name: "pending-source fact only warns, never errors",
+		name: "all facts determined: no pending-source warnings remain",
 		run: (check) => {
-			const warnings = pendingSourceWarnings();
-			check.ok(warnings.length >= 1, "at least one pending warning");
-			for (const warning of warnings) {
-				check.equal(warning.level, "warning", "warning level only");
-			}
-			const text = JSON.stringify(warnings).toLowerCase();
-			check.ok(!text.includes("error"), "no error claim");
+			check.deepEqual(
+				pendingSourceWarnings(),
+				[],
+				"no pending-source warnings once every fact is determined",
+			);
 		},
 	},
 	{
-		name: "eight §95 facts carry source, check date, and since state",
+		name: "seven §95 facts carry source, check date, and sourced since",
 		run: (check) => {
 			const byName = new Map(COMPAT_FACTS.map((fact) => [fact.fact, fact]));
-			check.equal(COMPAT_FACTS.length, 8, "eight facts");
+			check.equal(COMPAT_FACTS.length, 7, "seven facts");
+			check.ok(
+				!byName.has("resource-pack-format"),
+				"resource-pack-format fact is retired",
+			);
 			const expected: Array<{
 				fact: string;
 				status: "verified" | "pending-source";
@@ -313,52 +315,46 @@ export const MODEL_CASES: ModelCase[] = [
 				sourcePart: string;
 			}> = [
 				{
-					fact: "resource-pack-format",
-					status: "verified",
-					since: undefined,
-					sourcePart: "Template:Resource pack format",
-				},
-				{
 					fact: "trim-palette-location",
 					status: "verified",
-					since: undefined,
-					sourcePart: "Template:Resource pack format",
+					since: "97.1",
+					sourcePart: "26.3-snap1 / RP 97.1",
 				},
 				{
 					fact: "items-atlas-separated",
 					status: "verified",
 					since: "75.0",
-					sourcePart: "1.21.11 release notes",
+					sourcePart: "1.21.11 / RP 75.0",
 				},
 				{
 					fact: "item-same-atlas-block-blocks-atlas",
 					status: "verified",
 					since: "75.0",
-					sourcePart: "1.21.11 release notes",
+					sourcePart: "1.21.11 / RP 75.0",
 				},
 				{
 					fact: "texture-mipmap-fields",
 					status: "verified",
 					since: "75.0",
-					sourcePart: "1.21.11 release notes",
+					sourcePart: "1.21.11 / RP 75.0",
 				},
 				{
 					fact: "block-render-pass-auto",
 					status: "verified",
-					since: undefined,
-					sourcePart: "26.1 release notes",
+					since: "84.0",
+					sourcePart: "Java Edition 26.1 (Block model)",
 				},
 				{
 					fact: "block-force-translucent",
 					status: "verified",
-					since: undefined,
-					sourcePart: "26.1 release notes",
+					since: "84.0",
+					sourcePart: "Java Edition 26.1 (Block model)",
 				},
 				{
 					fact: "texture-png-only",
-					status: "pending-source",
-					since: undefined,
-					sourcePart: "pending official source",
+					status: "verified",
+					since: "22.0",
+					sourcePart: "1.20.3 / RP 22.0",
 				},
 			];
 			for (const want of expected) {
@@ -376,66 +372,40 @@ export const MODEL_CASES: ModelCase[] = [
 						found.source.includes("§95"),
 					`${want.fact} source cites origin and §95`,
 				);
-				check.equal(found?.checkedAt, "2026-09-19", `${want.fact} check date`);
+				check.equal(found?.checkedAt, "2026-09-20", `${want.fact} check date`);
 				check.ok(found?.value !== undefined, `${want.fact} value present`);
 			}
 			for (const fact of COMPAT_FACTS) {
+				const since = fact.since.packFormat;
 				check.ok(
-					fact.since.packFormat !== "97.1",
-					`${fact.fact}: 97.1 never enters since.packFormat`,
+					since !== undefined && /^\d+\.\d+$/.test(since),
+					`${fact.fact}: since.packFormat is a normalized dotted major.minor string`,
 				);
 			}
 		},
 	},
 	{
-		name: "since-undetermined and pending-source facts never enforce",
+		name: "determined facts activate at since and never warn",
 		run: (check) => {
 			for (const fact of COMPAT_FACTS) {
-				const undetermined = fact.since.packFormat === undefined;
-				const gated = undetermined || fact.status === "pending-source";
-				if (!gated) {
-					continue;
+				const since = fact.since.packFormat;
+				if (since === undefined) {
+					throw new Error(`${fact.fact} has no determined since.packFormat`);
 				}
-				if (undetermined) {
-					for (const target of ["1.0", "75.0", "999.0"]) {
-						check.equal(
-							isFactActive(fact, target),
-							false,
-							`${fact.fact} never active at ${target}`,
-						);
-					}
-				}
-				for (const target of ["1.0", "75.0", "999.0"]) {
-					check.equal(
-						resolveVersionedFact(fact, target),
-						undefined,
-						`${fact.fact} resolves to nothing at ${target}`,
-					);
-				}
-			}
-			const warnings = pendingSourceWarnings();
-			for (const fact of COMPAT_FACTS) {
-				const gated =
-					fact.since.packFormat === undefined ||
-					fact.status === "pending-source";
-				if (!gated) {
-					continue;
-				}
+				check.equal(
+					isFactActive(fact, since),
+					true,
+					`${fact.fact} active at its since ${since}`,
+				);
 				check.ok(
-					warnings.some(
-						(warning) =>
-							warning.level === "warning" &&
-							warning.message.includes(fact.fact),
-					),
-					`${fact.fact} surfaces a warning`,
+					resolveVersionedFact(fact, since) !== undefined,
+					`${fact.fact} resolves at its since ${since}`,
 				);
 			}
-			for (const warning of warnings) {
-				check.equal(warning.level, "warning", "warning level only");
-			}
-			check.ok(
-				!JSON.stringify(warnings).toLowerCase().includes("error"),
-				"no error claim in gate warnings",
+			check.deepEqual(
+				pendingSourceWarnings(),
+				[],
+				"no gate warnings once every fact is determined",
 			);
 		},
 	},

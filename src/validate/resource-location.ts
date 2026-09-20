@@ -69,7 +69,7 @@ function extensionOf(segment: string): string {
 /**
  * Full location check: namespace, path, case, filename, extension. Each
  * violated rule contributes exactly one finding; a clean location yields an
- * empty list. The extension finding is warning-only (pending-source fact);
+ * empty list. The extension finding is warning-only (sourced png-only fact);
  * every other finding is an error.
  */
 export function validateResourceLocation(value: string): ValidateFinding[] {
@@ -116,7 +116,7 @@ export function validateResourceLocation(value: string): ValidateFinding[] {
 		findings.push({
 			code: "PENDING_SOURCE_PNG_ONLY",
 			level: "warning",
-			message: `extension of "${segment}" is not .png; texture-png-only is pending an official source, reported as warning only.`,
+			message: `extension of "${segment}" is not .png; Minecraft 1.20.3 (resource-pack format 22.0) requires textures to be .png; reported as warning only.`,
 		});
 	}
 	return findings;

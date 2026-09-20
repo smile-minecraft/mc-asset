@@ -29,44 +29,30 @@ export interface TrimPaletteValue {
 	to: "textures/palettes/trim/";
 }
 
-export interface ResourcePackFormatValue {
-	format: "97.1";
-}
-
 export interface PngOnlyValue {
 	format: "png";
 }
 
 /**
- * §95 compatibility facts as version-interval data. Facts whose starting
- * packFormat is confirmed carry it in `since` as a dotted string; facts
- * still waiting on a version mapping (§95 table rows 1-2 and 6-8) leave
- * `since` empty and only ever produce warnings. A packFormat of "75.0" on
- * the 1.21.11 rows repeats the §95 structural example, not a verified
- * version mapping, so later steps must not treat it as a version boundary.
+ * §95 compatibility facts as version-interval data. Every fact carries its
+ * sourced starting packFormat in `since` as a dotted string; the
+ * version-to-format mapping itself lives in the version table
+ * (`src/cli/version-options.ts`), which supersedes the retired
+ * resource-pack-format fact. All seven facts are determined as of
+ * 2026-09-20; `pendingSourceWarnings` stays as the guard for any future
+ * undetermined fact.
  */
-export const RESOURCE_PACK_FORMAT_FACT: VersionedFact<ResourcePackFormatValue> =
-	{
-		fact: "resource-pack-format",
-		since: {},
-		value: { format: "97.1" },
-		status: "verified",
-		source:
-			"§95; Minecraft Wiki `Template:Resource pack format` (Java Edition 26.3)",
-		checkedAt: "2026-09-19",
-	};
-
 export const TRIM_PALETTE_FACT: VersionedFact<TrimPaletteValue> = {
 	fact: "trim-palette-location",
-	since: {},
+	since: { packFormat: "97.1" },
 	value: {
 		from: "textures/trim/color_palettes/",
 		to: "textures/palettes/trim/",
 	},
 	status: "verified",
 	source:
-		"§95; Minecraft Wiki `Template:Resource pack format` (26.3 / RP 97.1)",
-	checkedAt: "2026-09-19",
+		"§95; Minecraft Wiki Template:Resource pack format (26.3-snap1 / RP 97.1)",
+	checkedAt: "2026-09-20",
 };
 
 export const ITEMS_ATLAS_FACT: VersionedFact<ItemsAtlasValue> = {
@@ -74,8 +60,9 @@ export const ITEMS_ATLAS_FACT: VersionedFact<ItemsAtlasValue> = {
 	since: { packFormat: "75.0" },
 	value: { atlas: "items", mipmapped: false },
 	status: "verified",
-	source: "§95; Minecraft Java Edition 1.21.11 release notes",
-	checkedAt: "2026-09-19",
+	source:
+		"§95; Minecraft Java Edition 1.21.11 release notes; Minecraft Wiki Template:Resource pack format (1.21.11 / RP 75.0)",
+	checkedAt: "2026-09-20",
 };
 
 export const ITEM_ATLAS_PLACEMENT_FACT: VersionedFact<AtlasPlacementValue> = {
@@ -83,8 +70,9 @@ export const ITEM_ATLAS_PLACEMENT_FACT: VersionedFact<AtlasPlacementValue> = {
 	since: { packFormat: "75.0" },
 	value: { itemSameAtlas: true, blockAtlas: "blocks" },
 	status: "verified",
-	source: "§95; Minecraft Java Edition 1.21.11 release notes",
-	checkedAt: "2026-09-19",
+	source:
+		"§95; Minecraft Java Edition 1.21.11 release notes; Minecraft Wiki Template:Resource pack format (1.21.11 / RP 75.0)",
+	checkedAt: "2026-09-20",
 };
 
 export const TEXTURE_MIPMAP_FACT: VersionedFact<TextureMipmapValue> = {
@@ -92,47 +80,45 @@ export const TEXTURE_MIPMAP_FACT: VersionedFact<TextureMipmapValue> = {
 	since: { packFormat: "75.0" },
 	value: { fields: ["mipmap_strategy", "alpha_cutoff_bias"] },
 	status: "verified",
-	source: "§95; Minecraft Java Edition 1.21.11 release notes",
-	checkedAt: "2026-09-19",
+	source:
+		"§95; Minecraft Java Edition 1.21.11 release notes; Minecraft Wiki Template:Resource pack format (1.21.11 / RP 75.0)",
+	checkedAt: "2026-09-20",
 };
 
 export const BLOCK_RENDER_PASS_FACT: VersionedFact<BlockRenderPassValue> = {
 	fact: "block-render-pass-auto",
-	since: {},
+	since: { packFormat: "84.0" },
 	value: {
 		predictedClasses: ["solid", "cutout", "translucent"],
 	},
 	status: "verified",
-	source: "§95; Minecraft 26.1 release notes",
-	checkedAt: "2026-09-19",
+	source:
+		"§95; Minecraft 26.1 release notes; Minecraft Wiki Java Edition 26.1 (Block model)",
+	checkedAt: "2026-09-20",
 };
 
 export const BLOCK_FORCE_TRANSLUCENT_FACT: VersionedFact<BlockForceTranslucentValue> =
 	{
 		fact: "block-force-translucent",
-		since: {},
+		since: { packFormat: "84.0" },
 		value: { field: "force_translucent", entryForm: "object" },
 		status: "verified",
-		source: "§95; Minecraft 26.1 release notes",
-		checkedAt: "2026-09-19",
+		source:
+			"§95; Minecraft 26.1 release notes; Minecraft Wiki Java Edition 26.1 (Block model)",
+		checkedAt: "2026-09-20",
 	};
 
-/**
- * The PNG-only texture rule still lacks an official source for its starting
- * pack format (§95). It stays in the table so the gap is visible, but it
- * only ever produces a warning, never an enforcement value.
- */
 export const PNG_ONLY_FACT: VersionedFact<PngOnlyValue> = {
 	fact: "texture-png-only",
-	since: {},
+	since: { packFormat: "22.0" },
 	value: { format: "png" },
-	status: "pending-source",
-	source: "§95; pending official source",
-	checkedAt: "2026-09-19",
+	status: "verified",
+	source:
+		"§95; Minecraft Wiki Template:Resource pack format (1.20.3 / RP 22.0)",
+	checkedAt: "2026-09-20",
 };
 
 export const COMPAT_FACTS: VersionedFact<unknown>[] = [
-	RESOURCE_PACK_FORMAT_FACT,
 	TRIM_PALETTE_FACT,
 	ITEMS_ATLAS_FACT,
 	ITEM_ATLAS_PLACEMENT_FACT,
@@ -232,7 +218,9 @@ export function getItemAtlasPolicy(
 
 /**
  * Gated facts (§95) surface as warnings only, never as errors: pending-source
- * entries plus facts whose since.packFormat is still undetermined.
+ * entries plus facts whose since.packFormat is still undetermined. Every
+ * current fact is determined, so this naturally returns []; the mechanism
+ * stays to guard any future undetermined fact.
  */
 export function pendingSourceWarnings(): ProfileWarning[] {
 	const out: ProfileWarning[] = [];

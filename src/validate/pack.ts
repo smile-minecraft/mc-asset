@@ -374,7 +374,7 @@ async function checkSingleFile(
 			state.findings,
 			"PENDING_SOURCE_PNG_ONLY",
 			"warning",
-			`extension of "${rel}" is not .png; texture-png-only is pending an official source, reported as warning only.`,
+			`extension of "${rel}" is not .png; Minecraft 1.20.3 (resource-pack format 22.0) requires textures to be .png; reported as warning only.`,
 			rel,
 		);
 		return;

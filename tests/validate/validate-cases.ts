@@ -194,21 +194,24 @@ export const VALIDATE_CASES: ValidateCase[] = [
 		},
 	},
 	{
-		name: "pending-source facts never produce errors",
+		name: "sourced facts stay silent and never fail a clean asset",
 		run: (check) => {
 			const canvas = makeCanvas(1, 1, opaque(1));
 			const report = validateCanvas(canvas, {
 				profile: "generic",
 				filename: "a.png",
 			});
-			const pending = report.findings.filter((f) =>
-				f.code.startsWith("PENDING_SOURCE"),
+			const factFindings = report.findings.filter(
+				(f) =>
+					f.code.startsWith("PENDING_SOURCE") ||
+					f.code === "VERSION_FACT_UNDETERMINED",
 			);
-			check.ok(pending.length > 0, "pending-source warning present");
-			for (const finding of pending) {
-				check.equal(finding.level, "warning", `${finding.code} warns only`);
-			}
-			check.equal(report.verdict, "pass", "pending source never fails");
+			check.deepEqual(
+				factFindings,
+				[],
+				"no fact warnings once every fact is determined",
+			);
+			check.equal(report.verdict, "pass", "clean asset passes");
 		},
 	},
 	{

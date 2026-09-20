@@ -239,7 +239,7 @@ export const RESOURCE_LOCATION_CASES: ResourceLocationCase[] = [
 		},
 	},
 	{
-		name: "warning: webp extension is pending-source warning only",
+		name: "warning: webp extension is png-only warning only",
 		run: (check) => {
 			const findings = validateResourceLocation("minecraft:item/sword.webp");
 			check.deepEqual(

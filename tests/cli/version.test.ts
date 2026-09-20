@@ -274,7 +274,7 @@ describe("version flags via spawn (Red: flags do not exist yet)", () => {
 		});
 	}, 30_000);
 
-	test("pending-source stays warning-only under version flags", async () => {
+	test("sourced facts stay silent under version flags", async () => {
 		await withPng(async (input) => {
 			const analyzed = await runCli([
 				"analyze",
@@ -287,13 +287,13 @@ describe("version flags via spawn (Red: flags do not exist yet)", () => {
 			const envelope = JSON.parse(analyzed.stdout) as {
 				result: { warnings: Array<{ code: string; level: string }> };
 			};
-			const pending = envelope.result.warnings.filter(
-				(w) => w.code === "PENDING_SOURCE_PNG_ONLY",
-			);
-			expect(pending.length).toBeGreaterThan(0);
-			for (const warning of pending) {
-				expect(warning.level).toBe("warning");
-			}
+			expect(
+				envelope.result.warnings.filter(
+					(w) =>
+						w.code === "PENDING_SOURCE_PNG_ONLY" ||
+						w.code === "VERSION_FACT_UNDETERMINED",
+				),
+			).toEqual([]);
 			const validated = await runCli([
 				"validate",
 				input,
@@ -309,11 +309,13 @@ describe("version flags via spawn (Red: flags do not exist yet)", () => {
 				};
 			};
 			expect(verdict.result.verdict).toBe("pass");
-			for (const finding of verdict.result.findings.filter(
-				(f) => f.code === "PENDING_SOURCE_PNG_ONLY",
-			)) {
-				expect(finding.level).toBe("warning");
-			}
+			expect(
+				verdict.result.findings.filter(
+					(f) =>
+						f.code === "PENDING_SOURCE_PNG_ONLY" ||
+						f.code === "VERSION_FACT_UNDETERMINED",
+				),
+			).toEqual([]);
 		});
 	}, 30_000);
 
