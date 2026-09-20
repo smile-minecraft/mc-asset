@@ -451,24 +451,97 @@ preview   0 / 2 / 4 / 5（--scale 才可能有 4）
 
 ---
 
+## 實作補充（實作波）
+
+這一節把 tile／generate／preview 三命令實作時確認、但前面章節未寫定的判讀補上。體例同 `docs/v02-design.md` 的「實作補充」：標 `（實作判讀）` 的是實作實況，權威來源是每項列出的程式與測試，本節只記錄、不重新凍結。
+
+### tile 引擎（實作判讀）
+
+repetition 對每個軸的所有位移 `s` 全掃，取全圖總距離最小者（平手取最小 `s`）；`periodX`／`periodY` 就是該軸的最佳位移，整體分數取兩軸相似度的最大值。搜尋沒有成本上限，每個 `s` 都掃全圖。
+
+corner 接縫固定量兩組對角 wrap 對；長度 1 的退化軸只與自己比（距離 0）。
+
+`--edge-match` 把選定軸的兩條邊界線逐像素取四通道（含 alpha）的整數 floor 平均，讓兩線 byte-equal，該軸 `raw` 歸零。`--brightness-match` 以 recolor 同式的整數亮度對齊兩線的平均亮階，對較暗的一線逐像素加 delta、RGB 夾在 `[0, 255]`、alpha 不變；它只對齊平均亮階，不宣稱 seam 分數必降。
+
+修正順序固定：`both` 先 vertical 再 horizontal，edge 先於 brightness；`corrections` 記 `edge-match:<axis>`／`brightness-match:<axis>`，且只在有修正旗標時才出現 `corrected`。
+
+`--preview` 缺 `--output`／`--stdout` 是 `OUTPUT_REQUIRED`；無任何輸出的純分析是合法的 exit 0 零檔案，`--stdout` 放行。報告的 `width`／`height` 回報的是**輸入**尺寸，human 行固定 `ok tile profile=… seam=h:… v:… c:… repeat=…`。無修正旗標的 `--output` 等於把輸入 flatten 後重新編碼，byte-identical（實測）。
+
+出處：`src/core/tile.ts` 的 `seamMetrics`、`repetitionScore`、`axisSimilarity`、`applyEdgeMatch`、`applyBrightnessMatch`、`applyTileCorrections`、`buildTilePreview`、`parsePreviewSize`；`src/cli/cmd-tile.ts` 的 `runTile`。
+
+測試：`tests/core/tile-cases.ts`（`seam worked example locks raw pairs and score`、`repetition worked example locks score and periods`、`edge-match vertical zeroes the vertical seam`、`edge-match both applies vertical before horizontal`、`brightness-match keeps alpha and clamps channels`、`corrections record edge before brightness in fixed order`、`preview tiles the input N by N without scaling`）、`tests/cli/tile.test.ts`（`report mode writes zero files and prints the human line`、`--output without corrections is byte-equal to the input`、`--preview 4x4 writes a 4W by 4H preview`、`--preview without --output is OUTPUT_REQUIRED with zero files`、`--json report shape carries seam repeat corrections and output`、`same input reruns byte-identical`）。
+
+### generate（實作判讀）
+
+PRNG 是凍結的 xorshift32 starter：初始狀態 `(seed ^ 0x9E3779B9) >>> 0`，每步 `x ^= x << 13; x ^= x >>> 17; x ^= x << 5`，逐步遮成 32-bit 並回傳無號整數；oracle 以獨立算出的前三筆輸出鎖定。
+
+取色走固定的全序：palette 依整數亮度 `299R + 587G + 114B` 升冪、同亮度再依 `r`、`g`、`b`、`a` tie-break；強度索引為 `((i * n) / 256) | 0`。輸出每個像素必為 palette 成員或 transparent，不產生中間色。
+
+十個 pattern 的 starter 演算法：
+
+```text
+noise            rng % n 直抽 slot
+clustered-noise  4×4 粗格每格一個隨機值，權重 3:1:1:1
+stripes          週期 2 + rng % 4，方向 rng % 2
+checker          格邊 2 + rng % 3
+gradient         線性 x*255/(w-1)，方向 rng % 2
+brick            course 3、磚寬 4、錯縫 rng % 4、灰縫 0、磚面 255/170
+spots            3 + rng % 4 個圓斑（半徑 1–3），shade = 255 − (i×53 % 156)，斑外 transparent
+veins            2 + rng % 2 個漫步者各走 w*h 步
+cracks           1 + rng % 2 個對角偏置漫步者走半數步
+grain            每列基底 rng % 8，強度 (base + y×13) % 256
+```
+
+`--palette` 先比對內建 material id，完全相符就用該 palette；否則必須是 `.mcpx` 路徑並取其 `[palette]`。兩者皆非或 palette 為空是 `INVALID_ARGUMENT`，檔案不存在或不可讀是 `FILESYSTEM_ERROR`。
+
+golden：stone 8×8 seed 7 的輸出以 `STONE_GOLDENS` 逐 pattern 鎖 sha256；block 工作流的 stone 16×16 seed 1234 把 generate PNG 與 tile `--edge-match both` 的輸出鎖成 sha256（`cdbbbb1c…`／`98b69c8a…`）。
+
+殘留：`--size` 的錯誤文案沿用 pixelize 的 `parsePixelizeSize`（行為正確）。
+
+出處：`src/core/procedural.ts` 的 `GENERATE_PATTERNS`、`createXorshift32`、`orderPaletteColors`、`indexForIntensity`、`samplePattern`、`paintIntensities`、`paintSlots`、`generateProcedural`；`src/cli/cmd-generate.ts` 的 `resolveGeneratePalette`、`runGenerate`。
+
+測試：`tests/core/procedural-cases.ts`（`all ten CLI pattern names parse`、`unknown pattern is INVALID_ARGUMENT`、`seed parses the frozen 0-4294967295 range`、`xorshift32 matches the frozen oracle`、`palette ordering is a fixed total order`、`<pattern> emits sized palette-only pixels deterministically`、`stone 8x8 seed-7 goldens pin every pattern`）、`tests/cli/generate.test.ts`（`missing --size/--palette/--seed are INVALID_ARGUMENT with zero files`、`all ten patterns resolve and rerun byte-identical`、`output pixels are palette members or transparent`、`palette priority: material, .mcpx file, rejects, missing file`、`--json envelope carries the frozen shape`）、`tests/cli/block-workflow.test.ts`（`stone base generation matches the golden digest`、`tile --edge-match both correction matches the golden digest`）。
+
+### preview（實作判讀）
+
+`--ascii` 用 `assignSymbols` 指派符號：輸入是 `.mcpx` 時保留既有符號，transparent 固定 `.`；只把 flatten 後實際出現的色寫進 `[palette]`，全為單字元用 `[grid]`、否則用 `[grid tokens]`。人類模式下 ASCII 文件是 stdout 的唯一載荷（log 與 warning 走 stderr），可直接餵回 `render`（閉環實測）；`--json` 時整份文件放在 `result.ascii`。
+
+`--palette-map` 依列優先 first-appearance 編號並累計 `count`，`rows[y][x]` 是該像素的顏色索引。`--scale N` 用 `resize(nearest)` 放大後以 `validateDimension` 檢查上限，非整數或小於 1 是 `INVALID_ARGUMENT`。報告模式拒絕全部檔案旗標；無模式是 `INVALID_ARGUMENT`，兩種以上是 `ARGUMENT_CONFLICT`。
+
+殘留：`[grid tokens]` 路徑（flatten 後超過 62 色）沒有專屬的 spawn 測試。
+
+出處：`src/cli/cmd-preview.ts` 的 `runPreview`、`runPreviewReport`、`runPreviewScale`、`buildAsciiDoc`、`parseScaleFactor`、`rejectReportFileFlags`；`src/mcpx/assign.ts` 的 `assignSymbols`。
+
+測試：`tests/cli/preview.test.ts`（`no mode is INVALID_ARGUMENT`、`--ascii with --scale is ARGUMENT_CONFLICT`、`--ascii prints the frozen .grid document`、`--ascii output feeds render with identical pixels`、`--ascii on .mcpx keeps the existing symbols`、`--ascii maps transparent to the reserved dot`、`--palette-map matches the frozen shape`、`--scale 2 writes W*2 by H*2 nearest blocks`、`--scale rejects non-integer and over-limit sizes`、`report modes reject file flags`、`reruns are byte-identical and inputs stay untouched`）。
+
+### 跨 runtime 符合性（實作判讀）
+
+`scripts/compare-runtime.mjs` 的 V0.3 區塊比對 Bun（跑 source CLI）與 Node（跑 bundle）的輸出，六個新情境全部 identical：generate 的 PNG 與 `.mcpx`、tile 報告 JSON、preview `--ascii` JSON、preview `--palette-map` JSON、preview `--scale` PNG。
+
+`tests/conformance/cli-conformance.test.ts` 的 V0.3 章節有 13 個 §98 守衛案例（缺輸出、OUTPUT_EXISTS／`--force`、缺父目錄／`--mkdir`、輸出別名或等同輸入、`generate` 未宣告 `--input`／`--in-place`、preview 報告拒絕檔旗標），另有 2 個 report／PNG／三模式的重跑 determinism 案例。三命令的 exit 碼是 0／2／4／5；`preview` 的 4 只有 `--scale` 走得到（報告模式不寫檔）。`tile` 純分析（無輸出、無 `--preview`）是合法的 exit 0 零檔案。
+
+出處：`scripts/compare-runtime.mjs` 的 V0.3 區塊；`tests/conformance/cli-conformance.test.ts` 的 `conformance: V0.3 §98 output guards`、`conformance: V0.3 tile and preview report determinism`。
+
 ## 待決清單
 
 以下無法從規格推定，列出但不自行填補。前四項直接影響對外行為，需要決策後才適合定案。
 
 | 項目 | 為什麼無法推定 | 需要什麼 | 現況 |
 |---|---|---|---|
-| 十個 pattern 的演算法 | docs §37 只列名稱，沒有取樣、遮罩或上色規則 | 各 pattern 的整數演算法定義 | 只凍結 CLI 名稱與 determinism 約束；演算法未定 |
-| PRNG 的具體選型 | §100.3 要求由顯式 seed 導出，但未指定演算法 | 確認 PRNG 或沿用 starter | starter 為 xorshift32（見「命令表面」），待複核 |
-| 各 pattern 的 `--palette` 取色方式 | 未定義如何從 palette 挑色（role？明度帶？隨機？） | 取色規則 | 只凍結「輸出限於 palette 與 transparent」 |
-| `tile --output`（無 `--preview`）的語意 | docs §36 只示範命令，未說單格 tile 的轉換 | 確認「產生 tile」是否等於修正後單格 | 採最小讀法：無修正時即重編碼，待確認 |
-| `repetition_score` 的精確定義 | refs §14 只有名稱 | 定義或門檻 | 本凍結給最小可測定義（各軸最小週期），待複核 |
-| repeat 搜尋的成本上限 | 規格沒有複雜度要求 | 是否限制候選位移或大圖門檻 | 未定；目前對每個 s 掃全圖 |
-| `corner seam` 的像素對 | refs §14 只有名稱 | 對角對的定義 | 採兩組對角 wrap 對，待複核 |
-| `--brightness-match` 的期望效果 | 規格只列功能 | 是否要求分數必降 | 只保證對齊平均亮階，不宣稱分數必降 |
-| palette 檔的格式 | docs §37 只示範材料名 | 是否接受 `.mcpx` 的 `[palette]` | 本凍結採 `.mcpx`；另一選項是 `palette extract` 的 JSON（未採） |
-| `preview --ascii` 的輸出範圍 | docs §46 只說「ASCII Grid」 | 是否輸出完整 `.grid` 或只有 grid 列 | 本凍結採完整 `.grid` 以接回 `render`，待複核 |
-| `clustered-noise` 的連字號命名 | 規格以空白書寫 | 連字號或底線 | 本凍結採連字號；材料 id 用底線，屬不同命名空間 |
-| 是否提供 `--in-place`／`--source` | 規格未提 | 是否要原地改寫或 `.mcpx` 輸出 | `tile`／`preview` 目前不提供，待需求出現 |
+| 十個 pattern 的演算法 | docs §37 只列名稱，沒有取樣、遮罩或上色規則 | 各 pattern 的整數演算法定義 | starter 已落地（見「實作補充（實作波）」）；待複核 |
+| PRNG 的具體選型 | §100.3 要求由顯式 seed 導出，但未指定演算法 | 確認 PRNG 或沿用 starter | xorshift32 starter 已落地並有 oracle 測試；待複核 |
+| 各 pattern 的 `--palette` 取色方式 | 未定義如何從 palette 挑色（role？明度帶？隨機？） | 取色規則 | starter 已落地（見「實作補充（實作波）」）；待複核 |
+| `tile --output`（無 `--preview`）的語意 | docs §36 只示範命令，未說單格 tile 的轉換 | 確認「產生 tile」是否等於修正後單格 | 已落地：無修正時為 flatten 重編碼（byte-identical，實測） |
+| `repetition_score` 的精確定義 | refs §14 只有名稱 | 定義或門檻 | 定義已實作（兩軸相似度取 max）；待複核 |
+| repeat 搜尋的成本上限 | 規格沒有複雜度要求 | 是否限制候選位移或大圖門檻 | 成本上限仍無；目前對每個 s 掃全圖 |
+| `corner seam` 的像素對 | refs §14 只有名稱 | 對角對的定義 | 固定兩組對角已落地；待複核 |
+| `--brightness-match` 的期望效果 | 規格只列功能 | 是否要求分數必降 | 不宣稱（實作僅做整數亮度對齊） |
+| palette 檔的格式 | docs §37 只示範材料名 | 是否接受 `.mcpx` 的 `[palette]` | 內建材料名或 `.mcpx` 的 `[palette]`；非此兩者 `INVALID_ARGUMENT` |
+| `preview --ascii` 的輸出範圍 | docs §46 只說「ASCII Grid」 | 是否輸出完整 `.grid` 或只有 grid 列 | flatten 後實際出現色；`.mcpx` 既有符號保留；transparent 固定 `.` |
+| `clustered-noise` 的連字號命名 | 規格以空白書寫 | 連字號或底線 | CLI 十 pattern 名已落地（`clustered-noise` 連字號等） |
+| 是否提供 `--in-place`／`--source` | 規格未提 | 是否要原地改寫或 `.mcpx` 輸出 | `tile`／`generate`／`preview` 皆未宣告（傳入 exit 2） |
+
+「現況」一欄只記實作實況，不代表任何項目已定案；未提到的細節仍以各節敘述為準。
 
 ---
 

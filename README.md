@@ -1,8 +1,8 @@
 # mc-asset
 
 Pixel-native Minecraft asset toolchain. The V0.1 command set and the frozen
-V0.2 command set both ship from this entry point; `--version` still prints
-`0.1.0` (commander-owned).
+V0.2 and V0.3 command sets all ship from this entry point; `--version` still
+prints `0.1.0` (commander-owned).
 
 Entry point for development: `bun src/cli/index.ts`. For installation,
 `mc-asset` ships through Homebrew — see `docs/homebrew.md` and
@@ -35,6 +35,15 @@ exit codes in `docs/cli-surface.md`):
 | `recolor <source>` | `.mcpx` | PNG and/or `.mcpx` |
 | `variant <source>` | `.mcpx` | Several PNG and/or `.mcpx` under `--output-dir` |
 | `analyze <image>` (extended) | PNG/JPEG/WebP | Report only |
+
+V0.3 commands (three, frozen; semantics in `docs/v03-design.md`, flags and
+exit codes in `docs/cli-surface.md`):
+
+| Command | Input | Output |
+|---|---|---|
+| `tile <input>` | PNG/JPEG/WebP/`.mcpx` | Report only, or PNG (single corrected tile / NxN repeat preview) |
+| `generate <pattern>` | None (palette from built-in material name or `.mcpx`) | PNG and/or `.mcpx` |
+| `preview <input>` | PNG/JPEG/WebP/`.mcpx` | Report only (`--ascii`/`--palette-map`), or PNG (`--scale`) |
 
 ## Prerequisites
 
@@ -244,10 +253,13 @@ bun src/cli/index.ts import /tmp/mc-asset-quickstart/blank.png --source /tmp/mc-
 ## `import` and formats: PNG-only import, multi-format commands
 
 `import` stays on the PNG-only decoder: JPEG/WebP bytes are rejected, not
-converted. V0.2's shared multi-format decoder now backs `transform`,
-`quantize`, `cleanup`, `palette`, `pixelize`, and `analyze`, which all read
-PNG, JPEG, and WebP; `recolor` and `variant` take an editable `.mcpx` source
-(see the V0.2 section below):
+converted. The shared multi-format decoder backs `transform`, `quantize`,
+`cleanup`, `palette`, and — since V0.3 — `tile` and `preview`, which all read
+PNG, JPEG, WebP, and `.mcpx`; `pixelize` and `analyze` take PNG, JPEG, and
+WebP only. `generate` has no input image: its palette comes from a built-in
+material name or an `.mcpx` `[palette]`. `recolor` and `variant` take an
+editable `.mcpx` source, and `import`/`validate` remain PNG-only (see the
+V0.2 section below):
 
 ```sh
 bun src/cli/index.ts import /tmp/mc-asset-quickstart/fake.jpg --output /tmp/mc-asset-quickstart/fake.png
@@ -299,6 +311,76 @@ produce reports only and refuse every file flag. `analyze` keeps its V0.1
 fields and adds `paletteCharacteristics`, `pixelArtCharacteristics`, and
 `recommended` (see the quickstart sample above); its output stays predicted.
 
+## V0.3 commands in practice
+
+`tile`, `generate`, and `preview` reuse the V0.1 file rules: an explicit
+target is required where a command writes, an existing target needs
+`--force`, missing parents need `--mkdir`, and every write is atomic. `tile`
+is report-only unless `--output` is given, `generate` has no input file
+(pattern, palette, and seed replace it), and `preview` runs exactly one mode.
+The transcript below keeps the real outputs but uses bare command names
+instead of the full `bun src/cli/index.ts` entry prefix:
+
+```text
+$ generate noise --size 16 --palette stone --seed 1234 --output stone.png
+ok generate profile=generic applied=0 pattern=noise seed=1234 size=16x16 palette=stone output=stone.png
+
+$ tile stone.png
+ok tile profile=generic seam=h:0.078226 v:0.083931 c:0.054562 repeat=0.913975
+
+$ tile stone.png --json
+{"success":true,"result":{"command":"tile","profile":"generic","width":16,"height":16,"seam":{"horizontal":{"raw":325544,"pairs":16,"score":"0.078226"},"vertical":{"raw":349288,"pairs":16,"score":"0.083931"},"corner":{"raw":28383,"pairs":2,"score":"0.054562"}},"repeat":{"score":"0.913975","periodX":2,"periodY":3},"corrections":[]}}
+
+$ tile stone.png --edge-match both --output fixed.png
+ok tile profile=generic seam=h:0.078226 v:0.083931 c:0.054562 repeat=0.913975 output=fixed.png
+
+$ tile stone.png --preview 4x4 --output preview.png
+ok tile profile=generic seam=h:0.078226 v:0.083931 c:0.054562 repeat=0.913975 output=preview.png
+
+$ preview stone.png --palette-map
+ok preview profile=generic mode=palette-map colors=7 size=16x16
+
+$ preview stone.png --scale 4 --output big.png
+ok preview profile=generic mode=scale size=64x64 scale=4 output=big.png
+```
+
+`preview stone.png --ascii` prints the flattened canvas as a document in the
+`.grid` format:
+
+```text
+[palette]
+0 = #17171AFF
+1 = #55555CFF
+2 = #6B6B73FF
+3 = #84848CFF
+4 = #A3A3ABFF
+5 = #C9C9D1FF
+6 = #E8E8EEFF
+
+[grid]
+2336235330526123
+4522306531653216
+1625431242236524
+6223104060023614
+0631105555564454
+3403266614061161
+5544203002013606
+5566001015325452
+5455523212321636
+0566231315104646
+3014354163103004
+6535336525260264
+5630415266361416
+0446555652221412
+2312606651626531
+2651515315521115
+```
+
+That document is `.grid`-compatible: save it and feed it straight back to
+`render`, and `--json` carries the same document structurally. Tile
+measurement is an authoring tool — it reports, and with explicit correction
+flags writes PNG, but never writes back to a `.mcpx`.
+
 ## Batch operations (`--operations`)
 
 Pixel/rect/line/fill edits travel through `--operations <path>` on
@@ -326,7 +408,7 @@ translucent pass (`force_translucent`), so the effective classification
 needs the model JSON too. That check belongs to `validate-pack` (V0.5), not
 V0.1: never treat a V0.1 report as the in-game result.
 
-## Determinism scope (CI-limited, V0.1 + V0.2)
+## Determinism scope (CI-limited, V0.1 + V0.2 + V0.3)
 
 What the toolchain guarantees, and where it was checked:
 
@@ -341,6 +423,12 @@ What the toolchain guarantees, and where it was checked:
   rerun case of `tests/conformance/cli-conformance.test.ts`. The eleven-stage
   pixelize pipeline and the integer-only engines carry no timestamps and no
   randomness.
+- Same input plus same flags → byte-identical output for the V0.3 commands
+  too. `tile`, `generate`, and `preview` rerun byte-identically, locked in
+  their spawn suites and in the V0.3 determinism cases of
+  `tests/conformance/cli-conformance.test.ts`. `generate` produces identical
+  bytes for the same seed across Bun and Node, because its only randomness is
+  a fixed xorshift32 stream derived from `--seed`.
 - Cross-runtime: CI runs a `node` job alongside the `bun` job
   (`.github/workflows/ci.yml`); the shared golden/canonical/determinism cases
   in `tests/**/*.node.ts` run under `node:test` with the same assertions as
@@ -348,20 +436,25 @@ What the toolchain guarantees, and where it was checked:
   Bun (running the source CLI) against Node (running the bundle) byte for
   byte: the V0.1 render/build chain and the V0.2 scenarios `transform`,
   `quantize`, `pixelize` on JPEG and WebP, a four-file `variant` fan-out, and
-  canonical `analyze` JSON.
+  canonical `analyze` JSON. The V0.3 scenarios add `generate` PNG and `.mcpx`
+  bytes, the `tile` report JSON, and the three `preview` modes (`--ascii`,
+  `--palette-map`, and `--scale` PNG).
 - Static guards in CI forbid `Math.random` and transcendental `Math`
   functions in `src/` (§100.2, §100.3), and Bun-only APIs in `src/` (§100.5).
-- Scope limit: this covers the checked V0.1 and V0.2 inputs, formats, and
-  flags only. JPEG decode is not claimed bit-exact across implementations,
-  and untested format variants stay unverified (see the gaps below).
+- Scope limit: this covers the checked V0.1, V0.2, and V0.3 inputs, formats,
+  and flags only. JPEG decode is not claimed bit-exact across
+  implementations, and untested format variants stay unverified (see the
+  gaps below).
 
 ## Known gaps (honest list)
 
 - **Raster format coverage is split**: `transform`, `quantize`, `cleanup`,
-  `palette`, `pixelize`, and `analyze` accept PNG/JPEG/WebP; `import` and
-  `validate` are still PNG-only (JPEG/WebP rejected with
-  `UNSUPPORTED_IMAGE_FORMAT`, exit 5); `recolor` and `variant` take an
-  editable `.mcpx` source. The decoder pins `jpeg-js@0.4.4` and
+  `palette`, `tile`, and `preview` accept PNG/JPEG/WebP/`.mcpx`; `pixelize`
+  and `analyze` accept PNG/JPEG/WebP; `import` and `validate` are still
+  PNG-only (JPEG/WebP rejected with `UNSUPPORTED_IMAGE_FORMAT`, exit 5);
+  `generate` reads no input image (its palette comes from a built-in material
+  name or an `.mcpx` `[palette]`); `recolor` and `variant` take an editable
+  `.mcpx` source. The decoder pins `jpeg-js@0.4.4` and
   `@jsquash/webp@1.5.0` (libwebp via a wasm binary embedded as base64 so the
   single-file bundle needs no sidecar), recorded in
   `.project-doc/decoder-selection.md`.
@@ -413,7 +506,19 @@ What the toolchain guarantees, and where it was checked:
   source (§95). It is warning-only by construction and can never fail
   validation.
 - **Effective alpha needs `validate-pack` (V0.5)**, and later-version surface
-  stays unimplemented: no `tile`, `preview`, `animate`, or `mcp` command.
+  stays unimplemented: no `animate`, `validate-pack`, or `mcp` command
+  (V0.4–V0.6).
+- **The ten procedural patterns are a starter**: `generate`'s pattern
+  algorithms and color sampling are deterministic — goldens pin the 8×8
+  seed-7 stone output for every pattern — but the algorithms and the color
+  choices are pending art-direction review.
+- **`repeat` scoring has no cost ceiling**: `tile` scans every shift along
+  both axes, so large images are slow. The score is deterministic, its cost
+  is just unbounded.
+- **`preview --ascii` `[grid tokens]` is untested**: the tokenized path (more
+  than 62 colors in the flattened canvas) has no dedicated spawn test.
+- **Generation quality is not guaranteed**: determinism promises identical
+  reruns, not good-looking output. Aesthetics are explicitly out of scope.
 
 ## Development
 
