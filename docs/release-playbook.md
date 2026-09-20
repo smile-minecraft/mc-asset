@@ -2,9 +2,9 @@
 
 How to install, upgrade, reinstall, roll back, and publish a version of
 `mc-asset` through the public GitHub Release and the Homebrew tap. The
-v0.1.0 pipeline is live; every later version (V0.2–V0.6) reuses the same
-steps, so this page doubles as the repeatable checklist for future
-releases.
+pipeline is live and has carried v0.1.0 and v0.2.0; versions V0.3–V0.6
+reuse the same steps, so this page doubles as the repeatable checklist
+for future releases.
 
 Facts are split into **verified** (actually executed, with evidence) and
 **pending** (not yet done). Do not cite a pending item as done.
@@ -18,22 +18,24 @@ Sources of truth:
   (`.opencode/memory/plans.json`); this page never re-creates their task
   tables.
 
-## Current state: v0.1.0 (published)
+## Current state: v0.2.0 (published)
 
-Verified during the v0.1.0 release:
+Verified during the v0.2.0 release:
 
 - Public source repo: `https://github.com/smile-minecraft/mc-asset`
-- GitHub Release `v0.1.0` with asset
-  `https://github.com/smile-minecraft/mc-asset/releases/download/v0.1.0/mc-asset-0.1.0.tar.gz`
+- GitHub Release `v0.2.0` (published 2026-09-20) with asset
+  `https://github.com/smile-minecraft/mc-asset/releases/download/v0.2.0/mc-asset-0.2.0.tar.gz`
+  and its `.sha256` companion
 - Official tarball SHA-256:
-  `bdc941bce9eff148732398bb767d4b73f05c20a6ff4d6718b82a4317dba98881`
+  `3cf7dd7690833cbce866ef717bd2ac2b6b056b7bc2215ba6acd7f2911ad15d81`
   (matches the release `.sha256` companion and the formula)
+- The tag release workflow run `35503197797` succeeded
 - Public tap: `https://github.com/smile-minecraft/homebrew-tap`,
-  formula at `Formula/mc-asset.rb` with its own README
+  formula at `Formula/mc-asset.rb` bumped to v0.2.0, with its own README
 - Local macOS Homebrew 7.0.4: `brew reinstall
-  smile-minecraft/tap/mc-asset` succeeded; `brew test` chain
-  render → analyze → validate passed; `mc-asset --version` prints
-  `0.1.0`
+  smile-minecraft/tap/mc-asset` installed Cellar 0.2.0 (9 files);
+  `brew test` chain render → analyze → validate passed (exit 0);
+  `mc-asset --version` prints `0.2.0`
 - The formula installs the command as `mc-asset` via
   `bin.install_symlink libexec/"bin/mc-asset.js" => "mc-asset"`. An
   earlier draft used `bin.install` on the launcher file, which would
@@ -45,8 +47,9 @@ Pending (not done, do not claim otherwise):
 
 - No homebrew/core submission (self-hosted tap only; revisit after a
   few stable releases).
-- No MCP live verification yet — that is V0.6 (`v06-t03`), and it must
-  run against the Homebrew-installed binary (see the V0.6 checklist).
+- No MCP live verification yet — that is V0.6 (`v06-t03`), scheduled
+  after an OpenCode restart, and it must run against the
+  Homebrew-installed binary (see the V0.6 checklist).
 - No rollback has ever been executed; the rollback steps below follow
   documented Homebrew behavior but are untested in practice.
 
@@ -80,7 +83,7 @@ update` has not run.
 brew reinstall smile-minecraft/tap/mc-asset
 ```
 
-Verified for v0.1.0 (see Current state).
+Verified for v0.2.0 (see Current state).
 
 ## Rollback
 
@@ -148,7 +151,16 @@ Performed by the release owner. Steps 1–3 produce the release; steps
    new version; run the test chain render → analyze → validate on a
    real grid file.
 
-Status for v0.1.0: steps 1–6 all executed and verified (Current state).
+Status for v0.2.0: steps 1–6 all executed and verified (Current state).
+
+**Known incident from the v0.2.0 tag.** The first CI run on the `v0.2.0`
+tag (`35503197832`) failed: GitHub Actions sets
+`GITHUB_REF=refs/tags/v0.2.0` on a tag ref, so the release-staging test
+case "real mode without `--tag` must reject" picked up a valid tag from
+the environment instead of an unset one. Fixed in commit `f2e0e43` by
+isolating the test environment and adding an env-fallback positive case
+— test files only, no script changes; neither the Release nor
+`release.yml` was affected (release run `35503197797` succeeded).
 
 ## Troubleshooting
 
@@ -170,7 +182,7 @@ Status for v0.1.0: steps 1–6 all executed and verified (Current state).
   `../dist/mc-asset.js` relatively); see the comment in
   `homebrew/Formula/mc-asset.rb`.
 
-## Upcoming releases: V0.2–V0.6
+## Upcoming releases: V0.3–V0.6
 
 Every version runs the same core pipeline (Release pipeline above),
 plus the deltas below. Plan names and scope come from the plan
@@ -191,9 +203,10 @@ Core checklist (every version):
 
 Per-version deltas:
 
-- **V0.2 — 轉換、選取、色彩處理與像素化** (`mc-asset-v02`): new CLI
-  surface → update `docs/cli-surface.md` and README examples in the
-  same release; the frozen-surface claim must reflect the new commands.
+- **V0.2 — 轉換、選取、色彩處理與像素化** (`mc-asset-v02`): shipped as
+  v0.2.0 — the new CLI surface landed with `docs/cli-surface.md` and
+  README examples updated in the same release, and the frozen-surface
+  claim reflects the new commands.
 - **V0.3 — Tile Engine、程序化生成與 Block 工作流** (`mc-asset-v03`):
   core checklist + docs for the new workflows.
 - **V0.4 — 動畫、GUI／Particle Profile 與 mcmeta 驗證** (`mc-asset-v04`):

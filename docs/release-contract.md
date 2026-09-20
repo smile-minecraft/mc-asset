@@ -1,6 +1,6 @@
 # Release contract (mc-asset)
 
-Version source: `package.json` (`version`, currently `0.1.0`). No other
+Version source: `package.json` (`version`, currently `0.2.0`). No other
 file carries a second copy: `src/index.ts` reads it from `package.json`
 at build time, and the release script refuses any `--tag` that is not
 exactly `v<version>`.
@@ -50,9 +50,9 @@ Verify locally:
 bun run build
 node scripts/release-artifacts.mjs --dry-run --out /tmp/rel-a
 node scripts/release-artifacts.mjs --dry-run --out /tmp/rel-b
-diff -r /tmp/rel-a/mc-asset-0.1.0 /tmp/rel-b/mc-asset-0.1.0
-node -e "const m=require('/tmp/rel-a/mc-asset-0.1.0/manifest.json');const c=require('node:crypto');const f=require('node:fs');const p=require('node:path');for(const e of m.files){const d=f.readFileSync(p.join('/tmp/rel-a/mc-asset-0.1.0',e.path));if(c.createHash('sha256').update(d).digest('hex')!==e.sha256||d.length!==e.size)throw new Error(e.path)}console.log('manifest recomputes OK')"
-sha256sum /tmp/rel-a/mc-asset-0.1.0.tar.gz && cat /tmp/rel-a/mc-asset-0.1.0.tar.gz.sha256
+diff -r /tmp/rel-a/mc-asset-0.2.0 /tmp/rel-b/mc-asset-0.2.0
+node -e "const m=require('/tmp/rel-a/mc-asset-0.2.0/manifest.json');const c=require('node:crypto');const f=require('node:fs');const p=require('node:path');for(const e of m.files){const d=f.readFileSync(p.join('/tmp/rel-a/mc-asset-0.2.0',e.path));if(c.createHash('sha256').update(d).digest('hex')!==e.sha256||d.length!==e.size)throw new Error(e.path)}console.log('manifest recomputes OK')"
+sha256sum /tmp/rel-a/mc-asset-0.2.0.tar.gz && cat /tmp/rel-a/mc-asset-0.2.0.tar.gz.sha256
 ```
 
 Limit: archive byte-stability assumes identical input bytes (same tag
@@ -60,6 +60,16 @@ tree, same `bun run build` outputs). The tests pin the directory plus
 manifest equality and the tarball hash equality between two dry-runs of
 one tree; cross-machine `bun` bundle variance, if any, would surface as
 a manifest mismatch, never as a silently different tarball.
+
+Observed at v0.2.0: the published asset does not byte-match a local
+rebuild — the `bun` bundle helper prelude differs between the CI builder
+and the local `bun` version, so the bundle bytes (and therefore the
+tarball) differ, even though two local rebuilds of the same tree were
+byte-identical. The released digest stays authoritative: the formula
+pins the published `.tar.gz` digest, and a rebuild is validated by
+recomputing the manifest hashes, not by expecting identical bytes.
+Pinning the `bun` version in CI would remove this variance; that is a
+note, not an implemented change.
 
 ## Tag workflow
 
@@ -77,17 +87,19 @@ or tokens are hardcoded — authentication uses the ephemeral
 ## License inventory
 
 `THIRD_PARTY_NOTICES.md` is generated from `package.json`
-`dependencies` (runtime only: `commander`, `pngjs`) joined with each
-installed package's own `name/version/license` from `node_modules`.
-Source and limits: versions come from the locked install
-(`bun.lock`, `--frozen-lockfile` in CI); license labels are the
-packages' own declarations (both MIT at V0.1). Dev dependencies
+`dependencies` (runtime only) joined with each installed package's own
+`name/version/license` from `node_modules`. Source and limits: versions
+come from the locked install (`bun.lock`, `--frozen-lockfile` in CI);
+license labels are the packages' own declarations. At v0.2.0 the runtime
+dependency set is `@jsquash/webp`, `@modelcontextprotocol/sdk`,
+`commander`, `jpeg-js`, `pngjs`, and `zod`. Dev dependencies
 (`@biomejs/biome`, `bun-types`, `typescript`) are build-time only and
 are not shipped, so they are not listed.
 
-## Not in this task
+## Release status
 
-No tag was created and no GitHub Release was published here. The actual
-upload, the public-source versus private-repo decision, and any public
-download or Homebrew strategy stay open for the explicit decision point
-before rel-t06. This task only versions the automation and the contract.
+The tag/Release pipeline this contract specifies is live and has shipped
+`v0.1.0` and `v0.2.0` (see `docs/release-playbook.md` for the executed
+evidence). The public-source strategy is decided: the repository is
+public and the formula downloads the versioned tag tarball from the
+GitHub Release (`docs/homebrew.md`).
