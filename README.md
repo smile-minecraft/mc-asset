@@ -226,6 +226,18 @@ mc-asset validate-pack ./MyResourcePack \
 | `recolor_asset` | Remaps texture palettes to built-in material ramps (`iron`, `gold`, `stone`, etc.). |
 | `create_variants` | Fans out a source asset into per-material variants in an output directory. |
 | `validate_asset` | Checks single texture and `.mcmeta` conformance against Minecraft requirements. |
+| `import_asset` | Decodes raster inputs (PNG, JPEG, WebP) into the pixel canvas with an optional batch. |
+| `build_asset` | Builds `.mcpx` sources into PNG bytes or re-serialized source with an optional batch. |
+| `transform_asset` | Applies one geometry operation (flip, rotate, crop, pad, resize, translate) to a raster or `.mcpx` input. |
+| `quantize_asset` | Reduces distinct colors to a target count. |
+| `cleanup_asset` | Detects or fixes pixel defects (`isolated`, `noise`, `cluster`, `fringe`, `outlier`, `hole`, `aa`). |
+| `palette_asset` | Read-only palette `extract` / `inspect` reports (unique colors, distribution, roles, contrast). |
+| `material_asset` | Read-only `list` / `show` reports over the built-in material set. |
+| `tile_asset` | Seam, edge-repetition, and brightness analysis with an optional tiled preview PNG. |
+| `generate_asset` | Deterministic procedural texture generation (pattern, size, palette, seed). |
+| `preview_asset` | `ascii` / `palette-map` reports, `scale` and `nine-slice` guide PNGs. |
+| `animate_asset` | Animation `pack` / `unpack` / `reorder` / `resize` / `validate` / `preview` over frame sets. |
+| `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, version targeting. |
 
 ### Configuration
 

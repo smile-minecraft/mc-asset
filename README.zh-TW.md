@@ -226,6 +226,18 @@ mc-asset validate-pack ./MyResourcePack \
 | `recolor_asset` | 將材質套用至內建材質階梯（如 `iron`、`gold`、`stone` 等）。 |
 | `create_variants` | 依多種材質將單一素材批量衍生至指定目錄中。 |
 | `validate_asset` | 比對單一材質與 `.mcmeta` 是否符合 Minecraft 規範。 |
+| `import_asset` | 將點陣圖輸入（PNG/JPEG/WebP）解碼至像素畫布，可選擇套用批次修訂操作。 |
+| `build_asset` | 將 `.mcpx` 原始碼建置為 PNG 位元組或重新序列化的原始碼，可選擇套用批次修訂操作。 |
+| `transform_asset` | 對點陣圖或 `.mcpx` 輸入套用單一幾何操作（flip、rotate、crop、pad、resize、translate）。 |
+| `quantize_asset` | 將相異色彩數縮減至指定數量。 |
+| `cleanup_asset` | 偵測或修復像素瑕疵（`isolated`、`noise`、`cluster`、`fringe`、`outlier`、`hole`、`aa`）。 |
+| `palette_asset` | 唯讀調色盤 `extract`/`inspect` 報告（相異色彩、分布、角色、對比）。 |
+| `material_asset` | 對內建材質集提供唯讀 `list`/`show` 報告。 |
+| `tile_asset` | 接縫、邊緣重複與亮度分析，可選擇輸出平鋪預覽 PNG。 |
+| `generate_asset` | 決定性程序化材質生成（pattern、size、palette、seed）。 |
+| `preview_asset` | `ascii`/`palette-map` 報告，以及 `scale` 與 `nine-slice` 輔助 PNG。 |
+| `animate_asset` | 對動畫幀組提供 `pack`/`unpack`/`reorder`/`resize`/`validate`/`preview`。 |
+| `validate_pack_asset` | 唯讀整包掃描：命名空間、模型、材質、圖集、版本對應。 |
 
 ### 設定方式
 

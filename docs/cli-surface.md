@@ -201,7 +201,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>] [-
 mc-asset mcp
 ```
 
-Runs the native Model Context Protocol (MCP) stdio server for LLM agent integration. Provides 7 native tools without subprocess spawning:
+Runs the native Model Context Protocol (MCP) stdio server for LLM agent integration. Provides 19 native tools without subprocess spawning:
 - `analyze_asset`
 - `pixelize_asset`
 - `render_pixel_asset`
@@ -209,6 +209,18 @@ Runs the native Model Context Protocol (MCP) stdio server for LLM agent integrat
 - `recolor_asset`
 - `create_variants`
 - `validate_asset`
+- `import_asset`
+- `build_asset`
+- `transform_asset`
+- `quantize_asset`
+- `cleanup_asset`
+- `palette_asset`
+- `material_asset`
+- `tile_asset`
+- `generate_asset`
+- `preview_asset`
+- `animate_asset`
+- `validate_pack_asset`
 
 ---
 

@@ -201,7 +201,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>] [-
 mc-asset mcp
 ```
 
-启动原生 Model Context Protocol（MCP）stdio 服务器，供 LLM Agent 集成，提供 7 个原生工具，无需另起子进程：
+启动原生 Model Context Protocol（MCP）stdio 服务器，供 LLM Agent 集成，提供 19 个原生工具，无需另起子进程：
 - `analyze_asset`
 - `pixelize_asset`
 - `render_pixel_asset`
@@ -209,6 +209,18 @@ mc-asset mcp
 - `recolor_asset`
 - `create_variants`
 - `validate_asset`
+- `import_asset`
+- `build_asset`
+- `transform_asset`
+- `quantize_asset`
+- `cleanup_asset`
+- `palette_asset`
+- `material_asset`
+- `tile_asset`
+- `generate_asset`
+- `preview_asset`
+- `animate_asset`
+- `validate_pack_asset`
 
 ---
 

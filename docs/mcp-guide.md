@@ -37,9 +37,10 @@ Then fully restart OpenCode. MCP servers load at startup, so a config change
 without a restart proves nothing. To roll back, remove the entry (or restore
 the config backup) and restart again.
 
-The captures below were taken against the installed build with the MCP client
-SDK, from a demo working directory; every path in them is relative to that
-directory.
+The captures below were taken with the MCP client SDK from a demo working
+directory; every path in them is relative to that directory. The seven
+original captures come from the installed build and the v0.7 additions from
+the local source server — the same server code runs either way.
 
 ## The nineteen tools
 
