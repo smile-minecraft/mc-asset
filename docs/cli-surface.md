@@ -515,3 +515,67 @@ raise the V0.1 filesystem and unsupported cases, so their full set is
 `UNSUPPORTED_IMAGE_FORMAT`, `RESOURCE_LIMIT_EXCEEDED`, and
 `UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT`; `INVALID_ANIMATION_FRAME` and
 `INVALID_MCMETA` are exit 2.
+
+## V0.5 commands (frozen)
+
+Semantics, error codes, the exit boundary, the resource-location rules, and the
+version-fact data live in `docs/v05-design.md` and `project-detail.md` §108; the
+flag/IO/exit table is here. V0.5 adds exactly one command and no file-output
+surface: `validate-pack` is read-only, declares no file flag, and never rewrites
+Minecraft JSON (`project-docs.md` §42).
+
+| Command | Input | Output | Exit |
+|---|---|---|---|
+| `validate-pack <path>` | Resource Pack root directory, plus an optional version flag | Report only (human/JSON); no artifact file | 0/2/3/4/5 |
+| `validate <asset>` (extended) | PNG (+ existing flags) | Report only; resource-location filename check added | 0/2/3/4/5 |
+
+### Flags added in V0.5
+
+```text
+--minecraft-version <version>      validate-pack (and, since V0.1, analyze/validate);
+                                   target Minecraft version (§73).
+--resource-pack-version <n>        validate-pack (and, since V0.1, analyze/validate);
+                                   target packFormat as a positive integer (§73).
+--json                             validate-pack; JSON envelope to the envelope
+                                   stream, everything else to stderr (§98.1).
+```
+
+### Per-command surfaces
+
+```text
+validate-pack <path> [--minecraft-version <v> | --resource-pack-version <n>] [--json]
+validate      <asset> <file flags>          (unchanged surface; only the check set grows)
+```
+
+- `validate-pack` declares **no** file flag: `--output`, `--stdout`, `--source`,
+  `--force`, `--mkdir`, `--in-place`, and `--input` are undeclared and fail as
+  unknown options (exit 2); it creates zero files and writes nothing.
+- `validate-pack` does not declare `--profile`: a pack holds assets of several
+  profiles at once, so one caller-supplied profile would be a flag without a
+  meaning. Because `profile` is a per-asset notion (§37), the pack command stays
+  without it.
+- `<path>` is the pack root directory. A missing path, a non-directory path, or an
+  unreadable root is a filesystem failure (exit 4), not a verdict.
+- At most one version flag per invocation: both together, an unknown version, or a
+  non-integer `--resource-pack-version` is INVALID_ARGUMENT (exit 2, the V0.1
+  rule). With neither flag, `validate-pack` reads `pack.pack_format` from the
+  pack root's `pack.mcmeta`; when that is absent or unreadable the version-dependent
+  checks are skipped with a `PACK_VERSION_UNDETERMINED` warning and no hardcoded
+  default is applied (`project-detail.md` §73).
+- Exit boundary: anything wrong with the caller's invocation is exit 2; a defect
+  found inside the pack (including a JSON document that will not parse) is a
+  finding, and any error-level finding fails the verdict at exit 3
+  (`VALIDATION_FAILED`); a filesystem failure is exit 4; the `RESOURCE_LIMIT_EXCEEDED`
+  guard of §102 is exit 5.
+- `validate-pack` declares no `--stdout`: the report is the whole output, so
+  `--json` is the only channel choice.
+- `validate` keeps its V0.1–V0.4 surface unchanged and adds no flag. It gains the
+  filename-level resource-location checks (case, allowed characters, extension) on
+  the input basename; the namespace and path checks need a pack root and belong to
+  `validate-pack`.
+
+Exit 3 stays reserved for the `validate` family, now including `validate-pack`: a
+failing pack verdict is exit 3, while a structural or invocation problem is exit 2.
+Exit 5 keeps `RESOURCE_LIMIT_EXCEEDED`; `PACK_*` entries are finding codes carried
+inside the report, not thrown error codes. Their registration in the §99 registry
+is V0.5 implementation work (t02), not part of this frozen surface.

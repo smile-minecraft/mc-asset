@@ -3982,3 +3982,207 @@ exit code：`animate` 寫檔類為 0/2/4/5；`animate validate` 與 `validate`�
 ## 107.9 待決項目
 
 規格無法推定、且會影響對外行為的細節，列於 `docs/v04-design.md` 的待決清單，不在此自行補齊。直接影響命令表面或預設行為的有：frames 目錄是否接受 `.png` frame 與非 `.mcpx` 檔的處置、mcmeta 欄位的值域與組合語意、GUI scaling 的 mcmeta 鍵路徑、是否自動偵測同名 `.mcmeta`、grid 的預設欄數、nine-slice preview 的放大方式與 guide 色、`stretch_inner` 的行為、particle small-size readability 與 frame consistency 的規則、GUI scaling 與 palette metadata 的檢查規則、atlas reference 驗證、gui／particle preset 的數值、`animate preview` 的豐富形式、`animate` 的命令形狀與 unpack frame 格式、`FrameSetMetadata` 的內容，以及 `animate preview --ascii` 的尺寸上限。
+
+---
+
+# 108. V0.5 語意與介面凍結
+
+V0.5 的範圍見 §88（Atlas-aware Resource Pack Validator、Resource Location Validator、Version-aware Compatibility Layer）。命令表面（名稱、旗標、輸入輸出、exit code）以 `docs/cli-surface.md` 的「V0.5 commands (frozen)」為準；錯誤碼語意、resource location 規則、版本事實的資料與取捨理由以 `docs/v05-design.md` 為準。本節記錄規範性結論，三者衝突時以本節為準。
+
+規格只給了檢查清單與少數例子（§42、§55、§73、§88、§95；docs §41、§42），沒有給錯誤碼名稱、exit 分界、resource location 的字元集與長度，以及 26.1 與 1.21.11 的 packFormat 值；其餘細節記於 `docs/v05-design.md`，無法推定的列於 §108.9。
+
+範圍歸屬：§4 明列 Pixel Canvas Core MUST NOT 知道 namespace、resource location、atlas、`pack.mcmeta`。V0.5 的全部新邏輯 MUST 落在 Minecraft Compatibility Layer，MUST NOT 進 `src/core/`。
+
+## 108.1 命令表面
+
+V0.5 新增一個命令 `validate-pack`。名稱已在 `docs/cli-surface.md` 的 V0.1 保留清單（Deferred: `validate-pack` (V0.5)）與 docs §42 的範例命令中出現。V0.5 不新增其他命令。
+
+| 表面 | 種類 | 輸入 | 輸出 | exit code |
+|---|---|---|---|---|
+| `validate-pack <path>` | 新命令 | Resource Pack 根目錄（可加版本旗標） | 唯讀報告（人類／JSON） | 0/2/3/4/5 |
+| `validate <asset>`（延伸） | 既有命令新檢查 | PNG（既有旗標） | 唯讀報告 | 0/2/3/4/5 |
+
+```text
+輸出          validate-pack 不產生任何檔案；報告走 stdout（--json 走 envelope）
+檔案旗標      --output／--stdout／--source／--force／--mkdir／--in-place／--input
+              MUST NOT 被宣告；出現即 INVALID_ARGUMENT（exit 2）
+--profile     MUST NOT 被宣告：profile 是單一素材的概念（§37），pack 內同時含多種素材
+<path>        pack 根目錄；不存在、非目錄或不可讀是 FILESYSTEM_ERROR（exit 4）
+JSON          MUST NOT 生成、修改或格式化 pack 內任何 JSON（§42）
+```
+
+`validate-pack` 會讀取 pack 的目錄佈局，這是 §56「檔案位置由使用者決定」的唯一例外（§56 明文以 `validate-pack` 為例外）。
+
+## 108.2 Pack 驗證掃描與錯誤碼
+
+exit 分界（本節凍結）：
+
+```text
+呼叫端輸入不成立（引數、旗標組合、版本解析）      → throw，exit 2
+受檢素材的缺陷（含 pack 內 JSON 無法解析）        → finding；error 級 → verdict fail → exit 3
+工具讀不到 pack 根目錄                            → FILESYSTEM_ERROR，exit 4
+工具自身上限（§102 記憶體守衛）                    → RESOURCE_LIMIT_EXCEEDED，exit 5
+```
+
+依 §99，exit 3 是「工具正常運作、但素材不合格」，exit 2 是「呼叫端輸入不成立」。因此 `validate-pack` MUST NOT 因單一檔案缺陷中止掃描，MUST 掃完整棵樹再給 verdict。§42 的 invalid JSON 歸為 finding（exit 3），因為它是受檢素材的一部分，不是驗證器自己的輸入；這與 `validate --mcmeta` 的 `INVALID_MCMETA`（throw、exit 2）不同，後者的 `.mcmeta` 是呼叫端顯式指定的驗證器輸入。
+
+§42 逐項對應的 finding 碼：
+
+| §42 檢查 | finding code | level | 語意 |
+|---|---|---|---|
+| invalid JSON | `PACK_INVALID_JSON` | error | pack 內某個 JSON 文件無法解析 |
+| missing referenced texture | `PACK_MISSING_TEXTURE` | error | 被引用的 texture 不存在 |
+| missing referenced asset | `PACK_MISSING_ASSET` | error | 被引用的非 texture 素材不存在 |
+| wrong path | `PACK_WRONG_PATH` | error | 檔案實際位置與其 resource location 不符 |
+| namespace problem | `PACK_NAMESPACE_PROBLEM` | error | namespace 缺失或不在允許字元集內 |
+| case mismatch | `PACK_CASE_MISMATCH` | error | 引用與實際檔名只有大小寫不同，或出現大寫 |
+| orphan texture | `PACK_ORPHAN_TEXTURE` | warning | texture 未被任何引用觸及 |
+| invalid animation sheet | `PACK_INVALID_ANIMATION_SHEET` | error | 動畫 sheet 與其 `.mcmeta` 無法構成合法動畫 |
+| invalid image dimension | `PACK_INVALID_IMAGE_DIMENSION` | error | 圖片尺寸越界或與宣告不符 |
+| broken reference | `PACK_BROKEN_REFERENCE` | error | 引用本身不成立（目標無法解析或型別不符） |
+| （§53 第一種錯誤） | `PACK_TEXTURE_NOT_IN_ATLAS` | error | texture 存在但未進正確 atlas |
+| （§42 無對應項） | `PACK_INVALID_IMAGE_DATA` | error | 圖檔存在但無法解碼為 RGBA PNG |
+| （filename 層級） | `PACK_INVALID_FILENAME` | error | 檔名為空或含允許字元集以外的字元 |
+| （§95 待補出處） | `PENDING_SOURCE_PNG_ONLY` | warning | 非 `.png` 副檔名；沿用既有碼，永不為 error |
+| （版本未定） | `PACK_VERSION_UNDETERMINED` | warning | 版本目標無法判定，版本相依檢查已跳過 |
+
+```text
+§53 的兩種錯誤      「存在但未進正確 atlas」與「根本不存在」MUST 分成兩個碼
+                    （§53 明言兩者是不同錯誤）：PACK_TEXTURE_NOT_IN_ATLAS／PACK_MISSING_TEXTURE
+PACK_TEXTURE_MISSING 不另立：與 missing referenced texture 同義，統一為 PACK_MISSING_TEXTURE（§104.1）
+§61 既有碼          ATLAS_REFERENCE_ERROR／TEXTURE_NOT_IN_REQUIRED_ATLAS 維持登記；
+                    finding 名以 PACK_TEXTURE_NOT_IN_ATLAS 為準，ATLAS_REFERENCE_ERROR
+                    保留給 atlas 定義本身損壞的 thrown error
+orphan              warning（本凍結）：未被引用的 texture 不使 pack 無法載入
+image dimension     判準用 §102 的 1–4096（本凍結）；Minecraft 自身的尺寸規則無出處
+待補出處            只有 texture 僅 .png 一項；§95 的「只能 Warning」在此落實
+確定性              目錄列舉先排序（§100.3）；finding 依相對路徑 byte 升冪、檔內固定順序
+```
+
+§99 registry 是 exit 對照的唯一權威；把 `PACK_*` 登記進 `src/core/errors.ts` 屬實作（t02），本節只定名稱、level 與語意。這些碼是 finding 碼，隨報告回傳，verdict fail 由 `VALIDATION_FAILED`（exit 3）表達。
+
+## 108.3 Resource Location 規則
+
+§55 要求驗證 namespace、path、case、filename、extension，並說這些不是 Pixel Canvas Core 的事；§42 把 namespace problem、case mismatch、wrong path 列為 pack 檢查。規格未給字元集與長度，故保守集標（本凍結）。
+
+```text
+形式          <namespace>:<path>
+namespace     省略 ":" 時預設 minecraft（§95 的 minecraft:items 為證）
+分隔          ":" 至多一次；namespace 不含 "/"；path 不以 "/" 開頭或結尾，且不含 "//"
+允許字元（本凍結，保守集）
+              namespace  [a-z0-9_.-]      path  [a-z0-9/._-]
+大小寫        全部小寫
+長度          無出處 → 待決；MUST NOT 以長度拒絕
+對應          namespace 非法 → PACK_NAMESPACE_PROBLEM；path 非法 → PACK_WRONG_PATH
+              大寫 → PACK_CASE_MISMATCH；檔名結構非法 → PACK_INVALID_FILENAME
+              非 .png → PENDING_SOURCE_PNG_ONLY（warning，§95）
+```
+
+pack 內有出處的佈局：`assets/<namespace>/atlases/*.json`（§52）、`assets/<namespace>/textures/<path>.png`（docs §7 的 `./my-pack/assets/example/textures/item/sword.png`、§95 的 `textures/` 路徑）。其他 asset 型別的目錄名規格未列，V0.5 MUST NOT 據未列出的目錄名拒絕檔案（§108.9）。
+
+## 108.4 版本事實與資料結構
+
+§95 規定事實 MUST 附出處、MUST 在 Compatibility Layer 中以資料表達、不得散落 Core（§4）。資料形狀：
+
+```ts
+{
+  fact: "items-atlas-separated",
+  since: { packFormat: 75 },
+  value: { atlas: "items", mipmapped: false }
+}
+```
+
+八條事實（§95 查證日期 2026-09-19）：
+
+| # | fact | 文件版本 | since.packFormat | 狀態 |
+|---|---|---|---|---|
+| 1 | resource-pack-format（RP Format `97.1`） | Java Edition 26.3 | 待決（97.1 是標籤，非整數） | 已查證 |
+| 2 | trim-palette-location | 26.3 / RP 97.1 | 待決 | 已查證 |
+| 3 | items-atlas-separated | 1.21.11 | 75（§95 範例值） | 已查證 |
+| 4 | item-same-atlas／block-blocks-atlas | 1.21.11 | 75（§95 範例） | 已查證 |
+| 5 | texture-mipmap-fields | 1.21.11 | 75（§95 範例） | 已查證 |
+| 6 | block-render-pass-auto | 26.1 | 待決（無 packFormat 值） | 已查證 |
+| 7 | block-force-translucent | 26.1 | 待決 | 已查證 |
+| 8 | texture-png-only | 起始 pack format 未確認 | 待決 | 待補出處 |
+
+```text
+97.1          MUST NOT 寫進 since.packFormat；MUST NOT 成為未指定版本時的隱含目標（§73）
+75            來源是 §95 的結構範例，不是「1.21.11 等於 75」的版本對應；不得據此新增更多對應
+啟動條件      fact 生效 = since.packFormat ≤ 目標 packFormat
+warning 閘門  status: "pending-source" 或 since.packFormat 未定者，永不進入 error 路徑
+出處          每條事實 MUST 帶得出處與查證日期（§95）
+```
+
+「待補出處只能 Warning」的紀律（§95）在此延伸到「版本對應未知」：啟動點不明的事實若被套用，等於在猜版本，因此只能是 warning，不能使 verdict fail。
+
+## 108.5 版本旗標語意
+
+§73：Validator API SHOULD 接受 `--minecraft-version` 或 `--resource-pack-version`；未指定時未來可以讀 `pack.mcmeta` 決定 target；不得永遠硬編碼 `97.1`。
+
+```text
+至多一個      兩個同時 → INVALID_ARGUMENT（exit 2）
+未知版本      --minecraft-version 不在可解析集合 → INVALID_ARGUMENT（exit 2）
+非整數        --resource-pack-version 非正整數（含 "97.1" 這種點號版本）→ INVALID_ARGUMENT
+未指定（本凍結）
+  1  讀 pack 根目錄的 pack.mcmeta，取 pack.pack_format 作為目標 packFormat
+     （鍵路徑為 Minecraft 標準形狀但規格未載出處，列入待決）
+  2  讀不到或無法解析時，版本相依檢查跳過並附 PACK_VERSION_UNDETERMINED warning
+  3  MUST NOT 套用任何硬編碼預設（§73）
+  4  pack.mcmeta 本身無法解析時另給 PACK_INVALID_JSON finding
+可解析集合    packFormat 對應定案前維持既有（26.3 → 75）；新增值 MUST 先有出處
+```
+
+鍵路徑與讀取深度（`pack.pack_format`、`supported_formats`、overlays 等）在規格中都沒有出處，屬待決；讀不到該鍵時走「版本未定」路徑（warning），不得改讀其他欄位或套用預設。`pack.mcmeta` 只讀，不寫入、不重寫（§42）。
+
+## 108.6 validate 的 resource location 整合
+
+單檔沒有 pack 根目錄，可驗的只有檔案自身路徑的部分：
+
+```text
+可驗      filename：最後一段的字元集與大小寫、以及副檔名
+不可驗    namespace、path（需要 pack 根目錄）
+旗標      MUST NOT 新增（本凍結）；要驗 namespace／path 用 validate-pack
+既有      FILENAME_EXTENSION_NOT_PNG（§34）維持不變，不由 §95 的待補出處項重新推導
+新增      大寫 → PACK_CASE_MISMATCH（error）；字元集外字元 → PACK_INVALID_FILENAME（error）
+範圍      限 Minecraft profile；generic 依 §44 沒有 Minecraft 專屬限制
+```
+
+這是行為變更：既有資產若檔名含大寫，V0.5 後 verdict 由 pass 變 fail（exit 3）；實作 MUST 在回歸基線明列，MUST NOT 靜默改動既有 fixture 的預期。
+
+## 108.7 共同約束
+
+V0.5 的新表面是唯讀的，§57 與 §98.2–§98.4 的寫入守衛不適用；適用下列各條。
+
+```text
+零檔案        MUST NOT 建立任何檔案或目錄（§57 在唯讀命令上等於沒有輸出旗標）
+通道          --json 與 stdout 的分工依 §98.1；stdout 同時只承載一種載荷
+不重寫 JSON   MUST NOT 生成、修改或格式化 pack 內任何 JSON（§42）
+不改輸入      掃描前後 pack 內檔案 byte-identical（§56）
+只讀解析      pack.mcmeta、model、atlas、blockstate 一律只讀
+全序排序      目錄列舉先排序；不得依賴物件鍵序或不穩定排序（§100.3）
+無時間戳      報告 MUST NOT 含時間戳（§100.3）
+報告浮點      以固定小數位序列化（§100.3）
+跨 runtime    同 pack／同參數／同版本，跨 macOS／Linux 與 Bun／Node byte-identical（§100.4、§100.5）
+```
+
+`--json` 的 `result` 至少含 `command`、`path`、`target`、`verdict`、`findings`；每一筆 finding 是 `{ code, level, message, path? }`。既有 `validate` 的欄位不因 V0.5 改變。
+
+## 108.8 實作交接
+
+```text
+t02  validate-pack 引擎與命令；登記 PACK_* 進 src/core/errors.ts；碰 program.ts
+t03  Resource Location Validator 純引擎（單一實作點）；validate 檔名層級檢查；不碰 program.ts
+t04  Atlas 感知驗證鏈（texture→sprite reference→resource location→required atlas→
+     atlas sources→actual texture）；兩種錯誤分明；掛在 t02 的 validate-pack 內
+t05  8 條事實資料化、since 判定、warning 閘門、版本旗標解析與 pack.mcmeta 讀取
+```
+
+- t02 與 t05 都可能碰 `src/cli/program.ts`，依 §105.10 的接線權責 MUST 依序執行、MUST NOT 並行；t03、t04 的純引擎可先落地。
+- t03 的 resource location 引擎 MUST 是唯一實作點，`validate` 與 `validate-pack` 共用，避免兩處各自維護字元集。
+- t04 的 atlas 判定 MUST 走 t05 的事實資料，MUST NOT 在 Core 或 t04 內硬編碼 atlas 名稱與版本。
+- t02 MUST NOT 刪除 §61 既有的 atlas 碼。
+- t05 MUST NOT 為了讓旗標支援更多版本而填入未查證的 packFormat。
+
+## 108.9 待決項目
+
+規格無法推定、且會影響對外行為的細節列於 `docs/v05-design.md` 的待決清單，不在此自行補齊。直接影響命令表面或 verdict 的有：resource location 的完整字元集與長度、texture 僅 `.png` 的起始 pack format、26.1 與 1.21.11 及 26.3 的 packFormat 對應、`pack.mcmeta` 的鍵路徑與讀取深度、`PACK_INVALID_JSON` 的 exit 歸類、`validate-pack` 是否提供 profile 過濾、`validate` 是否需要 resource location 旗標、各 asset 型別的完整目錄佈局、Minecraft 自身的圖片尺寸規則、orphan texture 的等級、§61 既有 atlas 碼與 `PACK_*` 的收斂，以及 `validate` 的檔名檢查是否擴及全部 profile。
