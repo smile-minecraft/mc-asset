@@ -15,6 +15,11 @@ import { ensureMcpxText } from "../../src/cli/artifacts.ts";
 import { addLayer, createCanvas, setPixel } from "../../src/core/canvas.ts";
 import { decodePng, encodePng, flattenCanvas } from "../../src/io/png.ts";
 import { PNG_VECTORS } from "../io/png-cases.ts";
+import {
+	makePngBytes,
+	modelJson,
+	writePackFile,
+} from "../validate/pack-fixtures.ts";
 
 // CLI behavior needs real subprocesses, so it stays in this bun:test entry
 // on purpose: there is no node:test mirror for spawn coverage, matching the
@@ -162,6 +167,55 @@ async function writeV04SheetMcmeta(dir: string): Promise<string> {
 		}),
 	);
 	return path;
+}
+
+// V0.5 helpers: minimal pack roots built at runtime (never committed),
+// so every byte under test comes from this repo. The clean pack pairs one
+// model with the texture it references; the defect pack holds one
+// unparsable model plus one model pointing at a missing texture.
+async function writeV05CleanPack(parent: string): Promise<string> {
+	const root = join(parent, "pack");
+	await writePackFile(
+		root,
+		"assets/minecraft/models/item/sword.json",
+		modelJson({ textures: { layer0: "minecraft:item/sword" } }),
+	);
+	await writePackFile(
+		root,
+		"assets/minecraft/textures/item/sword.png",
+		makePngBytes(),
+	);
+	return root;
+}
+
+async function writeV05DefectPack(parent: string): Promise<string> {
+	const root = join(parent, "pack");
+	await writePackFile(
+		root,
+		"assets/minecraft/models/item/broken.json",
+		"{ not valid json",
+	);
+	await writePackFile(
+		root,
+		"assets/minecraft/models/item/sword.json",
+		modelJson({ textures: { layer0: "minecraft:item/missing" } }),
+	);
+	return root;
+}
+
+/** Full tree snapshot (relative names plus base64 bytes) for zero-file proofs. */
+async function snapshotTree(root: string): Promise<string> {
+	const rels = await listAllFiles(root);
+	const parts: string[] = [];
+	for (const rel of rels) {
+		try {
+			const content = await readFile(join(root, rel));
+			parts.push(`${rel}=${content.toString("base64")}`);
+		} catch {
+			parts.push(`${rel}=<unreadable>`);
+		}
+	}
+	return JSON.stringify(parts);
 }
 
 async function writeV04NineSliceMcmeta(dir: string): Promise<string> {
@@ -2048,4 +2102,327 @@ describe("conformance: V0.4 rerun determinism", () => {
 			await rm(dir, { recursive: true, force: true });
 		}
 	}, 60_000);
+});
+
+describe("conformance: V0.5 validate-pack file-flag guards", () => {
+	// validate-pack is read-only and declares no file flag: every
+	// file-targeting option is an unknown option (exit 2) and the pack
+	// tree stays byte-identical.
+	const FILE_FLAGS: Array<{ label: string; args: (dir: string) => string[] }> =
+		[
+			{ label: "--output", args: (dir) => ["--output", join(dir, "out.json")] },
+			{ label: "--stdout", args: () => ["--stdout"] },
+			{ label: "--source", args: (dir) => ["--source", join(dir, "x.mcpx")] },
+			{ label: "--force", args: () => ["--force"] },
+			{ label: "--mkdir", args: () => ["--mkdir"] },
+			{ label: "--in-place", args: () => ["--in-place"] },
+			{ label: "--input", args: () => ["--input", "x"] },
+		];
+
+	for (const entry of FILE_FLAGS) {
+		test(`validate-pack ${entry.label} is an unknown option with exit 2 and zero files`, async () => {
+			const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+			try {
+				const pack = await writeV05CleanPack(dir);
+				const before = await snapshotTree(dir);
+				const result = await runCli([
+					"validate-pack",
+					pack,
+					...entry.args(dir),
+				]);
+				expect(result.code).toBe(2);
+				expect(stdoutText(result) + result.stderr).toContain("unknown option");
+				expect(await snapshotTree(dir)).toBe(before);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		}, 30_000);
+	}
+
+	test("validate-pack --profile is an unknown option with exit 2", async () => {
+		// A pack holds assets of several profiles at once, so one
+		// caller-supplied profile would be a flag without a meaning.
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05CleanPack(dir);
+			const before = await snapshotTree(dir);
+			const result = await runCli([
+				"validate-pack",
+				pack,
+				"--profile",
+				"minecraft:item",
+			]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("unknown option");
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+});
+
+describe("conformance: V0.5 validate-pack version and path guards", () => {
+	test("both version flags together are INVALID_ARGUMENT with exit 2", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05CleanPack(dir);
+			const before = await snapshotTree(dir);
+			const result = await runCli([
+				"validate-pack",
+				pack,
+				"--minecraft-version",
+				"26.3",
+				"--resource-pack-version",
+				"75",
+			]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("INVALID_ARGUMENT");
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("unknown minecraft version is INVALID_ARGUMENT with exit 2", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05CleanPack(dir);
+			const before = await snapshotTree(dir);
+			const result = await runCli([
+				"validate-pack",
+				pack,
+				"--minecraft-version",
+				"99.99",
+			]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("INVALID_ARGUMENT");
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("non-integer resource-pack version is INVALID_ARGUMENT with exit 2", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05CleanPack(dir);
+			const before = await snapshotTree(dir);
+			const result = await runCli([
+				"validate-pack",
+				pack,
+				"--resource-pack-version",
+				"97.1",
+			]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("INVALID_ARGUMENT");
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("missing pack root is FILESYSTEM_ERROR with exit 4, never exit 3", async () => {
+		const result = await runCli([
+			"validate-pack",
+			"/no/such/dir/missing-pack",
+			"--json",
+		]);
+		expect(result.code).toBe(4);
+		expect(result.code).not.toBe(3);
+		const envelope = JSON.parse(stdoutText(result)) as {
+			success: boolean;
+			error: { code: string };
+		};
+		expect(envelope.success).toBe(false);
+		expect(envelope.error.code).toBe("FILESYSTEM_ERROR");
+	}, 30_000);
+
+	test("file path instead of a directory is FILESYSTEM_ERROR with exit 4", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const file = join(dir, "lonely.png");
+			await writePackFile(dir, "lonely.png", makePngBytes());
+			const before = await snapshotTree(dir);
+			const result = await runCli(["validate-pack", file, "--json"]);
+			expect(result.code).toBe(4);
+			const envelope = JSON.parse(stdoutText(result)) as {
+				success: boolean;
+				error: { code: string };
+			};
+			expect(envelope.success).toBe(false);
+			expect(envelope.error.code).toBe("FILESYSTEM_ERROR");
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+});
+
+describe("conformance: V0.5 validate-pack verdict and determinism", () => {
+	test("clean pack passes as JSON without touching inputs", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05CleanPack(dir);
+			const before = await snapshotTree(dir);
+			const result = await runCli([
+				"validate-pack",
+				pack,
+				"--resource-pack-version",
+				"75",
+				"--json",
+			]);
+			expect(result.code).toBe(0);
+			const envelope = JSON.parse(stdoutText(result)) as {
+				success: boolean;
+				result: {
+					command: string;
+					target: string;
+					verdict: string;
+					findings: unknown[];
+				};
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.command).toBe("validate-pack");
+			expect(envelope.result.verdict).toBe("pass");
+			expect(envelope.result.target).toContain("75");
+			expect(envelope.result.findings).toEqual([]);
+			expect(result.stderr).not.toContain('"success":true');
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("defect pack fails at exit 3 with PACK_* findings, inputs kept", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05DefectPack(dir);
+			const before = await snapshotTree(dir);
+			const result = await runCli([
+				"validate-pack",
+				pack,
+				"--resource-pack-version",
+				"75",
+				"--json",
+			]);
+			expect(result.code).toBe(3);
+			const envelope = JSON.parse(stdoutText(result)) as {
+				success: boolean;
+				error: { code: string };
+				result: {
+					verdict: string;
+					findings: Array<{ code: string; level: string; path?: string }>;
+				};
+			};
+			expect(envelope.success).toBe(false);
+			expect(envelope.error.code).toBe("VALIDATION_FAILED");
+			expect(envelope.result.verdict).toBe("fail");
+			const codes = envelope.result.findings.map((f) => f.code).sort();
+			expect(codes).toEqual(["PACK_INVALID_JSON", "PACK_MISSING_TEXTURE"]);
+			for (const finding of envelope.result.findings) {
+				expect(finding.level).toBe("error");
+				expect(typeof finding.path).toBe("string");
+			}
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("validate-pack reruns with identical stdout and a human verdict line", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05CleanPack(dir);
+			const base = [
+				"validate-pack",
+				pack,
+				"--resource-pack-version",
+				"75",
+				"--json",
+			];
+			const first = await runCli(base);
+			const second = await runCli(base);
+			expect(first.code).toBe(0);
+			expect(stdoutText(second)).toBe(stdoutText(first));
+			const human = await runCli([
+				"validate-pack",
+				pack,
+				"--resource-pack-version",
+				"75",
+			]);
+			expect(human.code).toBe(0);
+			expect(stdoutText(human) + human.stderr).toContain("verdict: pass");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("no flags without pack.mcmeta warns only and never defaults", async () => {
+		// Without a version flag or a pack.mcmeta pack_format, the
+		// version-dependent checks stay skipped: one warning-level
+		// PACK_VERSION_UNDETERMINED finding, exit 0, no invented target.
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05CleanPack(dir);
+			const before = await snapshotTree(dir);
+			const result = await runCli(["validate-pack", pack, "--json"]);
+			expect(result.code).toBe(0);
+			const envelope = JSON.parse(stdoutText(result)) as {
+				success: boolean;
+				result: {
+					verdict: string;
+					target: string;
+					findings: Array<{ code: string; level: string }>;
+				};
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.verdict).toBe("pass");
+			expect(envelope.result.target).toBe("default (engine defaults)");
+			const undetermined = envelope.result.findings.filter(
+				(f) => f.code === "PACK_VERSION_UNDETERMINED",
+			);
+			expect(undetermined.length).toBe(1);
+			expect(undetermined[0]?.level).toBe("warning");
+			expect(stdoutText(result)).not.toContain("97.1");
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("validate flags a misnamed minecraft asset without touching it", async () => {
+		// The V0.5 filename-level resource-location checks ride on the
+		// unchanged validate surface: stem case, charset, and extension.
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const input = join(dir, "Bad Name.PNG");
+			await writePackFile(dir, "Bad Name.PNG", makePngBytes());
+			const before = await snapshotTree(dir);
+			const result = await runCli([
+				"validate",
+				input,
+				"--profile",
+				"minecraft:item",
+				"--json",
+			]);
+			expect(result.code).toBe(3);
+			const envelope = JSON.parse(stdoutText(result)) as {
+				success: boolean;
+				error: { code: string };
+				result: {
+					verdict: string;
+					findings: Array<{ code: string; level: string }>;
+				};
+			};
+			expect(envelope.success).toBe(false);
+			expect(envelope.error.code).toBe("VALIDATION_FAILED");
+			expect(envelope.result.verdict).toBe("fail");
+			const codes = envelope.result.findings.map((f) => f.code);
+			expect(codes).toContain("PACK_CASE_MISMATCH");
+			expect(codes).toContain("PACK_INVALID_FILENAME");
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
 });

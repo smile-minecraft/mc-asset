@@ -18,6 +18,9 @@
 //   - V0.4: runtime's own packed sheet, frame-size 4x4)
 //   - V0.4: validate --mcmeta JSON canonical bytes (own sheet + mcmeta)
 //   - V0.4: preview --nine-slice JSON canonical bytes (px-8x8.png + mcmeta)
+//   - V0.5: validate-pack clean + defect JSON canonical bytes (fixed pack
+//   - V0.5: fixtures, explicit --resource-pack-version 75, result.path
+//   - V0.5: normalized to a fixed token so temp dirs never leak in)
 // Any difference exits non-zero so CI fails. stderr, timing, and absolute
 // paths never enter the comparison. Temp dirs are always cleaned up.
 import { spawnSync } from "node:child_process";
@@ -28,7 +31,10 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readFileSync,
+	readdirSync,
 	rmSync,
+	statSync,
+	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -64,6 +70,20 @@ const V04_NINE_SLICE_MCMETA_FIXTURE = join(
 	"fixtures",
 	"v04-nine-slice.mcmeta",
 );
+const V05_CLEAN_PACK_FIXTURE = join(
+	ROOT,
+	"tests",
+	"cli",
+	"fixtures",
+	"v05-clean-pack",
+);
+const V05_DEFECT_PACK_FIXTURE = join(
+	ROOT,
+	"tests",
+	"cli",
+	"fixtures",
+	"v05-defect-pack",
+);
 
 /** Stable serialization: object keys sorted recursively, arrays in order. */
 export function canonicalize(value) {
@@ -93,13 +113,13 @@ function fail(message) {
 	process.exit(1);
 }
 
-function runBun(args, label) {
+function runBun(args, label, okStatuses = [0]) {
 	const result = spawnSync("bun", [SOURCE_ENTRY, ...args], {
 		cwd: ROOT,
 		encoding: "buffer",
 		maxBuffer: 64 * 1024 * 1024,
 	});
-	if ((result.status ?? 1) !== 0) {
+	if (!okStatuses.includes(result.status ?? 1)) {
 		fail(
 			`bun source CLI failed on ${label} (exit ${result.status ?? "?"}):\n${String(result.stderr ?? "")}`,
 		);
@@ -107,18 +127,32 @@ function runBun(args, label) {
 	return result;
 }
 
-function runNode(args, label) {
+function runNode(args, label, okStatuses = [0]) {
 	const result = spawnSync("node", [BUNDLE, ...args], {
 		cwd: ROOT,
 		encoding: "buffer",
 		maxBuffer: 64 * 1024 * 1024,
 	});
-	if ((result.status ?? 1) !== 0) {
+	if (!okStatuses.includes(result.status ?? 1)) {
 		fail(
 			`node bundle failed on ${label} (exit ${result.status ?? "?"}):\n${String(result.stderr ?? "")}`,
 		);
 	}
 	return result;
+}
+
+/** Recursive pack-tree copy: fixtures stay fixed, each runtime scans its own copy. */
+function copyDirSync(from, to) {
+	mkdirSync(to, { recursive: true });
+	for (const entry of readdirSync(from).sort()) {
+		const src = join(from, entry);
+		const dst = join(to, entry);
+		if (statSync(src).isDirectory()) {
+			copyDirSync(src, dst);
+		} else {
+			copyFileSync(src, dst);
+		}
+	}
 }
 
 function readBytes(path, label, runtime) {
@@ -163,6 +197,40 @@ function compareCanonicalJson(label, bunStdout, nodeStdout) {
 	);
 }
 
+function comparePackJson(label, bunStdout, nodeStdout) {
+	// validate-pack echoes the scanned root as result.path, which is a
+	// different temp dir per runtime by construction. Both sides scan the
+	// same fixed fixture tree, so the path folds to one token before the
+	// canonical comparison; every finding path is already relative.
+	let bunCanon;
+	let nodeCanon;
+	try {
+		const bunJson = JSON.parse(String(bunStdout).trim());
+		const nodeJson = JSON.parse(String(nodeStdout).trim());
+		for (const doc of [bunJson, nodeJson]) {
+			if (
+				doc.result !== null &&
+				typeof doc.result === "object" &&
+				typeof doc.result.path === "string"
+			) {
+				doc.result.path = "pack";
+			}
+		}
+		bunCanon = canonicalize(bunJson);
+		nodeCanon = canonicalize(nodeJson);
+	} catch {
+		fail(`${label} stdout was not a single JSON envelope`);
+	}
+	if (bunCanon !== nodeCanon) {
+		fail(
+			`${label} differs: bun sha256=${sha256Hex(bunCanon)} vs node sha256=${sha256Hex(nodeCanon)}`,
+		);
+	}
+	process.stdout.write(
+		`ok ${label} sha256=${sha256Hex(bunCanon)} bytes=${Buffer.byteLength(bunCanon)}\n`,
+	);
+}
+
 function main() {
 	if (!existsSync(BUNDLE)) {
 		fail(`bundle missing at ${BUNDLE}; run "bun run build" first`);
@@ -176,7 +244,9 @@ function main() {
 		!existsSync(join(V04_FRAMES_FIXTURE, "frame_0.mcpx")) ||
 		!existsSync(join(V04_FRAMES_FIXTURE, "frame_1.mcpx")) ||
 		!existsSync(V04_SHEET_MCMETA_FIXTURE) ||
-		!existsSync(V04_NINE_SLICE_MCMETA_FIXTURE)
+		!existsSync(V04_NINE_SLICE_MCMETA_FIXTURE) ||
+		!existsSync(join(V05_CLEAN_PACK_FIXTURE, "assets")) ||
+		!existsSync(join(V05_DEFECT_PACK_FIXTURE, "assets"))
 	) {
 		fail("fixed fixtures missing under tests/cli/fixtures");
 	}
@@ -546,6 +616,62 @@ function main() {
 			"preview-nine-slice.json",
 			bunNineSlice.stdout,
 			nodeNineSlice.stdout,
+		);
+
+		// V0.5 validate-pack: read-only report over each runtime's own
+		// copy of the fixed fixture packs, explicit --resource-pack-version
+		// 75 so the target is reproducible without a pack.mcmeta. Only
+		// the stdout JSON envelope enters the comparison, in canonical
+		// form with result.path folded (see comparePackJson). The clean
+		// pack exits 0; the defect pack carries PACK_INVALID_JSON plus
+		// PACK_MISSING_TEXTURE and exits 3 on both runtimes.
+		copyDirSync(V05_CLEAN_PACK_FIXTURE, join(bunDir, "v05-clean-pack"));
+		copyDirSync(V05_CLEAN_PACK_FIXTURE, join(nodeDir, "v05-clean-pack"));
+		copyDirSync(V05_DEFECT_PACK_FIXTURE, join(bunDir, "v05-defect-pack"));
+		copyDirSync(V05_DEFECT_PACK_FIXTURE, join(nodeDir, "v05-defect-pack"));
+		// The unparsable model is written here from a fixed string: an
+		// intentionally broken JSON document cannot live in the repo
+		// without tripping the formatter, so it never becomes a fixture.
+		for (const dir of [bunDir, nodeDir]) {
+			writeFileSync(
+				join(dir, "v05-defect-pack", "assets", "minecraft", "models", "item", "broken.json"),
+				"{ not valid json",
+			);
+		}
+		const packCleanArgs = (dir, name) => [
+			"validate-pack",
+			join(dir, name),
+			"--resource-pack-version",
+			"75",
+			"--json",
+		];
+		const bunPackClean = runBun(
+			packCleanArgs(bunDir, "v05-clean-pack"),
+			"validate-pack-clean",
+		);
+		const nodePackClean = runNode(
+			packCleanArgs(nodeDir, "v05-clean-pack"),
+			"validate-pack-clean",
+		);
+		comparePackJson(
+			"validate-pack-clean.json",
+			bunPackClean.stdout,
+			nodePackClean.stdout,
+		);
+		const bunPackDefect = runBun(
+			packCleanArgs(bunDir, "v05-defect-pack"),
+			"validate-pack-defect",
+			[3],
+		);
+		const nodePackDefect = runNode(
+			packCleanArgs(nodeDir, "v05-defect-pack"),
+			"validate-pack-defect",
+			[3],
+		);
+		comparePackJson(
+			"validate-pack-defect.json",
+			bunPackDefect.stdout,
+			nodePackDefect.stdout,
 		);
 		process.stdout.write("compare-runtime: all outputs identical\n");
 	} finally {
