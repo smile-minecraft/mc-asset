@@ -245,7 +245,7 @@ warning 閘門  status: "pending-source" 或 since.packFormat 未定者，永不
 出處         每條事實 MUST 帶得出處與查證日期（§95）
 ```
 
-既有實作現況（實作判讀；權威來源是 `src/profiles/versions.ts`）：已以資料表達 4 條（items-atlas-separated、block-render-pass-auto、texture-mipmap-strategy、texture-png-only），全部掛在 packFormat 75 的單一版本群組；§95 的其餘列（RP format、trim palette、同一 atlas 約束）尚未以資料表達，且 render-pass 與 `force_translucent` 目前合成一條 fact。補齊這段落是 t05 的工作，不是已完成的狀態。
+實作現況（實作判讀；權威來源是 `src/profiles/versions.ts` 的 `COMPAT_FACTS`）：八條事實都已以資料表達；`since.packFormat` 未定者以 `since:{}` 表達、永不生效，只走 warning 閘門。補齊細節見「實作補充（實作波）」的版本事實層。
 
 應測點：8 條事實逐條有出處欄位；`pending-source` 與 `since` 未定者只產生 warning；把 `packFormat` 傳小於某 fact 的 `since` 時該 fact 不生效；grep 層級確認 Core 不含 atlas／resource location／pack.mcmeta 字樣。
 
@@ -328,29 +328,83 @@ V0.5 的新表面是唯讀的，因此 §57 與 §98.2–§98.4 的寫入守衛�
 
 ---
 
+## 實作補充（實作波）
+
+這一節把 V0.5 實作時確認、但前面章節未寫定的判讀補上。體例同 `docs/v03-design.md` 的「實作補充（實作波）」：標 `（實作判讀）` 的是實作實況，權威來源是每項列出的程式與測試，本節只記錄、不重新凍結。
+
+### validate-pack 掃描引擎（實作判讀）
+
+掃描範圍是 starter：引用解析只認 `assets/<namespace>/models/**/*.json` 的 `parent`（解析成 model 檔）與 `textures` 的值（解析成 `textures/<path>.png`），其他 asset 型別不發明 schema。extension 檢查只對磁碟上的實檔發出（引用字串不噴 warning 洪流，主代理裁決），因此引用慣例上省略副檔名不會造成誤報。
+
+`PACK_BROKEN_REFERENCE` 的 starter 界線同樣收窄：非字串或空白的引用、`textures` 不是物件、texture 指到 `.json`、`parent` 指到 `.png`。單一壞檔不中止掃描，一顆壞掉的 model 不阻止其餘問題被回報；finding 依相對路徑 byte 升冪、再依 `FINDING_ORDER` 的固定檢查順序排序。
+
+出處：`src/validate/pack.ts` 的 `scanPack`、`checkSingleFile`、`checkDiskName`、`checkModelReferences`、`checkParentReference`、`checkTextureReference`、`checkAnimationSheet`、`collectPackFiles`、`FINDING_ORDER`。
+
+測試：`tests/validate/pack-cases.ts`（`pass: clean pack has no error findings`、`fail: missing referenced texture`、`fail: missing referenced parent asset`、`fail: non-string texture reference is broken`、`fail: one bad model never blocks the rest of the report`、`deterministic: reruns are byte-identical and findings sort by path`）、`tests/validate/pack.test.ts`（`clean pack passes as JSON without touching inputs`、`failing pack exits 3 with VALIDATION_FAILED and keeps every finding`、`file flags are unknown options (exit 2) and create nothing`、`--profile is an unknown option (exit 2)`、`missing root is exit 4, never exit 3`、`no flags without pack.mcmeta warns only and never defaults`、`no flags reads pack.mcmeta pack_format and reports it`）。
+
+### Resource Location 引擎（實作判讀）
+
+引擎是唯一實作點：單檔 `validate` 的檔名檢查與 `validate-pack` 的引用與磁碟檔名檢查都匯入同一份 `src/validate/resource-location.ts`，沒有第二份字元集。大寫由 `PACK_CASE_MISMATCH` 獨占：字元集檢查先小寫化，所以同一個「大寫」成因只給一個碼，不會同時噴 namespace／path 的集合違規。長度不拒絕。
+
+`validate` 的整合只驗 filename 層級：從 basename 取最後一個點之前的 stem，驗大小寫與字元集；大寫 extension 仍由既有 `FILENAME_EXTENSION_NOT_PNG` 處理，不重複回報。閘門沿用既有 Minecraft profile 清單（`minecraft:item`／`minecraft:block`），`generic` 不觸發；gui／particle 刻意不含，避免讓原本通過的資產變成 fail。
+
+出處：`src/validate/resource-location.ts` 的 `parseResourceLocation`、`validateResourceLocation`、`validateDiskFilename`；`src/validate/checks.ts` 的 `checkFilename`、`checkResourceFilename`、`validateReport`。
+
+測試：`tests/validate/resource-location-cases.ts`（`fail: freeze witness MySword.PNG is a case mismatch`、`fail: uppercase namespace is a case mismatch, not a namespace problem`、`pass: length never rejects`、`warning: webp extension is pending-source warning only`、`filename: Sword.png stem uppercase is a case mismatch`、`validate: minecraft item fails Sword.png with PACK_CASE_MISMATCH`、`validate: generic ignores uppercase stems`）、`tests/validate/resource-location.test.ts`。
+
+### Atlas 感知判定（實作判讀）
+
+atlas sources 只解析 `directory` 與 `single`；`filter`、`paletted_permutations` 等未知型別（含缺 `type` 或 `source`）一律跳過，該 atlas 標 `complete: false`，查詢回 `unknown`，呼叫端跳過不妄判。required atlas 與版本閘門都取自事實資料（`ITEMS_ATLAS_FACT`／`ITEM_ATLAS_PLACEMENT_FACT`；block→`blocks`、item→`items` 的值），不在引擎內硬編碼。§54 的同 atlas 約束以 required membership 等價執法；跨 namespace 的同名 atlas 以 union 看待（僅可能漏報）。`ATLAS_REFERENCE_ERROR` 保留在 registry 未拋：壞掉的 atlas JSON 走 `PACK_INVALID_JSON` finding 並跳過。
+
+出處：`src/validate/atlas.ts` 的 `parseAtlasDefinitions`、`atlasCoverageFor`、`requiredAtlasForModel`、`normalizeDirectorySource`；`src/validate/pack.ts` 的 `checkAtlasCoverage`。
+
+測試：`tests/validate/atlas-cases.ts`（`directory source covers its subtree only`、`single source covers exactly its resource`、`unknown source types are reported and never accuse`、`missing atlas answers unknown, never not-covered`、`unusable atlas documents skip without inventing members`、`required atlas follows the model kind through the policy`）、`tests/validate/pack-cases.ts`（`fail: existing texture absent from the required atlas`、`pass: packFormat below the atlas split skips atlas verdicts`、`pass: unknown atlas source types never accuse`）。
+
+### 版本事實層（實作判讀）
+
+八條事實都以資料表達，每條帶 `source` 與 `checkedAt`（2026-09-19）。`since.packFormat` 未定者以 `since:{}` 表達，`isFactActive` 永不成立，因此永不生效；pending-source 與 since 未定共用同一道 warning 閘門，永不進入 error 路徑，`validate`／`analyze` 報告會出現 `VERSION_FACT_UNDETERMINED`（以及尚未查證項目的 `PENDING_SOURCE_PNG_ONLY`）等 warning。75 只是 §95 的結構範例值並已註記，不當成版本界線；`97.1` 是 RP Format 標籤，不進 `since`，報告也不用它作預設。未指定版本時，`validate-pack` 只讀 pack 根目錄 `pack.mcmeta` 的 `pack.pack_format`（唯讀；鍵路徑本凍結未變），讀不到就只給 `PACK_VERSION_UNDETERMINED` warning、不套預設。
+
+出處：`src/profiles/versions.ts` 的 `COMPAT_FACTS`（八條）、`isFactActive`、`resolveVersionedFact`、`pendingSourceWarnings`；`src/validate/pack.ts` 的 `packFormatFromMcmeta`；`src/cli/version-options.ts` 的 `resolveVersionTarget`、`formatVersionTarget`。
+
+測試：`tests/validate/pack-cases.ts`（`warning: undetermined version without a flag`、`undetermined version report never hardcodes 97.1`、`pack.mcmeta pack.pack_format becomes the target with no flag`、`pack.mcmeta without a usable pack_format warns and skips with no default`）；`tests/cli/version.test.ts`、`tests/profiles/profile-cases.ts`。
+
+### 跨 runtime 與符合性（實作判讀）
+
+`scripts/compare-runtime.mjs` 的 V0.5 區塊比對 Bun（跑 source CLI）與 Node（跑 bundle）的輸出：clean pack 與 defect pack 兩個 `validate-pack --json` 情境（皆帶 `--resource-pack-version 75`）都 identical，全樹 28 個比對項目全部 OK。defect pack 的不可解析 JSON 由腳本以固定字串寫入，不進 repo 的 fixture。`tests/conformance/cli-conformance.test.ts` 的 V0.5 章節涵蓋檔案旗標守衛、版本與路徑守衛、verdict 與 determinism；CI run 35499155465 的 `bun` 與 `node` 兩個 job 都成功。
+
+出處：`scripts/compare-runtime.mjs` 的 V0.5 區塊；`tests/conformance/cli-conformance.test.ts` 的 `conformance: V0.5 validate-pack file-flag guards`、`conformance: V0.5 validate-pack version and path guards`、`conformance: V0.5 validate-pack verdict and determinism`。
+
+### 未驗證與風險（實作判讀）
+
+- `exit 5`（`RESOURCE_LIMIT_EXCEEDED`）的記憶體守衛沒有活體的大包測試，只由 `MAX_PACK_FILES` 上限的程式路徑存在。
+- atlas 保守跳過的召回率取捨：未定義或只解析一半的 atlas 一律跳過，代價是可能漏報。
+- `--minecraft-version 26.3`（走 packFormat 75 的單群組）未進 `compare-runtime` 矩陣，V0.5 只比對 `--resource-pack-version 75`。
+- Windows 路徑分隔符未測：`basenameOf` 同時處理 `\` 與 `/`，但沒有跨平台測試。
+- resource location 的保守字元集可能誤拒（見待決清單第一列）。
+
 ## 待決清單
 
 以下無法從規格推定，列出但不自行填補。標「影響對外行為」的項目在定案前會直接改變命令表面或 verdict。
 
 | 項目 | 為什麼無法推定 | 需要什麼 | 現況 | 影響 |
 |---|---|---|---|---|
-| resource location 的完整字元集 | §55 只列類別，沒有字元集 | 官方字元集出處 | 用保守集（本凍結）；可能誤拒 | 影響對外行為：誤判 verdict |
-| resource location 的長度上限 | 規格無出處 | 官方上限 | MUST NOT 以長度拒絕 | 目前不影響 |
-| texture 僅 `.png` 的起始 pack format | §95 標待補出處 | 官方出處 | warning only（§95） | 影響對外行為：非 `.png` 的等級 |
-| 26.1 兩條事實的 packFormat | §95 沒有值 | 版本↔packFormat 對應出處 | 不得作為 error；不新增可解析版本 | 影響對外行為：t05 無法切換 26.1 |
-| 1.21.11 的 packFormat（75 只是 §95 範例） | 範例不是版本對應出處 | 同上 | 沿用既有 75 單群組 | 影響對外行為：版本切換精度 |
-| Java 26.3 的 packFormat 整數（表只給 97.1 標籤） | 97.1 不是整數 | 同上 | 沿用既有 75 | 影響對外行為：同上 |
-| `pack.mcmeta` 的鍵路徑與讀取深度 | §73 只說「讀 pack.mcmeta」，沒有欄位或鍵路徑 | 官方 schema 出處（`pack.pack_format`、`supported_formats` 等） | 只讀 `pack.pack_format`（本凍結；鍵路徑未證） | 影響對外行為：未指定版本時的 target |
-| `PACK_INVALID_JSON` 的 exit 歸類 | §42 的「主要檢查」與 §99 的分類有張力 | 決策 | finding／exit 3（本凍結） | 影響對外行為：改判會同時動 t02、t03 |
-| `validate-pack` 是否提供 profile 過濾 | 規格未定 | 是否要 | 不宣告（本凍結） | 影響對外行為：命令表面 |
-| `validate` 是否需要 resource location 旗標 | 單檔沒有 pack 根目錄 | 是否要 `--resource-location` | 不新增（本凍結） | 影響對外行為：t03 的表面 |
-| 各 asset 型別的完整目錄佈局 | 只有 atlases 與 textures 有出處 | 完整佈局出處 | 只驗有出處者 | 影響對外行為：`PACK_WRONG_PATH` 的覆蓋率 |
-| Minecraft 自身的圖片尺寸規則 | 規格無出處 | 官方出處 | 以 §102 的 1–4096 為判準（本凍結） | 影響對外行為：`PACK_INVALID_IMAGE_DIMENSION` |
-| `orphan texture` 的等級 | §42 只列檢查 | 是否視為不合格 | warning（本凍結） | 影響對外行為：verdict |
-| §61 既有 atlas 碼與 `PACK_*` 的收斂 | 兩套命名在同一概念上重疊 | 是否合併 | 見「Pack 驗證掃描與錯誤碼」的命名決定 | 影響對外行為：t02 的登記 |
-| `validate` 的檔名檢查是否擴及全部 profile | §44 只說 generic 沒有 Minecraft 限制 | 是否放寬 | 限定 Minecraft profile（本凍結） | 影響對外行為：generic 的 verdict |
+| resource location 的完整字元集 | §55 只列類別，沒有字元集 | 官方字元集出處 | 保守集已落地（`src/validate/resource-location.ts`）；可能誤拒（實作判讀；待複核） | 影響對外行為：誤判 verdict |
+| resource location 的長度上限 | 規格無出處 | 官方上限 | 不拒絕（實作判讀） | 目前不影響 |
+| texture 僅 `.png` 的起始 pack format | §95 標待補出處 | 官方出處 | warning only（§95）；非 `.png` 永不使 verdict fail（實作判讀） | 影響對外行為：非 `.png` 的等級 |
+| 26.1 兩條事實的 packFormat | §95 沒有值 | 版本↔packFormat 對應出處 | `since:{}` 表達、永不生效，只走 warning；不新增可解析版本（實作判讀） | 影響對外行為：t05 無法切換 26.1 |
+| 1.21.11 的 packFormat（75 只是 §95 範例） | 範例不是版本對應出處 | 同上 | 75 僅作 §95 範例值註記，不當版本界線（實作判讀） | 影響對外行為：版本切換精度 |
+| Java 26.3 的 packFormat 整數（表只給 97.1 標籤） | 97.1 不是整數 | 同上 | 97.1 為標籤、不入 `since`；報告不以它作預設（實作判讀） | 影響對外行為：同上 |
+| `pack.mcmeta` 的鍵路徑與讀取深度 | §73 只說「讀 pack.mcmeta」，沒有欄位或鍵路徑 | 官方 schema 出處（`pack.pack_format`、`supported_formats` 等） | 只讀 `pack.pack_format`（本凍結；鍵路徑未證）；已落地為唯讀讀取（實作判讀） | 影響對外行為：未指定版本時的 target |
+| `PACK_INVALID_JSON` 的 exit 歸類 | §42 的「主要檢查」與 §99 的分類有張力 | 決策 | finding／exit 3 已落地，含 `pack.mcmeta` 的 `PACK_INVALID_JSON`（實作判讀） | 影響對外行為：改判會同時動 t02、t03 |
+| `validate-pack` 是否提供 profile 過濾 | 規格未定 | 是否要 | 不宣告（本凍結）；傳入即未知選項 exit 2（實作判讀） | 影響對外行為：命令表面 |
+| `validate` 是否需要 resource location 旗標 | 單檔沒有 pack 根目錄 | 是否要 `--resource-location` | 不新增；檢查掛在既有 `validate`（實作判讀） | 影響對外行為：t03 的表面 |
+| 各 asset 型別的完整目錄佈局 | 只有 atlases 與 textures 有出處 | 完整佈局出處 | 只驗 `textures/` 與 `atlases/` 等有出處者（實作判讀） | 影響對外行為：`PACK_WRONG_PATH` 的覆蓋率 |
+| Minecraft 自身的圖片尺寸規則 | 規格無出處 | 官方出處 | 沿用 §102 的 1–4096 判準（實作判讀） | 影響對外行為：`PACK_INVALID_IMAGE_DIMENSION` |
+| `orphan texture` 的等級 | §42 只列檢查 | 是否視為不合格 | warning 已落地；verdict 仍 pass（實作判讀） | 影響對外行為：verdict |
+| §61 既有 atlas 碼與 `PACK_*` 的收斂 | 兩套命名在同一概念上重疊 | 是否合併 | 已登記關係：finding 名為 `PACK_TEXTURE_NOT_IN_ATLAS`，`ATLAS_REFERENCE_ERROR` 留在 registry 未拋（實作判讀） | 影響對外行為：t02 的登記 |
+| `validate` 的檔名檢查是否擴及全部 profile | §44 只說 generic 沒有 Minecraft 限制 | 是否放寬 | 限定 `minecraft:item`／`minecraft:block`；gui／particle 刻意不含、`generic` 不觸發（實作判讀；t03 刻意） | 影響對外行為：generic 的 verdict |
 
-「現況」一欄只記凍結時點的處置，不代表已定案；未提到的細節仍以各節敘述為準。
+「現況」一欄只記實作實況，不代表任何項目已定案；未提到的細節仍以各節敘述為準。
 
 ---
 

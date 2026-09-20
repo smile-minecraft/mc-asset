@@ -1,8 +1,8 @@
 # mc-asset
 
 Pixel-native Minecraft asset toolchain. The V0.1 command set and the frozen
-V0.2, V0.3, and V0.4 command sets all ship from this entry point; `--version`
-still prints `0.1.0` (commander-owned).
+V0.2, V0.3, V0.4, and V0.5 command sets all ship from this entry point;
+`--version` still prints `0.1.0` (commander-owned).
 
 Entry point for development: `bun src/cli/index.ts`. For installation,
 `mc-asset` ships through Homebrew — see `docs/homebrew.md` and
@@ -62,6 +62,23 @@ The V0.4 extensions to existing commands: `preview --nine-slice` (a fourth
 preview mode that requires `--mcmeta`), `validate --mcmeta <path>`,
 `--profile minecraft:gui` / `minecraft:particle`, and
 `pixelize --preset gui` / `particle`.
+
+V0.5 adds one command, `validate-pack`, plus a frozen extension to `validate`
+(semantics in `docs/v05-design.md`, flags and exit codes in
+`docs/cli-surface.md`):
+
+| Command | Input | Output |
+|---|---|---|
+| `validate-pack <path>` | Resource Pack root directory (+ optional version flag) | Report only, no artifact file; exit 0/2/3/4/5 |
+| `validate <asset>` (extended) | PNG (+ existing flags) | Report only; filename-level resource-location checks added |
+
+`validate-pack` is read-only and declares no file flag and no `--profile` (a
+pack holds several profiles at once). With no version flag it reads
+`pack.pack_format` from the pack root's `pack.mcmeta`, and applies no default
+when that is missing or unusable. `validate` keeps its V0.1–V0.4 surface and
+adds no flag: its new checks cover only the filename level (case and allowed
+characters) of `minecraft:item` / `minecraft:block` inputs — `generic` and the
+gui/particle profiles are untouched.
 
 ## Prerequisites
 
@@ -149,6 +166,12 @@ bun src/cli/index.ts --json analyze /tmp/mc-asset-quickstart/blank.png
 bun src/cli/index.ts --json validate /tmp/mc-asset-quickstart/blank.png
 # {"success":true,"result":{"verdict":"pass","profile":{"id":"generic","predictedDescription":"predicted profile generic has no Minecraft-specific restrictions."},"dimensions":{"width":16,"height":16},"totalPixels":256,"colorCount":2,"alpha":{"predictedClassification":"cutout","opaquePixels":60,"transparentPixels":196,"partialAlphaPixels":0,"partialAlphaValues":[],"opaqueRatio":"0.2344","transparentRatio":"0.7656","partialAlphaRatio":"0.0000","predictedNote":"predicted classification from PNG bytes only; not the final in-game render result."},"findings":[{"code":"PENDING_SOURCE_PNG_ONLY","level":"warning","message":"Compat fact \"texture-png-only\" is pending an official source; reported as warning only."}],"version":{},"target":"default (engine defaults)"}}
 ```
+
+Since V0.5 an `analyze`/`validate` report also carries one
+`VERSION_FACT_UNDETERMINED` warning per compatibility fact whose
+`since.packFormat` is still undetermined. Those warnings are warning-only and
+never change the verdict; the quickstart transcripts above predate that
+addition.
 
 ## Explicit paths: no implicit filenames, no silent overwrites
 
@@ -443,6 +466,47 @@ $ preview px.png --nine-slice --mcmeta nine.mcmeta --json
 {"success":true,"result":{"command":"preview","mode":"nine-slice","profile":"generic","width":8,"height":8,"mcmeta":"nine.mcmeta","scaling":{"type":"nine_slice"},"findings":[],"nineSlice":{"border":{"left":2,"top":2,"right":2,"bottom":2},"stretchInner":false},"regions":{"topLeft":{"x":0,"y":0,"width":2,"height":2},"top":{"x":2,"y":0,"width":4,"height":2},"topRight":{"x":6,"y":0,"width":2,"height":2},"left":{"x":0,"y":2,"width":2,"height":4},"center":{"x":2,"y":2,"width":4,"height":4},"right":{"x":6,"y":2,"width":2,"height":4},"bottomLeft":{"x":0,"y":6,"width":2,"height":2},"bottom":{"x":2,"y":6,"width":4,"height":2},"bottomRight":{"x":6,"y":6,"width":2,"height":2}}}}
 ```
 
+## V0.5 commands in practice
+
+`validate-pack` is read-only and declares no file flag: it scans a pack root
+directory and prints a report, creating zero files. With no version flag it
+reads `pack.pack_format` from the pack root's `pack.mcmeta`; when that is
+missing or unusable, the version-dependent checks are skipped with a
+`PACK_VERSION_UNDETERMINED` warning and no default is applied. The transcript
+below keeps the real outputs but uses bare command names instead of the full
+`bun src/cli/index.ts` entry prefix:
+
+```text
+$ validate-pack tests/cli/fixtures/v05-clean-pack --resource-pack-version 75
+command: validate-pack
+path: tests/cli/fixtures/v05-clean-pack
+target: resource-pack 75 / packFormat 75
+verdict: pass
+
+$ validate-pack tests/cli/fixtures/v05-clean-pack --resource-pack-version 75 --json
+{"success":true,"result":{"command":"validate-pack","path":"tests/cli/fixtures/v05-clean-pack","target":"resource-pack 75 / packFormat 75","verdict":"pass","findings":[]}}
+
+$ validate-pack tests/cli/fixtures/v05-defect-pack --resource-pack-version 75
+command: validate-pack
+path: tests/cli/fixtures/v05-defect-pack
+target: resource-pack 75 / packFormat 75
+verdict: fail
+error [PACK_MISSING_TEXTURE] assets/minecraft/models/item/sword.json: "textures.layer0" "minecraft:item/missing" in "assets/minecraft/models/item/sword.json" has no texture at "assets/minecraft/textures/item/missing.png".
+error [VALIDATION_FAILED] validation failed: 1 error(s), 0 warning(s).
+
+$ validate-pack does-not-exist
+error [FILESYSTEM_ERROR] Cannot read pack root: does-not-exist.
+```
+
+The clean pack exits 0, the defect pack exits 3, and the missing root exits 4
+— a filesystem failure, never a verdict. Atlas coverage follows the same
+cautious rule: a pack that ships an
+`assets/<namespace>/atlases/items.json` with an empty `sources` list gives
+`PACK_TEXTURE_NOT_IN_ATLAS` (error) for an existing item texture that never
+entered the required atlas, while deleting that atlas definition returns the
+same pack to `pass` — an atlas that is undefined or only partially understood
+is skipped instead of judged.
+
 ## Batch operations (`--operations`)
 
 Pixel/rect/line/fill edits travel through `--operations <path>` on
@@ -466,11 +530,11 @@ error envelope reports `{applied: 0, rolledBack: true}`.
 `translucent`) computed from PNG bytes only — the reports even say so
 (`predictedNote: "predicted classification from PNG bytes only; not the
 final in-game render result."`). A block model can force any quad into the
-translucent pass (`force_translucent`), so the effective classification
-needs the model JSON too. That check belongs to `validate-pack` (V0.5), not
-V0.1: never treat a V0.1 report as the in-game result.
+translucent pass (`force_translucent`), so the effective classification needs
+the model JSON too — a pack-level question rather than a single-file one.
+Never treat an `analyze`/`validate` report as the in-game result.
 
-## Determinism scope (CI-limited, V0.1 + V0.2 + V0.3 + V0.4)
+## Determinism scope (CI-limited, V0.1 + V0.2 + V0.3 + V0.4 + V0.5)
 
 What the toolchain guarantees, and where it was checked:
 
@@ -495,6 +559,11 @@ What the toolchain guarantees, and where it was checked:
   well. `animate pack` and `validate --mcmeta` rerun byte-identically, locked in
   the V0.4 determinism cases of `tests/conformance/cli-conformance.test.ts`
   (eight V0.4 guard-matrix cases plus two V0.4 determinism cases).
+- Same input plus same flags → identical output for V0.5's read-only
+  `validate-pack` too: reruns produce identical stdout and the pack tree is
+  never written, locked in `tests/validate/pack.test.ts` (`reruns are
+  byte-identical on stdout`) and in the V0.5 guard and determinism cases of
+  `tests/conformance/cli-conformance.test.ts`.
 - Cross-runtime: CI runs a `node` job alongside the `bun` job
   (`.github/workflows/ci.yml`); the shared golden/canonical/determinism cases
   in `tests/**/*.node.ts` run under `node:test` with the same assertions as
@@ -508,13 +577,16 @@ What the toolchain guarantees, and where it was checked:
   `animate pack` sheet (`668bf78b…`, 204 B), the two unpacked frame files
   (`ffed8046…` / `71c28eab…`, 136 B each, matching the committed fixtures), the
   `validate --mcmeta` canonical report (`2d33ded5…`, 1111 B), and the
-  `preview --nine-slice` canonical JSON (`4f6d1f7b…`, 685 B). The comparison
-  reports all 26 compared items OK and identical across Bun and Node; CI run
-  35494750478 succeeded on both the `bun` and `node` jobs.
+  `preview --nine-slice` canonical JSON (`4f6d1f7b…`, 685 B). The V0.5
+  scenarios add two more: the `validate-pack` canonical report over the clean
+  fixture pack (exit 0) and over the defect pack (exit 3), both with an
+  explicit `--resource-pack-version 75`. The comparison reports all 28
+  compared items OK and identical across Bun and Node; CI run 35499155465
+  succeeded on both the `bun` and `node` jobs.
 - Static guards in CI forbid `Math.random` and transcendental `Math`
   functions in `src/` (§100.2, §100.3), and Bun-only APIs in `src/` (§100.5).
-- Scope limit: this covers the checked V0.1, V0.2, V0.3, and V0.4 inputs,
-  formats, and flags only. JPEG decode is not claimed bit-exact across
+- Scope limit: this covers the checked V0.1, V0.2, V0.3, V0.4, and V0.5
+  inputs, formats, and flags only. JPEG decode is not claimed bit-exact across
   implementations, and untested format variants stay unverified (see the
   gaps below).
 
@@ -566,19 +638,43 @@ What the toolchain guarantees, and where it was checked:
   `--operations` and the CLI, and `analyze` now reports a measured
   `isolatedPixels` (the V0.1 "silent on isolated pixels" gap is retired);
   there is still no anti-aliasing detection.
-- **Version targets are narrow**: `analyze`/`validate` accept
+- **Version targets are narrow**: `analyze`/`validate`/`validate-pack` accept
   `--minecraft-version 26.3` or an integer `--resource-pack-version`; dotted
-  resource-pack versions such as `97.1` are `INVALID_ARGUMENT`, and the
-  multi-version fact layer is V0.5 work. `--preset` exists on `pixelize` only;
-  there is no `--pack-format`.
+  resource-pack versions such as `97.1` are `INVALID_ARGUMENT` (the `97.1`
+  label never becomes a default target). The V0.5 fact layer registers eight
+  compatibility facts, but a fact whose version mapping is still undetermined
+  never takes effect — warning only (see the V0.5 gaps below). `--preset`
+  exists on `pixelize` only; there is no `--pack-format`.
 - **`--version` prints the toolchain version** (`0.1.0`, commander-owned,
   exit 0) and nothing more; it does not select compat behavior.
 - **`PENDING_SOURCE_PNG_ONLY` warning**: every analyze/validate report
   carries it, because the PNG-only texture fact still lacks an official
   source (§95). It is warning-only by construction and can never fail
   validation.
-- **Effective alpha needs `validate-pack` (V0.5)**, and later-version surface
-  stays unimplemented: no `validate-pack` or `mcp` command (V0.5–V0.6).
+- **Later-version surface stays unimplemented**: V0.5 ships `validate-pack`,
+  so that gap is closed; the `mcp` command (V0.6) is still absent.
+- **V0.5's `exit 5` path is untested in practice**: the
+  `RESOURCE_LIMIT_EXCEEDED` guard for an oversized pack exists, but no live
+  large-pack run exercises it.
+- **`validate-pack` skips instead of accusing on partial atlas knowledge**: an
+  undefined atlas, an atlas with a source type the starter does not understand
+  (`filter`, `paletted_permutations`, …), or an unparsable atlas document makes
+  the coverage query `unknown`, so atlas membership is never invented — at the
+  cost of recall on packs the scan does not fully parse.
+- **The version-fact layer is mostly warning-only**: the eight facts carry a
+  `source` and `checkedAt` (2026-09-19), but a fact whose `since.packFormat` is
+  still undetermined is expressed as `since:{}`, never takes effect, and shows
+  up only as a `VERSION_FACT_UNDETERMINED` warning per such fact in
+  `analyze`/`validate` reports (see the note in the quickstart). The only
+  `pack.mcmeta` key read is `pack.pack_format`, and its exact key path is still
+  an open decision.
+- **The resource-location character set is conservative**: the frozen
+  `[a-z0-9_.-]` namespace and `[a-z0-9/._-]` path sets are a minimal set with
+  no official source, so a wider official set would mean false rejections;
+  length never rejects.
+- **V0.5 cross-platform coverage is partial**: `--minecraft-version 26.3` is
+  not in the `compare-runtime` matrix, and Windows path separators were never
+  tested.
 - **The V0.4 `animate` and mcmeta readings are starter behavior pending
   review**: frame derivation prefers `vertical` when the mcmeta layout is
   ambiguous; `unpack --mcmeta` is conservative (a size mismatch, a
@@ -599,9 +695,10 @@ What the toolchain guarantees, and where it was checked:
   a border that overflows the sprite is an error finding with no regions while
   the preview PNG is still written (a guide line outside the sprite is
   skipped); findings never raise exit 3. These readings are pending review.
-- **Particle atlas reference stays predicted**: full atlas validation is V0.5
-  work (§88), so `--profile minecraft:particle` marks the atlas reference as
-  predicted only.
+- **Particle atlas reference stays predicted**: atlas-aware validation needs a
+  pack root and lives in `validate-pack` (V0.5, §88); the single-asset
+  `--profile minecraft:particle` still marks its atlas reference as predicted
+  only.
 - **`pixelize --preset gui` / `particle` are starter parameter sets** pending
   art-direction review (gui 16 colors, particle 24; cleanup `outlier`; edge and
   cluster 0), on the same footing as the V0.2 presets.
