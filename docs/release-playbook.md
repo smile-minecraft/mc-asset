@@ -2,9 +2,10 @@
 
 How to install, upgrade, reinstall, roll back, and publish a version of
 `mc-asset` through the public GitHub Release and the Homebrew tap. The
-pipeline is live and has carried v0.1.0 and v0.2.0; versions V0.3–V0.6
-reuse the same steps, so this page doubles as the repeatable checklist
-for future releases.
+pipeline is live and has carried v0.1.0 and v0.2.0; the V0.3–V0.6
+feature sets shipped together in v0.2.0 rather than as separate
+releases, and later versions reuse the same steps, so this page doubles
+as the repeatable checklist for future releases.
 
 Facts are split into **verified** (actually executed, with evidence) and
 **pending** (not yet done). Do not cite a pending item as done.
@@ -42,14 +43,23 @@ Verified during the v0.2.0 release:
   have produced a `mc-asset.js` command name and broken nothing else —
   the symlink form is the fixed and verified one. Keep this line when
   bumping the formula.
+- MCP live verification against the Homebrew-installed v0.2.0 binary
+  (the release that carries the V0.6 `mc-asset mcp` server):
+  `opencode mcp list` reports `mc-asset connected`
+  (`command: /opt/homebrew/bin/mc-asset mcp`), and a fresh OpenCode
+  session ran all seven MCP tools end to end — `analyze_asset`,
+  `pixelize_asset`, `render_pixel_asset`, `apply_asset_operations`,
+  `recolor_asset`, `create_variants`, `validate_asset` — with the raw
+  tool outputs kept as evidence and exit 0. The missing-file path
+  returned `FILESYSTEM_ERROR`, and the output files were written to
+  disk. Registration lives in the global OpenCode config
+  (`~/.config/opencode/opencode.jsonc`); removing the block reverts
+  the registration.
 
 Pending (not done, do not claim otherwise):
 
 - No homebrew/core submission (self-hosted tap only; revisit after a
   few stable releases).
-- No MCP live verification yet — that is V0.6 (`v06-t03`), scheduled
-  after an OpenCode restart, and it must run against the
-  Homebrew-installed binary (see the V0.6 checklist).
 - No rollback has ever been executed; the rollback steps below follow
   documented Homebrew behavior but are untested in practice.
 
@@ -182,11 +192,14 @@ isolating the test environment and adding an env-fallback positive case
   `../dist/mc-asset.js` relatively); see the comment in
   `homebrew/Formula/mc-asset.rb`.
 
-## Upcoming releases: V0.3–V0.6
+## V0.3–V0.6 feature sets, and the steps for future releases
 
-Every version runs the same core pipeline (Release pipeline above),
-plus the deltas below. Plan names and scope come from the plan
-registry; the per-version task breakdowns live there, not here.
+The V0.3–V0.6 feature sets were not cut as separate releases: they
+shipped together in v0.2.0, so the deltas below describe v0.2.0's
+content, not pending work. Future versions run the same core pipeline
+(Release pipeline above) plus their own deltas. Plan names and scope
+come from the plan registry; the per-version task breakdowns live
+there, not here.
 
 Core checklist (every version):
 
@@ -214,26 +227,32 @@ Per-version deltas:
 - **V0.5 — Atlas 感知 Pack 驗證與版本相容層** (`mc-asset-v05`): adds
   `validate-pack` and version-target flags. README's "effective alpha
   needs validate-pack (V0.5)" note and the "no version-target flags"
-  gap entry must be rewritten when this ships.
+  gap entry were rewritten when the feature set shipped in v0.2.0;
+  neither phrase appears in the README now.
 - **V0.6 — MCP Server** (`mc-asset-v06`): core checklist, then the MCP
-  verification checklist below. The MCP test is deliberately last and
-  uses the installed binary, not the source checkout.
+  verification checklist below. The MCP test ran last and used the
+  installed binary, not the source checkout; it is now verified (see
+  Current state).
 
 ### V0.6 MCP verification checklist
 
-- [ ] All V0.6 code merged and released through the core checklist;
+Status: all items done — the verification was carried out against the
+Homebrew-installed v0.2.0 build, which is the release that carries the
+V0.6 `mc-asset mcp` server (evidence in Current state above).
+
+- [x] All V0.6 code merged and released through the core checklist;
       tap formula bumped to the V0.6 version
-- [ ] Verification target is the Homebrew-installed `mc-asset`
+- [x] Verification target is the Homebrew-installed `mc-asset`
       (`mc-asset --version` shows the V0.6 version before starting) —
       per the V0.6 plan, the installed build is the verification
       target, never `bun src/cli/index.ts`
-- [ ] Register `mc-asset mcp` in the OpenCode MCP config; record the
+- [x] Register `mc-asset mcp` in the OpenCode MCP config; record the
       exact config change so it can be reverted
-- [ ] Restart OpenCode (MCP servers load at startup; a config change
+- [x] Restart OpenCode (MCP servers load at startup; a config change
       without a restart proves nothing)
-- [ ] After restart, exercise all seven MCP tools end to end and keep
+- [x] After restart, exercise all seven MCP tools end to end and keep
       the real tool outputs as evidence
-- [ ] If the package is upgraded during verification, reinstall and
+- [x] If the package is upgraded during verification, reinstall and
       restart OpenCode again so the new version is loaded
-- [ ] Schedule the whole block last: the restart interrupts the user's
+- [x] Schedule the whole block last: the restart interrupts the user's
       environment
