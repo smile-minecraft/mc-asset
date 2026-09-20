@@ -1,0 +1,18 @@
+mcpx 1
+
+[canvas]
+width = 4
+height = 4
+
+[palette]
+0 = #FF0000FF
+
+[layer base]
+visible = true
+opacity = 1.000
+
+[grid]
+0000
+0000
+0000
+0000

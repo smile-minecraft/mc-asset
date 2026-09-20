@@ -13,11 +13,17 @@
 //   - V0.3: tile JSON canonical bytes (px-8x8.png report mode)
 //   - V0.3: preview ascii JSON + palette-map JSON canonical bytes,
 //   - V0.3: preview --scale PNG bytes (px-8x8.png --scale 2)
+//   - V0.4: animate pack sheet PNG bytes (v04-anim-frames, vertical)
+//   - V0.4: animate unpack per-frame .mcpx text bytes (from each
+//   - V0.4: runtime's own packed sheet, frame-size 4x4)
+//   - V0.4: validate --mcmeta JSON canonical bytes (own sheet + mcmeta)
+//   - V0.4: preview --nine-slice JSON canonical bytes (px-8x8.png + mcmeta)
 // Any difference exits non-zero so CI fails. stderr, timing, and absolute
 // paths never enter the comparison. Temp dirs are always cleaned up.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -37,6 +43,27 @@ const MCPX_FIXTURE = join(ROOT, "tests", "cli", "fixtures", "sword.mcpx");
 const PX_PNG_FIXTURE = join(ROOT, "tests", "cli", "fixtures", "px-8x8.png");
 const PX_JPG_FIXTURE = join(ROOT, "tests", "cli", "fixtures", "px-8x8.jpg");
 const PX_WEBP_FIXTURE = join(ROOT, "tests", "cli", "fixtures", "px-lossless.webp");
+const V04_FRAMES_FIXTURE = join(
+	ROOT,
+	"tests",
+	"cli",
+	"fixtures",
+	"v04-anim-frames",
+);
+const V04_SHEET_MCMETA_FIXTURE = join(
+	ROOT,
+	"tests",
+	"cli",
+	"fixtures",
+	"v04-sheet.mcmeta",
+);
+const V04_NINE_SLICE_MCMETA_FIXTURE = join(
+	ROOT,
+	"tests",
+	"cli",
+	"fixtures",
+	"v04-nine-slice.mcmeta",
+);
 
 /** Stable serialization: object keys sorted recursively, arrays in order. */
 export function canonicalize(value) {
@@ -145,7 +172,11 @@ function main() {
 		!existsSync(MCPX_FIXTURE) ||
 		!existsSync(PX_PNG_FIXTURE) ||
 		!existsSync(PX_JPG_FIXTURE) ||
-		!existsSync(PX_WEBP_FIXTURE)
+		!existsSync(PX_WEBP_FIXTURE) ||
+		!existsSync(join(V04_FRAMES_FIXTURE, "frame_0.mcpx")) ||
+		!existsSync(join(V04_FRAMES_FIXTURE, "frame_1.mcpx")) ||
+		!existsSync(V04_SHEET_MCMETA_FIXTURE) ||
+		!existsSync(V04_NINE_SLICE_MCMETA_FIXTURE)
 	) {
 		fail("fixed fixtures missing under tests/cli/fixtures");
 	}
@@ -399,6 +430,122 @@ function main() {
 			"preview-scale.png",
 			join(bunDir, "preview-scale.png"),
 			join(nodeDir, "preview-scale.png"),
+		);
+
+		// V0.4 animate pack: the fixed two-frame fixture packs to a
+		// byte-identical vertical sheet PNG on both runtimes.
+		const packArgs = (dir) => [
+			"animate",
+			"pack",
+			"--frames-dir",
+			V04_FRAMES_FIXTURE,
+			"--layout",
+			"vertical",
+			"--output",
+			join(dir, "v04-sheet.png"),
+		];
+		runBun(packArgs(bunDir), "animate-pack");
+		runNode(packArgs(nodeDir), "animate-pack");
+		compareFile(
+			"v04-sheet.png",
+			join(bunDir, "v04-sheet.png"),
+			join(nodeDir, "v04-sheet.png"),
+		);
+
+		// V0.4 animate unpack: each runtime unpacks its own packed sheet
+		// (same precedent as analyze on each runtime's own render.png);
+		// every per-frame .mcpx text file enters the comparison.
+		const unpackArgs = (dir) => [
+			"animate",
+			"unpack",
+			join(dir, "v04-sheet.png"),
+			"--layout",
+			"vertical",
+			"--frame-size",
+			"4x4",
+			"--output-dir",
+			join(dir, "v04-unpacked"),
+			"--mkdir",
+		];
+		runBun(unpackArgs(bunDir), "animate-unpack");
+		runNode(unpackArgs(nodeDir), "animate-unpack");
+		for (const name of ["frame_0.mcpx", "frame_1.mcpx"]) {
+			compareFile(
+				`v04-unpacked/${name}`,
+				join(bunDir, "v04-unpacked", name),
+				join(nodeDir, "v04-unpacked", name),
+			);
+		}
+
+		// V0.4 validate --mcmeta: read-only report over each runtime's own
+		// sheet; only the stdout JSON envelope enters the comparison, in
+		// canonical form. Each side gets the same mcmeta basename so the
+		// envelope path field cannot leak the temp dir.
+		copyFileSync(V04_SHEET_MCMETA_FIXTURE, join(bunDir, "v04-sheet.mcmeta"));
+		copyFileSync(V04_SHEET_MCMETA_FIXTURE, join(nodeDir, "v04-sheet.mcmeta"));
+		const bunMcmeta = runBun(
+			[
+				"validate",
+				join(bunDir, "v04-sheet.png"),
+				"--mcmeta",
+				join(bunDir, "v04-sheet.mcmeta"),
+				"--json",
+			],
+			"validate-mcmeta",
+		);
+		const nodeMcmeta = runNode(
+			[
+				"validate",
+				join(nodeDir, "v04-sheet.png"),
+				"--mcmeta",
+				join(nodeDir, "v04-sheet.mcmeta"),
+				"--json",
+			],
+			"validate-mcmeta",
+		);
+		compareCanonicalJson(
+			"validate-mcmeta.json",
+			bunMcmeta.stdout,
+			nodeMcmeta.stdout,
+		);
+
+		// V0.4 preview --nine-slice: read-only report over the shared PNG
+		// fixture; only the stdout JSON envelope enters the comparison,
+		// in canonical form.
+		copyFileSync(
+			V04_NINE_SLICE_MCMETA_FIXTURE,
+			join(bunDir, "v04-nine-slice.mcmeta"),
+		);
+		copyFileSync(
+			V04_NINE_SLICE_MCMETA_FIXTURE,
+			join(nodeDir, "v04-nine-slice.mcmeta"),
+		);
+		const bunNineSlice = runBun(
+			[
+				"preview",
+				PX_PNG_FIXTURE,
+				"--nine-slice",
+				"--mcmeta",
+				join(bunDir, "v04-nine-slice.mcmeta"),
+				"--json",
+			],
+			"preview-nine-slice",
+		);
+		const nodeNineSlice = runNode(
+			[
+				"preview",
+				PX_PNG_FIXTURE,
+				"--nine-slice",
+				"--mcmeta",
+				join(nodeDir, "v04-nine-slice.mcmeta"),
+				"--json",
+			],
+			"preview-nine-slice",
+		);
+		compareCanonicalJson(
+			"preview-nine-slice.json",
+			bunNineSlice.stdout,
+			nodeNineSlice.stdout,
 		);
 		process.stdout.write("compare-runtime: all outputs identical\n");
 	} finally {

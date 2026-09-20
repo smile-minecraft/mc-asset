@@ -11,6 +11,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ensureMcpxText } from "../../src/cli/artifacts.ts";
 import { addLayer, createCanvas, setPixel } from "../../src/core/canvas.ts";
 import { decodePng, encodePng, flattenCanvas } from "../../src/io/png.ts";
 import { PNG_VECTORS } from "../io/png-cases.ts";
@@ -116,6 +117,68 @@ async function fileExists(path: string): Promise<boolean> {
 	} catch {
 		return false;
 	}
+}
+
+// V0.4 helpers: runtime-built two-frame set (4x4 solid red + green) over the
+// frozen .mcpx pipeline, so every byte on disk comes from this repo. The
+// geometry (two 4x4 frames, vertical sheet 4x8) matches the committed
+// v04-anim-frames / v04-sheet.mcmeta fixtures used by compare-runtime.
+async function writeV04Frames(parent: string, name: string): Promise<string> {
+	const dir = join(parent, name);
+	await mkdir(dir, { recursive: true });
+	const colors = [
+		{ r: 255, g: 0, b: 0, a: 255 },
+		{ r: 0, g: 255, b: 0, a: 255 },
+	];
+	for (const [index, color] of colors.entries()) {
+		const canvas = createCanvas(4, 4);
+		const layer = addLayer(canvas, { id: "base" });
+		for (let y = 0; y < 4; y += 1) {
+			for (let x = 0; x < 4; x += 1) {
+				setPixel(canvas, layer.id, x, y, color);
+			}
+		}
+		await writeFile(
+			join(dir, `frame_${index}.mcpx`),
+			ensureMcpxText(canvas, () => {}),
+		);
+	}
+	return dir;
+}
+
+async function writeV04SheetMcmeta(dir: string): Promise<string> {
+	const path = join(dir, "sheet.mcmeta");
+	await writeFile(
+		path,
+		JSON.stringify({
+			texture: { mipmap_strategy: "mean", alpha_cutoff_bias: 0 },
+			animation: {
+				frametime: 2,
+				interpolate: false,
+				width: 4,
+				height: 4,
+				frames: [0, 1],
+			},
+		}),
+	);
+	return path;
+}
+
+async function writeV04NineSliceMcmeta(dir: string): Promise<string> {
+	const path = join(dir, "nine-slice.mcmeta");
+	await writeFile(
+		path,
+		JSON.stringify({
+			gui: {
+				scaling: {
+					type: "nine_slice",
+					border: { left: 2, top: 2, right: 2, bottom: 2 },
+					stretch_inner: false,
+				},
+			},
+		}),
+	);
+	return path;
 }
 
 describe("conformance: import gaps (t08 spawn缺口補齊)", () => {
@@ -1680,6 +1743,307 @@ describe("conformance: V0.3 tile and preview report determinism", () => {
 			).toBe(0);
 			expect(await readFile(firstPng)).toEqual(await readFile(secondPng));
 			expect(await readFile(work)).toEqual(inputBefore);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+});
+
+describe("conformance: V0.4 §98 output guards", () => {
+	const PX_PNG = join(FIXTURES, "px-8x8.png");
+
+	test("animate pack without any output channel is OUTPUT_REQUIRED with zero files", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const framesDir = await writeV04Frames(dir, "frames");
+			const before = await listAllFiles(dir);
+			const result = await runCli([
+				"animate",
+				"pack",
+				"--frames-dir",
+				framesDir,
+				"--layout",
+				"vertical",
+			]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("OUTPUT_REQUIRED");
+			expect(await listAllFiles(dir)).toEqual(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("animate pack second write is OUTPUT_EXISTS; --force reruns byte-identical", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const framesDir = await writeV04Frames(dir, "frames");
+			const out = join(dir, "sheet.png");
+			const base = [
+				"animate",
+				"pack",
+				"--frames-dir",
+				framesDir,
+				"--layout",
+				"vertical",
+			];
+			expect((await runCli([...base, "--output", out])).code).toBe(0);
+			const original = await readFile(out);
+			const before = await listAllFiles(dir);
+			const refused = await runCli([...base, "--output", out]);
+			expect(refused.code).toBe(4);
+			expect(stdoutText(refused) + refused.stderr).toContain("OUTPUT_EXISTS");
+			expect(await readFile(out)).toEqual(original);
+			expect(await listAllFiles(dir)).toEqual(before);
+			expect((await runCli([...base, "--output", out, "--force"])).code).toBe(
+				0,
+			);
+			expect(await readFile(out)).toEqual(original);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("animate pack missing parents need --mkdir", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const framesDir = await writeV04Frames(dir, "frames");
+			const base = [
+				"animate",
+				"pack",
+				"--frames-dir",
+				framesDir,
+				"--layout",
+				"vertical",
+			];
+			const nested = join(dir, "nope", "nested", "sheet.png");
+			const refused = await runCli([...base, "--output", nested]);
+			expect(refused.code).toBe(4);
+			expect(stdoutText(refused) + refused.stderr).toContain(
+				"FILESYSTEM_ERROR",
+			);
+			expect(await fileExists(join(dir, "nope"))).toBe(false);
+			const made = join(dir, "fresh", "nested", "sheet.png");
+			expect((await runCli([...base, "--output", made, "--mkdir"])).code).toBe(
+				0,
+			);
+			expect(await fileExists(made)).toBe(true);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("validate --mcmeta rejects file flags as unknown options with exit 2", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const framesDir = await writeV04Frames(dir, "frames");
+			const sheet = join(dir, "sheet.png");
+			expect(
+				(
+					await runCli([
+						"animate",
+						"pack",
+						"--frames-dir",
+						framesDir,
+						"--layout",
+						"vertical",
+						"--output",
+						sheet,
+					])
+				).code,
+			).toBe(0);
+			const mcmeta = await writeV04SheetMcmeta(dir);
+			const before = await listAllFiles(dir);
+			const withOutput = await runCli([
+				"--json",
+				"validate",
+				sheet,
+				"--mcmeta",
+				mcmeta,
+				"--output",
+				join(dir, "out.json"),
+			]);
+			expect(withOutput.code).toBe(2);
+			expect(stdoutText(withOutput) + withOutput.stderr).toContain(
+				"unknown option",
+			);
+			const withStdout = await runCli([
+				"validate",
+				sheet,
+				"--mcmeta",
+				mcmeta,
+				"--stdout",
+			]);
+			expect(withStdout.code).toBe(2);
+			expect(stdoutText(withStdout) + withStdout.stderr).toContain(
+				"unknown option",
+			);
+			expect(await listAllFiles(dir)).toEqual(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("animate validate rejects file flags as read-only with exit 2", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const framesDir = await writeV04Frames(dir, "frames");
+			const before = await listAllFiles(dir);
+			const result = await runCli([
+				"--json",
+				"animate",
+				"validate",
+				"--frames-dir",
+				framesDir,
+				"--output",
+				join(dir, "out.json"),
+			]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("read-only");
+			expect(await listAllFiles(dir)).toEqual(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("preview without a mode is INVALID_ARGUMENT with exit 2", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const before = await listAllFiles(dir);
+			const result = await runCli(["--json", "preview", PX_PNG]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("INVALID_ARGUMENT");
+			expect(await listAllFiles(dir)).toEqual(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("preview with two modes is ARGUMENT_CONFLICT with exit 2", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const mcmeta = await writeV04NineSliceMcmeta(dir);
+			const pair = await runCli([
+				"--json",
+				"preview",
+				PX_PNG,
+				"--ascii",
+				"--palette-map",
+			]);
+			expect(pair.code).toBe(2);
+			expect(stdoutText(pair) + pair.stderr).toContain("ARGUMENT_CONFLICT");
+			const mixed = await runCli([
+				"--json",
+				"preview",
+				PX_PNG,
+				"--ascii",
+				"--nine-slice",
+				"--mcmeta",
+				mcmeta,
+			]);
+			expect(mixed.code).toBe(2);
+			expect(stdoutText(mixed) + mixed.stderr).toContain("ARGUMENT_CONFLICT");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("validate --mcmeta leaves the PNG and mcmeta bytes alone", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const framesDir = await writeV04Frames(dir, "frames");
+			const sheet = join(dir, "sheet.png");
+			expect(
+				(
+					await runCli([
+						"animate",
+						"pack",
+						"--frames-dir",
+						framesDir,
+						"--layout",
+						"vertical",
+						"--output",
+						sheet,
+					])
+				).code,
+			).toBe(0);
+			const mcmeta = await writeV04SheetMcmeta(dir);
+			const pngBefore = await readFile(sheet);
+			const mcmetaBefore = await readFile(mcmeta);
+			const result = await runCli([
+				"--json",
+				"validate",
+				sheet,
+				"--mcmeta",
+				mcmeta,
+			]);
+			expect(result.code).toBe(0);
+			expect(await readFile(sheet)).toEqual(pngBefore);
+			expect(await readFile(mcmeta)).toEqual(mcmetaBefore);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+});
+
+describe("conformance: V0.4 rerun determinism", () => {
+	test("animate pack reruns byte-identical on the same frames", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const framesDir = await writeV04Frames(dir, "frames");
+			const first = join(dir, "sheet-a.png");
+			const second = join(dir, "sheet-b.png");
+			const base = [
+				"animate",
+				"pack",
+				"--frames-dir",
+				framesDir,
+				"--layout",
+				"vertical",
+			];
+			expect((await runCli([...base, "--output", first])).code).toBe(0);
+			expect((await runCli([...base, "--output", second])).code).toBe(0);
+			expect(await readFile(first)).toEqual(await readFile(second));
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("validate --mcmeta reruns with identical stdout on the same inputs", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const framesDir = await writeV04Frames(dir, "frames");
+			const sheet = join(dir, "sheet.png");
+			expect(
+				(
+					await runCli([
+						"animate",
+						"pack",
+						"--frames-dir",
+						framesDir,
+						"--layout",
+						"vertical",
+						"--output",
+						sheet,
+					])
+				).code,
+			).toBe(0);
+			const mcmeta = await writeV04SheetMcmeta(dir);
+			const first = await runCli([
+				"--json",
+				"validate",
+				sheet,
+				"--mcmeta",
+				mcmeta,
+			]);
+			const second = await runCli([
+				"--json",
+				"validate",
+				sheet,
+				"--mcmeta",
+				mcmeta,
+			]);
+			expect(first.code).toBe(0);
+			expect(stdoutText(second)).toBe(stdoutText(first));
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
