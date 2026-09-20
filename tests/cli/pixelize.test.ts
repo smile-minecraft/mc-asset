@@ -315,7 +315,7 @@ describe("pixelize wiring via spawn", () => {
 				"--size",
 				"16",
 				"--preset",
-				"gui",
+				"retro",
 				"--stdout",
 			]);
 			expect(bad.code).toBe(2);

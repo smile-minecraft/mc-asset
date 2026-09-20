@@ -1,10 +1,12 @@
 import { McAssetError } from "../core/errors.ts";
 
-/** Frozen V0.1 profile set per section 104.3. No --preset flag exists. */
+/** Frozen profile set: generic plus the four Minecraft asset profiles. */
 export const SUPPORTED_PROFILES = [
 	"generic",
 	"minecraft:item",
 	"minecraft:block",
+	"minecraft:gui",
+	"minecraft:particle",
 ] as const;
 
 export type SupportedProfile = (typeof SUPPORTED_PROFILES)[number];
@@ -23,6 +25,6 @@ export function parseProfile(value: string | undefined): SupportedProfile {
 	}
 	throw new McAssetError(
 		"INVALID_PROFILE",
-		`Unknown profile "${value}". V0.1 supports: ${SUPPORTED_PROFILES.join(", ")}.`,
+		`Unknown profile "${value}". Supported: ${SUPPORTED_PROFILES.join(", ")}.`,
 	);
 }

@@ -1,6 +1,11 @@
 /** Shared profile-layer types. All classification output stays predicted. */
 
-export type AssetProfileId = "generic" | "minecraft:item" | "minecraft:block";
+export type AssetProfileId =
+	| "generic"
+	| "minecraft:item"
+	| "minecraft:block"
+	| "minecraft:gui"
+	| "minecraft:particle";
 
 export type PredictedAlphaClassification = "solid" | "cutout" | "translucent";
 

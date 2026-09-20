@@ -141,7 +141,13 @@ export const PIXELIZE_CASES: PixelizeCase[] = [
 	{
 		name: "presets are explicit, printable, and pending-review",
 		run: (check) => {
-			for (const name of ["item", "block", "generic"] as const) {
+			for (const name of [
+				"item",
+				"block",
+				"generic",
+				"gui",
+				"particle",
+			] as const) {
 				const preset = PIXELIZE_PRESETS[name];
 				check.ok(
 					Number.isInteger(preset.colors) &&
@@ -159,7 +165,7 @@ export const PIXELIZE_CASES: PixelizeCase[] = [
 				check.ok(text.includes(String(preset.colors)), "budget printable");
 			}
 			check.throwsCode(
-				() => describePixelizePreset("gui" as PixelizePresetName),
+				() => describePixelizePreset("retro" as PixelizePresetName),
 				"INVALID_ARGUMENT",
 				"unknown preset",
 			);

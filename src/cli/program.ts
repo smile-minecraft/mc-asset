@@ -187,7 +187,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path used with --in-place.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(async (options: StubOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -202,7 +202,7 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.option(
 			"--minecraft-version <version>",
@@ -238,7 +238,7 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.option(
 			"--minecraft-version <version>",
@@ -282,7 +282,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path used with --in-place.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.option(
 			"--operations <path>",
@@ -316,7 +316,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path used with --in-place.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.option(
 			"--operations <path>",
@@ -364,7 +364,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path used with --in-place.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.option(
 			"--selection <scope>",
@@ -399,7 +399,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path used with --in-place.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.option(
 			"--selection <scope>",
@@ -440,7 +440,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path used with --in-place.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.option(
 			"--selection <scope>",
@@ -474,7 +474,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Rejected: reports take no file flags.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(
 			async (image: string, options: PaletteOptions, command: Command) => {
@@ -501,7 +501,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Rejected: reports take no file flags.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(
 			async (image: string, options: PaletteOptions, command: Command) => {
@@ -532,7 +532,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Rejected: reports take no file flags.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(async (options: MaterialOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -557,7 +557,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Rejected: reports take no file flags.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(
 			async (name: string, options: MaterialOptions, command: Command) => {
@@ -590,7 +590,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path used with --in-place.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.option(
 			"--selection <scope>",
@@ -625,7 +625,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path used with --in-place.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.option(
 			"--operations <path>",
@@ -652,7 +652,10 @@ export function buildProgram(): Command {
 		.command("pixelize <image>")
 		.description("Run a reference image through the pixelize pipeline.")
 		.option("--size <size>", "Output size: 16, 32, 64, 128, or WxH.")
-		.option("--preset <name>", "Processing preset: item, block, generic.")
+		.option(
+			"--preset <name>",
+			"Processing preset: item, block, generic, gui, particle.",
+		)
 		.option("--output <path>", "Explicit PNG output file path.")
 		.option("--stdout", "Write PNG bytes to stdout.")
 		.option("--source <path>", "Write the editable .mcpx source file.")
@@ -665,7 +668,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path used with --in-place.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.option(
 			"--selection <scope>",
@@ -698,7 +701,7 @@ export function buildProgram(): Command {
 		.option("--mkdir", "Create missing parent directories.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(
 			async (source: string, options: VariantOptions, command: Command) => {
@@ -734,7 +737,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path aliasing the positional input.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(async (input: string, options: TileOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -765,7 +768,7 @@ export function buildProgram(): Command {
 		.option("--mkdir", "Create missing parent directories.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(
 			async (pattern: string, options: GenerateOptions, command: Command) => {
@@ -783,7 +786,7 @@ export function buildProgram(): Command {
 	program
 		.command("preview <input>")
 		.description(
-			"Preview an image as a .grid-compatible ASCII document, a palette map report, or a scaled PNG.",
+			"Preview an image as a .grid-compatible ASCII document, a palette map report, a scaled PNG, or a nine-slice border report.",
 		)
 		.option(
 			"--ascii",
@@ -794,6 +797,14 @@ export function buildProgram(): Command {
 			"--scale <N>",
 			"Integer nearest-neighbor upscale factor; needs --output or --stdout.",
 		)
+		.option(
+			"--nine-slice",
+			"Report the mcmeta nine-slice geometry, or write a 1:1 border-guide PNG with --output or --stdout; needs --mcmeta.",
+		)
+		.option(
+			"--mcmeta <path>",
+			"Explicit mcmeta path for --nine-slice; a sibling file is never derived.",
+		)
 		.option("--output <path>", "Explicit PNG output file path.")
 		.option("--stdout", "Write PNG bytes to stdout.")
 		.option("--force", "Allow overwriting an existing output file.")
@@ -801,7 +812,7 @@ export function buildProgram(): Command {
 		.option("--input <path>", "Input path aliasing the positional input.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(
 			async (input: string, options: PreviewOptions, command: Command) => {
@@ -833,7 +844,7 @@ export function buildProgram(): Command {
 		.option("--mkdir", "Create missing parent directories.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(async (options: AnimateOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -858,7 +869,7 @@ export function buildProgram(): Command {
 		.option("--mkdir", "Create missing parent directories.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(
 			async (sheet: string, options: AnimateOptions, command: Command) => {
@@ -884,7 +895,7 @@ export function buildProgram(): Command {
 		.option("--mkdir", "Create missing parent directories.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(async (options: AnimateOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -912,7 +923,7 @@ export function buildProgram(): Command {
 		.option("--mkdir", "Create missing parent directories.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(async (options: AnimateOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -936,7 +947,7 @@ export function buildProgram(): Command {
 		.option("--mkdir", "Rejected: reports take no file flags.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(async (options: AnimateOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -963,7 +974,7 @@ export function buildProgram(): Command {
 		.option("--mkdir", "Rejected: reports take no file flags.")
 		.option(
 			"--profile <name>",
-			"Asset profile (V0.1: generic, minecraft:item, minecraft:block).",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
 		)
 		.action(async (options: AnimateOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();

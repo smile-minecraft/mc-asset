@@ -230,12 +230,18 @@ export const CLI_CASES: CliCase[] = [
 		},
 	},
 	{
-		name: "V0.1 only supports --profile generic/minecraft:item/minecraft:block",
+		name: "profiles cover generic plus the four minecraft asset profiles",
 		run: (check) => {
 			check.deepEqual(
 				[...SUPPORTED_PROFILES],
-				["generic", "minecraft:item", "minecraft:block"],
-				"supported profiles frozen",
+				[
+					"generic",
+					"minecraft:item",
+					"minecraft:block",
+					"minecraft:gui",
+					"minecraft:particle",
+				],
+				"supported profiles",
 			);
 			check.equal(parseProfile(undefined), "generic", "default profile");
 			check.equal(
@@ -243,7 +249,16 @@ export const CLI_CASES: CliCase[] = [
 				"minecraft:item",
 				"item profile",
 			);
-			throwsCode(check, () => parseProfile("minecraft:gui"), "INVALID_PROFILE");
+			check.equal(
+				parseProfile("minecraft:gui"),
+				"minecraft:gui",
+				"gui profile",
+			);
+			check.equal(
+				parseProfile("minecraft:particle"),
+				"minecraft:particle",
+				"particle profile",
+			);
 			throwsCode(check, () => parseProfile("photo"), "INVALID_PROFILE");
 		},
 	},

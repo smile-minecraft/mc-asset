@@ -25,21 +25,47 @@ export const BLOCK_PROFILE: AssetProfile = {
 		"Minecraft block texture from the blocks atlas; mipmap-aware and predicted alpha-aware.",
 };
 
+export const GUI_PROFILE: AssetProfile = {
+	id: "minecraft:gui",
+	preferredAtlas: "gui",
+	alphaClassificationAware: true,
+	description:
+		"Minecraft GUI sprite with exact bounds and nine-slice scaling; predicted handling only.",
+};
+
+export const PARTICLE_PROFILE: AssetProfile = {
+	id: "minecraft:particle",
+	preferredAtlas: "particles",
+	alphaClassificationAware: true,
+	description:
+		"Minecraft particle texture without a forced uniform size; predicted handling only.",
+};
+
 const PROFILES: Record<AssetProfileId, AssetProfile> = {
 	generic: GENERIC_PROFILE,
 	"minecraft:item": ITEM_PROFILE,
 	"minecraft:block": BLOCK_PROFILE,
+	"minecraft:gui": GUI_PROFILE,
+	"minecraft:particle": PARTICLE_PROFILE,
 };
 
 export function listAssetProfileIds(): AssetProfileId[] {
-	return ["generic", "minecraft:item", "minecraft:block"];
+	return [
+		"generic",
+		"minecraft:item",
+		"minecraft:block",
+		"minecraft:gui",
+		"minecraft:particle",
+	];
 }
 
 export function isAssetProfileId(value: unknown): value is AssetProfileId {
 	return (
 		value === "generic" ||
 		value === "minecraft:item" ||
-		value === "minecraft:block"
+		value === "minecraft:block" ||
+		value === "minecraft:gui" ||
+		value === "minecraft:particle"
 	);
 }
 
@@ -75,6 +101,12 @@ export function describeAssetProfilePredicted(
 	}
 	if (profile.id === "minecraft:block") {
 		return "predicted profile minecraft:block uses the blocks atlas with mipmap-aware predicted alpha.";
+	}
+	if (profile.id === "minecraft:gui") {
+		return "predicted profile minecraft:gui keeps exact sprite bounds with predicted nine-slice scaling.";
+	}
+	if (profile.id === "minecraft:particle") {
+		return "predicted profile minecraft:particle keeps its own size with predicted alpha; atlas reference is predicted and unverified.";
 	}
 	return "predicted profile generic has no Minecraft-specific restrictions.";
 }

@@ -10,10 +10,12 @@ export {
 	BLOCK_PROFILE,
 	describeAssetProfilePredicted,
 	GENERIC_PROFILE,
+	GUI_PROFILE,
 	getAssetProfile,
 	ITEM_PROFILE,
 	isAssetProfileId,
 	listAssetProfileIds,
+	PARTICLE_PROFILE,
 } from "./profiles.ts";
 export type {
 	AlphaHistogram,

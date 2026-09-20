@@ -339,7 +339,10 @@ function assertNoNormalizedDuplicate(targets: FileTarget[]): void {
 /** Minecraft profiles export PNG only (§34); the gate covers explicit --output paths. */
 export function assertMinecraftOutputPath(profile: string, path: string): void {
 	if (
-		(profile === "minecraft:item" || profile === "minecraft:block") &&
+		(profile === "minecraft:item" ||
+			profile === "minecraft:block" ||
+			profile === "minecraft:gui" ||
+			profile === "minecraft:particle") &&
 		!path.toLowerCase().endsWith(".png")
 	) {
 		throw new McAssetError(

@@ -185,7 +185,7 @@ describe("validate command via spawn", () => {
 				"validate",
 				input,
 				"--profile",
-				"minecraft:gui",
+				"minecraft:entity",
 			]);
 			expect(code).toBe(2);
 			expect(stdout + stderr).toContain("INVALID_PROFILE");

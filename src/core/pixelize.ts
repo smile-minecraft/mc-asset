@@ -46,7 +46,12 @@ export const PIXELIZE_STAGES = [
 
 export type PixelizeStage = (typeof PIXELIZE_STAGES)[number];
 
-export type PixelizePresetName = "item" | "block" | "generic";
+export type PixelizePresetName =
+	| "item"
+	| "block"
+	| "generic"
+	| "gui"
+	| "particle";
 
 export interface PixelizePresetParams {
 	/** Quantize color budget for the preset. */
@@ -65,7 +70,10 @@ export interface PixelizePresetParams {
  * Starter parameter sets (pending art-direction review, not spec-derived).
  * item favors silhouette readability with a tight budget; block keeps a
  * small budget toward tileable textures; generic applies no
- * Minecraft-specific heuristic beyond the shared pipeline.
+ * Minecraft-specific heuristic beyond the shared pipeline; gui keeps a
+ * tight budget toward exact dimensions, hard edges, and flat colors without
+ * generating any nine-slice metadata; particle keeps a mid budget toward
+ * alpha precision and small-scale readability without pinning a size.
  */
 export const PIXELIZE_PRESETS: Record<
 	PixelizePresetName,
@@ -91,6 +99,22 @@ export const PIXELIZE_PRESETS: Record<
 		cluster: 0,
 		cleanupClasses: [],
 		description: "generic: 32-color budget, detect-only cleanup",
+	},
+	gui: {
+		colors: 16,
+		edge: 0,
+		cluster: 0,
+		cleanupClasses: ["outlier"],
+		description:
+			"gui: tight 16-color budget for hard edges and flat colors, outlier cleanup, no nine-slice metadata",
+	},
+	particle: {
+		colors: 24,
+		edge: 0,
+		cluster: 0,
+		cleanupClasses: ["outlier"],
+		description:
+			"particle: mid 24-color budget for alpha precision and small-scale readability, outlier cleanup, no fixed size",
 	},
 };
 
@@ -165,7 +189,13 @@ export function isStandardPixelizeSize(width: number, height: number): boolean {
 }
 
 function isPresetName(value: string): value is PixelizePresetName {
-	return value === "item" || value === "block" || value === "generic";
+	return (
+		value === "item" ||
+		value === "block" ||
+		value === "generic" ||
+		value === "gui" ||
+		value === "particle"
+	);
 }
 
 /** Omitted preset defaults to generic; unknown names are INVALID_ARGUMENT. */
@@ -178,7 +208,7 @@ export function parsePixelizePreset(
 	if (!isPresetName(raw)) {
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			`Unknown preset "${raw}". Pixelize presets: item, block, generic.`,
+			`Unknown preset "${raw}". Pixelize presets: item, block, generic, gui, particle.`,
 			{ preset: raw },
 		);
 	}
