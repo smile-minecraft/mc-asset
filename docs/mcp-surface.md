@@ -10,7 +10,7 @@ reimplements image logic.
 Tool names are frozen. Earlier drafts called the batch-edit tool
 `edit_asset`; the frozen name is `apply_asset_operations`.
 
-v0.7 adds twelve tools (`import_asset` through `validate_pack_asset`;
+The current release (`v0.3.0`) adds twelve tools (`import_asset` through `validate_pack_asset`;
 `palette_asset`, `material_asset`, `preview_asset`, and `animate_asset`
 merge CLI subcommands into a `mode` field) for full CLI parity. Their
 names and input shapes are frozen here; the running server exposes
