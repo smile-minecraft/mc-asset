@@ -351,3 +351,69 @@ material  list | material show <name>
   `--selection`) are undeclared and fail as unknown options (exit 2).
 - `pixelize` declares `--selection` but always rejects a non-empty value
   with ARGUMENT_CONFLICT: the pipeline owns cropping and resizing.
+
+## V0.3 commands (frozen)
+
+Semantics, algorithm definitions, and rationale live in `docs/v03-design.md`
+and `project-detail.md` §106; the flag/IO/exit table is here. Every V0.3
+command reuses the V0.1 file rules above unchanged where it writes files:
+explicit `--output`/`--stdout` (OUTPUT_REQUIRED), OUTPUT_EXISTS unless
+`--force`, `--mkdir`, `--input` aliasing the positional input path, per-file
+atomic writes, and no default filenames or directories (§57, §98). Input
+intake is PNG/JPEG/WebP/`.mcpx`, the same shared loader as `transform`.
+
+| Command | Input | Output | Exit |
+|---|---|---|---|
+| `tile <input>` | PNG/JPEG/WebP/`.mcpx` | report only, or PNG (single tile / NxN preview) | 0/2/4/5 |
+| `generate <pattern>` | — | PNG and/or `.mcpx` | 0/2/4/5 |
+| `preview <input>` | PNG/JPEG/WebP/`.mcpx` | report only, or PNG (`--scale`) | 0/2/4/5 |
+
+### Flags added in V0.3
+
+```text
+--preview <2x2|4x4|8x8>   tile only; NxN repeat preview PNG; needs --output.
+--edge-match <axis>       tile only; horizontal|vertical|both.
+--brightness-match <axis> tile only; horizontal|vertical|both.
+--size <N|WxH>            generate only; required; same rule as pixelize.
+--palette <name|path>     generate only; required; builtin material id, or a
+                          .mcpx path whose [palette] supplies the colors.
+--seed <int>              generate only; required; integer 0-4294967295.
+--ascii                   preview only; .grid-compatible ASCII document.
+--palette-map             preview only; palette map JSON.
+--scale <N>               preview only; integer nearest upscale PNG; needs
+                          --output or --stdout.
+```
+
+### Per-command surfaces
+
+```text
+tile      <input> [--preview 2x2|4x4|8x8] [--edge-match a] [--brightness-match a]
+                  [--output png] [--stdout] <file flags>
+generate  <pattern> --size N|WxH --palette name|path --seed int
+                  [--output png] [--source mcpx] [--stdout] <file flags>
+preview   <input> --ascii | --palette-map | --scale N
+                  [--output png] [--stdout] <file flags>
+```
+
+`<file flags>` = `--output`, `--stdout`, `--force`, `--mkdir`, `--input`,
+`--profile`, `--json`.
+
+- `tile` writes PNG only: it does not declare `--source` or `--in-place`.
+  Omitting both `--output` and `--stdout` is a report-only run and creates
+  zero files. `--preview` without `--output` is OUTPUT_REQUIRED. Only
+  `--edge-match`/`--brightness-match` modify pixels, and only the written
+  artifact.
+- `generate` has no input file: it does not declare `--input` or
+  `--in-place`. Missing `--size`, `--palette`, or `--seed` is
+  INVALID_ARGUMENT; missing all three output flags is OUTPUT_REQUIRED and
+  creates zero files. An unknown pattern is INVALID_ARGUMENT.
+- `preview` takes exactly one mode flag: none is INVALID_ARGUMENT, two or
+  more is ARGUMENT_CONFLICT. `--ascii` and `--palette-map` are reports and
+  reject every file flag (INVALID_ARGUMENT), like `palette`/`material`;
+  `--scale` needs `--output` or `--stdout` (else OUTPUT_REQUIRED).
+- `preview` does not declare `--in-place` or `--source`; use
+  `transform --resize` for an in-place upscale.
+
+Exit 3 stays reserved for `validate`. `UNSUPPORTED_IMAGE_FORMAT` and
+`RESOURCE_LIMIT_EXCEEDED` remain exit 5; `UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT`
+applies to a `minecraft:*` `--output` that is not `.png`.

@@ -3711,3 +3711,113 @@ V0.1 已凍結的行為（`docs/cli-surface.md`）MUST NOT 因 V0.2 接線而改
 ## 105.12 待決項目
 
 規格無法推定、且會影響對外行為的細節，列於 `docs/v02-design.md` 的待決清單，不在此自行補齊。其中直接影響命令表面或預設行為的有：`resize` / `crop` 是否保留 top-level 別名、`pixel-aware` resize 的演算法、Pixelize preset 的具體數值、`tileFriendly` 的判斷規則、`moveLayer` 的語意、`outline` / `accent` / `custom` 的 recolor 映射、`--colors` 上限、目標材料不存在的 error code，以及 geometry 是否進 `--operations` 批次詞彙。
+
+---
+
+# 106. V0.3 語意與介面凍結
+
+V0.3 的範圍見 §86。命令表面（名稱、旗標、輸入輸出、exit code）以 `docs/cli-surface.md` 為準；語意、演算法與取捨理由的細節以 `docs/v03-design.md` 為準。本節記錄規範性結論，三者衝突時以本節為準。
+
+規格只寫了功能名稱與少數範例（docs §36、§37、§46；§65），沒有給演算法、分數公式或旗標語意。因此本節多數內容是正式凍結，細節與 worked example 見 `docs/v03-design.md`；無法推定的列於 §106.7。
+
+## 106.1 命令表面
+
+V0.3 新增三個命令：
+
+| 命令 | 輸入 | 輸出 | exit code |
+|---|---|---|---|
+| `tile <input>` | PNG/JPEG/WebP/`.mcpx` | 唯讀報告，或 PNG（單格 / NxN 預覽） | 0/2/4/5 |
+| `generate <pattern>` | — | PNG 和/或 `.mcpx` | 0/2/4/5 |
+| `preview <input>` | PNG/JPEG/WebP/`.mcpx` | 唯讀報告，或 PNG（`--scale`） | 0/2/4/5 |
+
+```text
+tile 名稱        V0.1 保留清單已列；不與既有命令衝突（docs §48、§104.1）
+generate 名稱    docs §48 command tree 已列
+輸出守衛         MUST 遵守 §57、§98：顯式輸出、OUTPUT_EXISTS、--mkdir、
+                 同目錄暫存加 rename、不得推導檔名或建立預設目錄
+輸入 intake      PNG/JPEG/WebP/.mcpx，與 transform 一致
+```
+
+`tile` 不宣告 `--source`、`--in-place`；`generate` 不宣告 `--input`、`--in-place`；`preview` 不宣告 `--source`、`--in-place`。`resize`／`crop` 的簡化原則不變，V0.3 不新增幾何命令。
+
+## 106.2 Seam 指標
+
+接縫是環繞相鄰的像素對：
+
+```text
+vertical    （W-1, y）與（0, y），對每個 y
+horizontal  （x, H-1）與（x, 0），對每個 x
+corner      （0, 0）與（W-1, H-1），以及（W-1, 0）與（0, H-1）
+```
+
+- 單對距離 MUST 是整數平方 RGBA 距離 `dr² + dg² + db² + da²`（與 `src/core/palette.ts` 的 `squaredDistance` 一致）。
+- `raw` 為整數總和；`pairs` 為像素對數（H／W／2）；`score = raw / (pairs × 260100)`，以固定 6 位小數字串序列化（§100.3）。
+- 值域 `[0, 1]`，0 為無接縫、1 為最大不連續；三個分數分開回報，MUST NOT 合併。
+- 軸長度為 1 的退化軸只與自己比（距離 0）。
+- 全序 tie-break：總和順序固定列優先，比較順序 `horizontal → vertical → corner`；MUST NOT 依賴物件鍵序或不穩定排序（§100.3）。
+
+## 106.3 Repetition scoring
+
+`repetition_score` MUST 由確定性規則導出（§100.3、§100.2），定義為各軸最佳環繞週期位移的自相似度：
+
+```text
+候選 shift     s ∈ [1, len-1]；len ≤ 1 時該軸無候選
+最佳 shift     總距離最小者；平手取最小 s（全序 tie-break）
+整體分數       兩軸相似度的最大值；0 = 找不到小週期重複，1 = 完美週期重複
+報告欄位       repeat.periodX / repeat.periodY（無候選為 null）
+```
+
+## 106.4 Edge matching 與 brightness matching
+
+兩者都是 pixel 修正，MUST 顯式啟用，MUST NOT 默默修改；未帶旗標時 `tile` 的輸出像素與輸入 byte-identical。
+
+```text
+--edge-match <axis>        把選定接縫兩線逐像素設為整數 floor 平均，兩線相等、該軸 raw 歸零
+--brightness-match <axis>  以整數 luminance 對齊兩線平均亮階；RGB 各加差額並夾在 [0,255]，alpha 不變
+axis                       horizontal|vertical|both
+both 順序                  MUST 先 vertical 再 horizontal；兩旗標並用時先 edge 後 brightness
+```
+
+`--brightness-match` MUST NOT 被宣稱保證降低 seam 分數：它只對齊平均亮階，因為對整條線加值會改變每一對的 RGB 差，且夾在邊界時對齊可能只是近似。
+
+## 106.5 Block Texture Workflow
+
+V0.3 的 block 工作流是既有命令的組合，不新增命令（§86）：
+
+```text
+generate ──▶ tile ──▶ preview ──▶ pixelize --preset block ──▶ PNG
+```
+
+依 §65，seam analysis、tile generation、tile preview、brightness normalization、cluster analysis、repeat detection 都是 authoring tools，MUST NOT 變成 Minecraft format requirement。這些量測結果 MUST NOT 被寫進 `.mcpx` 當成格式語意，只出現在報告與 `--json`。
+
+## 106.6 Preview 輸出
+
+```text
+--ascii      MUST 輸出 .grid 相容文件（[palette] 再 [grid]/[grid tokens]），符號指派依 §96.6/§96.8；
+             輸出 MUST 能被 render 讀回且像素一致；`--json` 時整份文件置於 result.ascii
+--palette-map MUST 回報凍結 JSON 形狀：colors（首次出現順序，含 index/color/count）與 rows（顏色索引）
+--scale <N>  MUST 為整數 N ≥ 1 的 nearest 放大，輸出 W·N × H·N；需 --output 或 --stdout
+模式衝突     preview 剛好一種模式；都不帶為 INVALID_ARGUMENT，兩種以上為 ARGUMENT_CONFLICT
+tile preview docs §46 的 tile preview 與 docs §36 的 tile --preview 是同一個功能；
+             權威入口為 tile --preview，preview 不新增 tile 旗標（§104.1 不保留同義詞）
+```
+
+## 106.7 Determinism 與共同約束
+
+V0.3 三個命令全部適用 §57、§98、§100：
+
+```text
+整數優先      影響像素的運算以整數完成（§100.1）
+禁超越函式    MUST NOT 用 Math.cbrt / pow / exp / sin 於影響像素的計算（§100.2）
+禁隨機        generate 的亂數 MUST 由 --seed 導出；MUST NOT 用 Math.random（§100.3）
+全序排序      不得依賴不穩定排序或物件鍵序（§100.3）
+無時間戳      輸出內容 MUST NOT 含時間戳（§100.3）
+報告浮點      以固定小數位序列化（§100.3）
+跨 runtime    同 input / 參數 / 版本 MUST 跨 macOS / Linux 與 Bun / Node byte-identical（§100.4、§100.5）
+```
+
+`generate --seed` MUST 必填（缺為 `INVALID_ARGUMENT`），整數 0–4294967295；同 seed、同 pattern、同 size、同 palette、同版本 MUST byte-identical。PRNG 與各 pattern 演算法屬 starter／待決，但無論選型 MUST 為整數且跨 runtime 一致。
+
+## 106.8 待決項目
+
+規格無法推定、且會影響對外行為的細節，列於 `docs/v03-design.md` 的待決清單，不在此自行補齊。其中直接影響命令表面或預設行為的有：十個 pattern 的演算法與取色方式、PRNG 的具體選型、`tile --output`（無 `--preview`）的單格語意、`repetition_score` 的精確定義與搜尋成本上限、`corner seam` 的像素對、`--brightness-match` 是否要求分數下降、palette 檔的格式、`preview --ascii` 是否輸出完整 `.grid`、`clustered-noise` 的連字號命名，以及是否提供 `--in-place`／`--source`。
