@@ -101,5 +101,5 @@ are not shipped, so they are not listed.
 The tag/Release pipeline this contract specifies is live and has shipped
 `v0.1.0` and `v0.2.0` (see `docs/release-playbook.md` for the executed
 evidence). The public-source strategy is decided: the repository is
-public and the formula downloads the versioned tag tarball from the
+public and the Homebrew formula downloads the versioned tag tarball from the
 GitHub Release (`docs/homebrew.md`).
