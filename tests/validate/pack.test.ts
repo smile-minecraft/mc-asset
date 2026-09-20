@@ -303,4 +303,97 @@ describe("validate-pack command via spawn", () => {
 			await rm(dir, { recursive: true, force: true });
 		}
 	}, 30_000);
+
+	test("no flags reads pack.mcmeta pack_format and reports it", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		try {
+			await writeCleanBaseline(dir);
+			await writePackFile(
+				dir,
+				"pack.mcmeta",
+				modelJson({ pack: { pack_format: 75, description: "reads" } }),
+			);
+			const before = await treeHash(dir);
+			const { stdout, code } = await runCli(["validate-pack", dir, "--json"]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: {
+					verdict: string;
+					target: string;
+					findings: Array<{ code: string; level: string }>;
+				};
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.verdict).toBe("pass");
+			expect(envelope.result.target).toContain("75");
+			expect(
+				envelope.result.findings.some(
+					(f) => f.code === "PACK_VERSION_UNDETERMINED",
+				),
+			).toBe(false);
+			expect(stdout).not.toContain("97.1");
+			expect(await treeHash(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("no flags without pack.mcmeta warns only and never defaults", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		try {
+			await writeCleanBaseline(dir);
+			const { stdout, code } = await runCli(["validate-pack", dir, "--json"]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: {
+					verdict: string;
+					findings: Array<{ code: string; level: string }>;
+				};
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.verdict).toBe("pass");
+			const undetermined = envelope.result.findings.filter(
+				(f) => f.code === "PACK_VERSION_UNDETERMINED",
+			);
+			expect(undetermined.length).toBe(1);
+			expect(undetermined[0]?.level).toBe("warning");
+			expect(stdout).not.toContain("97.1");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("no flags with broken pack.mcmeta fails on INVALID_JSON and keeps inputs", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		try {
+			await writeCleanBaseline(dir);
+			await writePackFile(dir, "pack.mcmeta", "{ not valid json");
+			const before = await treeHash(dir);
+			const { stdout, code } = await runCli(["validate-pack", dir, "--json"]);
+			expect(code).toBe(3);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				error: { code: string };
+				result: {
+					verdict: string;
+					findings: Array<{ code: string; level: string }>;
+				};
+			};
+			expect(envelope.success).toBe(false);
+			expect(envelope.error.code).toBe("VALIDATION_FAILED");
+			const codes = envelope.result.findings.map((f) => f.code);
+			expect(codes).toContain("PACK_INVALID_JSON");
+			expect(codes).toContain("PACK_VERSION_UNDETERMINED");
+			expect(
+				envelope.result.findings.find(
+					(f) => f.code === "PACK_VERSION_UNDETERMINED",
+				)?.level,
+			).toBe("warning");
+			expect(await treeHash(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
 });

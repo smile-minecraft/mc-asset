@@ -14,8 +14,10 @@ import { validatePackFormat } from "../profiles/versions.ts";
  * `validatePackFormat` check. Dotted resource-pack versions (including
  * "97.1" itself) stay unsupported until the full version-fact layer lands:
  * they are not positive integers, so they fail here with INVALID_ARGUMENT
- * instead of being silently truncated. Multi-group splits, atlas/pack
- * validators, and pack.mcmeta auto-detection are v05 follow-up work.
+ * instead of being silently truncated. Multi-group splits and atlas/pack
+ * validators are later work; the no-flag pack.mcmeta fallback
+ * (pack.pack_format as target, warning with no default otherwise) lives
+ * in the validate-pack engine, never here.
  */
 
 export const SUPPORTED_MINECRAFT_VERSIONS = ["26.3"] as const;

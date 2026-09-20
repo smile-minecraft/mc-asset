@@ -28,7 +28,8 @@ export interface PredictedAlphaReport {
 export type ProfileWarningCode =
 	| "PARTIAL_ALPHA_CAUSES_TRANSLUCENT_RENDERING"
 	| "NON_STANDARD_RESOLUTION"
-	| "PENDING_SOURCE_PNG_ONLY";
+	| "PENDING_SOURCE_PNG_ONLY"
+	| "VERSION_FACT_UNDETERMINED";
 
 export interface ProfileWarning {
 	code: ProfileWarningCode;
@@ -46,7 +47,12 @@ export interface AssetProfile {
 }
 
 export interface VersionSince {
-	packFormat: number;
+	/**
+	 * Integer packFormat the fact starts from. Absent means the starting
+	 * version is undetermined: the fact never activates and only ever
+	 * produces a warning, never an enforcement value.
+	 */
+	packFormat?: number | undefined;
 }
 
 export type FactStatus = "verified" | "pending-source";

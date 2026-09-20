@@ -88,6 +88,125 @@ export const PACK_CASES: PackCase[] = [
 		},
 	},
 	{
+		name: "pack.mcmeta pack.pack_format becomes the target with no flag",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writeCleanBaseline(dir);
+				await writePackFile(
+					dir,
+					"pack.mcmeta",
+					modelJson({ pack: { pack_format: 75, description: "reads" } }),
+				);
+				const report = await scanPack(dir, {});
+				check.equal(
+					report.verdict,
+					"pass",
+					"pack with a versioned mcmeta passes",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_VERSION_UNDETERMINED"),
+					"no undetermined warning when pack_format is usable",
+				);
+				check.ok(
+					(report.target ?? "").includes("75"),
+					"report target carries the pack_format",
+				);
+				check.ok(
+					!JSON.stringify(report).includes("97.1"),
+					"no hardcoded 97.1 default in the report",
+				);
+			});
+		},
+	},
+	{
+		name: "pack.mcmeta without a usable pack_format warns and skips with no default",
+		run: async (check) => {
+			const variants: Array<{ name: string; body: string }> = [
+				{
+					name: "missing key",
+					body: modelJson({ pack: { description: "t" } }),
+				},
+				{
+					name: "dotted label",
+					body: modelJson({ pack: { pack_format: "97.1" } }),
+				},
+				{ name: "zero", body: modelJson({ pack: { pack_format: 0 } }) },
+				{ name: "no pack section", body: modelJson({ note: "t" }) },
+			];
+			for (const variant of variants) {
+				await withPackDir(async (dir) => {
+					await writeCleanBaseline(dir);
+					await writePackFile(dir, "pack.mcmeta", variant.body);
+					const report = await scanPack(dir, {});
+					check.equal(report.verdict, "pass", `${variant.name} still passes`);
+					const undetermined = report.findings.find(
+						(f) => f.code === "PACK_VERSION_UNDETERMINED",
+					);
+					check.ok(
+						undetermined !== undefined,
+						`${variant.name} warns undetermined`,
+					);
+					check.equal(
+						undetermined?.level,
+						"warning",
+						`${variant.name} warns only`,
+					);
+					check.equal(
+						undetermined?.message,
+						"no version flag was given and pack.mcmeta carries no usable pack.pack_format; version-dependent checks were skipped with no default applied.",
+						`${variant.name} frozen wording`,
+					);
+					check.ok(
+						!JSON.stringify(report).includes("97.1"),
+						`${variant.name} never defaults to 97.1`,
+					);
+				});
+			}
+		},
+	},
+	{
+		name: "unparseable pack.mcmeta is INVALID_JSON plus undetermined version",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writeCleanBaseline(dir);
+				await writePackFile(dir, "pack.mcmeta", "{ not valid json");
+				const report = await scanPack(dir, {});
+				check.equal(report.verdict, "fail", "broken mcmeta fails");
+				check.ok(
+					codesOf(report).includes("PACK_INVALID_JSON"),
+					"INVALID_JSON finding present",
+				);
+				check.equal(
+					report.findings.find((f) => f.code === "PACK_INVALID_JSON")?.level,
+					"error",
+					"INVALID_JSON is an error",
+				);
+				const undetermined = report.findings.find(
+					(f) => f.code === "PACK_VERSION_UNDETERMINED",
+				);
+				check.ok(undetermined !== undefined, "version stays undetermined");
+				check.equal(undetermined?.level, "warning", "undetermined warns only");
+			});
+		},
+	},
+	{
+		name: "undetermined version report never hardcodes 97.1",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writeCleanBaseline(dir);
+				const report = await scanPack(dir, {});
+				check.ok(
+					!JSON.stringify(report).includes("97.1"),
+					"no 97.1 anywhere in the undetermined report",
+				);
+				check.ok(
+					!codesOf(report).some((code) => code.includes("97")),
+					"no 97-family finding code",
+				);
+			});
+		},
+	},
+	{
 		name: "fail: invalid JSON is a finding, scan continues past it",
 		run: async (check) => {
 			await withPackDir(async (dir) => {

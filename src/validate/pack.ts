@@ -23,8 +23,9 @@ import {
  * `parent` and `textures` references, texture PNG decode and dimensions,
  * sibling `.png.mcmeta` animation geometry, disk filename and namespace
  * checks through the shared resource-location engine. Atlas sources
- * (PACK_TEXTURE_NOT_IN_ATLAS) and pack.mcmeta version reads belong to
- * later steps and are only reserved here, never emitted.
+ * (PACK_TEXTURE_NOT_IN_ATLAS) stay reserved and are never emitted here;
+ * the root pack.mcmeta parses for INVALID_JSON and, with no version flag,
+ * lends its pack.pack_format as the scan target (read-only, no default).
  */
 
 export interface PackFinding {
@@ -78,6 +79,10 @@ const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
 
 const encoder = new TextEncoder();
 
+/** Frozen PACK_VERSION_UNDETERMINED wording: no default is ever applied. */
+const VERSION_UNDETERMINED_MESSAGE =
+	"no version flag was given and pack.mcmeta carries no usable pack.pack_format; version-dependent checks were skipped with no default applied.";
+
 /** Byte-lexicographic string order, identical on every runtime. */
 function compareBytes(a: string, b: string): number {
 	const ab = encoder.encode(a);
@@ -109,6 +114,26 @@ function extensionOf(filename: string): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Read-only pack.pack_format lookup over an already-parsed pack.mcmeta.
+ * Only a positive integer counts; anything else (missing key, dotted
+ * label, other shapes) leaves the version undetermined.
+ */
+function packFormatFromMcmeta(doc: unknown): number | undefined {
+	if (!isRecord(doc)) {
+		return undefined;
+	}
+	const pack = doc.pack;
+	if (!isRecord(pack)) {
+		return undefined;
+	}
+	const format = pack.pack_format;
+	if (typeof format !== "number" || !Number.isInteger(format) || format < 1) {
+		return undefined;
+	}
+	return format;
 }
 
 async function collectPackFiles(packRoot: string): Promise<string[]> {
@@ -652,13 +677,16 @@ export async function scanPack(
 			state.modelRels.push(rel);
 		}
 	}
-	// The root pack.mcmeta parses for INVALID_JSON only; version reads stay
-	// with the version step, never here.
+	// The root pack.mcmeta parses for INVALID_JSON and, with no version
+	// flag, lends its pack.pack_format as the scan target. The file is
+	// only read, never written; an unusable value keeps the version
+	// undetermined with no default applied.
+	let mcmetaDoc: unknown;
 	if (knownFiles.has("pack.mcmeta")) {
 		try {
 			const bytes = new Uint8Array(await readFile(`${packRoot}/pack.mcmeta`));
 			const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-			JSON.parse(text) as unknown;
+			mcmetaDoc = JSON.parse(text) as unknown;
 		} catch {
 			push(
 				state.findings,
@@ -705,14 +733,24 @@ export async function scanPack(
 			rel,
 		);
 	}
+	// Version target: an explicit flag always wins. With no flag the engine
+	// reads pack.pack_format from the root pack.mcmeta; a missing or
+	// unusable value warns once and skips version-dependent checks with
+	// no default version ever applied.
+	let effectiveTarget = options?.target ?? "default (engine defaults)";
 	if (options?.packFormat === undefined) {
-		push(
-			state.findings,
-			"PACK_VERSION_UNDETERMINED",
-			"warning",
-			"no version flag was given and pack.mcmeta reads stay with the version step; version-dependent checks were skipped with no default applied.",
-			undefined,
-		);
+		const fromMcmeta = packFormatFromMcmeta(mcmetaDoc);
+		if (fromMcmeta !== undefined) {
+			effectiveTarget = `pack.mcmeta packFormat ${fromMcmeta}`;
+		} else {
+			push(
+				state.findings,
+				"PACK_VERSION_UNDETERMINED",
+				"warning",
+				VERSION_UNDETERMINED_MESSAGE,
+				undefined,
+			);
+		}
 	}
 	const findings = [...state.findings].sort((a, b) => {
 		const pa = a.path ?? "";
@@ -733,7 +771,7 @@ export async function scanPack(
 	return {
 		command: "validate-pack",
 		path: packRoot,
-		target: options?.target ?? "default (engine defaults)",
+		target: effectiveTarget,
 		verdict,
 		findings,
 	};

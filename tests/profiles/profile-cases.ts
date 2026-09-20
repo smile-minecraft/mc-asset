@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
 	addLayer,
 	createCanvas,
@@ -21,6 +24,7 @@ import {
 	COMPAT_FACTS,
 	getItemAtlasPolicy,
 	ITEMS_ATLAS_FACT,
+	isFactActive,
 	pendingSourceWarnings,
 	resolveVersionedFact,
 } from "../../src/profiles/versions.ts";
@@ -271,7 +275,11 @@ export const MODEL_CASES: ModelCase[] = [
 			check.ok(COMPAT_FACTS.length >= 1, "version interval table is populated");
 			for (const fact of COMPAT_FACTS) {
 				check.ok(typeof fact.fact === "string", "fact name");
-				check.ok(typeof fact.since.packFormat === "number", "since.packFormat");
+				check.ok(
+					fact.since.packFormat === undefined ||
+						typeof fact.since.packFormat === "number",
+					"since.packFormat is a number or undetermined",
+				);
 				check.ok(fact.value !== undefined, "value present");
 			}
 		},
@@ -286,6 +294,211 @@ export const MODEL_CASES: ModelCase[] = [
 			}
 			const text = JSON.stringify(warnings).toLowerCase();
 			check.ok(!text.includes("error"), "no error claim");
+		},
+	},
+	{
+		name: "eight §95 facts carry source, check date, and since state",
+		run: (check) => {
+			const byName = new Map(COMPAT_FACTS.map((fact) => [fact.fact, fact]));
+			check.equal(COMPAT_FACTS.length, 8, "eight facts");
+			const expected: Array<{
+				fact: string;
+				status: "verified" | "pending-source";
+				since: number | undefined;
+				sourcePart: string;
+			}> = [
+				{
+					fact: "resource-pack-format",
+					status: "verified",
+					since: undefined,
+					sourcePart: "Template:Resource pack format",
+				},
+				{
+					fact: "trim-palette-location",
+					status: "verified",
+					since: undefined,
+					sourcePart: "Template:Resource pack format",
+				},
+				{
+					fact: "items-atlas-separated",
+					status: "verified",
+					since: 75,
+					sourcePart: "1.21.11 release notes",
+				},
+				{
+					fact: "item-same-atlas-block-blocks-atlas",
+					status: "verified",
+					since: 75,
+					sourcePart: "1.21.11 release notes",
+				},
+				{
+					fact: "texture-mipmap-fields",
+					status: "verified",
+					since: 75,
+					sourcePart: "1.21.11 release notes",
+				},
+				{
+					fact: "block-render-pass-auto",
+					status: "verified",
+					since: undefined,
+					sourcePart: "26.1 release notes",
+				},
+				{
+					fact: "block-force-translucent",
+					status: "verified",
+					since: undefined,
+					sourcePart: "26.1 release notes",
+				},
+				{
+					fact: "texture-png-only",
+					status: "pending-source",
+					since: undefined,
+					sourcePart: "pending official source",
+				},
+			];
+			for (const want of expected) {
+				const found = byName.get(want.fact);
+				check.ok(found !== undefined, `fact ${want.fact} present`);
+				check.equal(found?.status, want.status, `${want.fact} status`);
+				check.equal(
+					found?.since.packFormat,
+					want.since,
+					`${want.fact} since.packFormat`,
+				);
+				check.ok(
+					typeof found?.source === "string" &&
+						found.source.includes(want.sourcePart) &&
+						found.source.includes("§95"),
+					`${want.fact} source cites origin and §95`,
+				);
+				check.equal(found?.checkedAt, "2026-09-19", `${want.fact} check date`);
+				check.ok(found?.value !== undefined, `${want.fact} value present`);
+			}
+			for (const fact of COMPAT_FACTS) {
+				check.ok(
+					fact.since.packFormat !== 97.1,
+					`${fact.fact}: 97.1 never enters since.packFormat`,
+				);
+			}
+		},
+	},
+	{
+		name: "since-undetermined and pending-source facts never enforce",
+		run: (check) => {
+			for (const fact of COMPAT_FACTS) {
+				const undetermined = fact.since.packFormat === undefined;
+				const gated = undetermined || fact.status === "pending-source";
+				if (!gated) {
+					continue;
+				}
+				if (undetermined) {
+					for (const target of [1, 75, 999]) {
+						check.equal(
+							isFactActive(fact, target),
+							false,
+							`${fact.fact} never active at ${target}`,
+						);
+					}
+				}
+				for (const target of [1, 75, 999]) {
+					check.equal(
+						resolveVersionedFact(fact, target),
+						undefined,
+						`${fact.fact} resolves to nothing at ${target}`,
+					);
+				}
+			}
+			const warnings = pendingSourceWarnings();
+			for (const fact of COMPAT_FACTS) {
+				const gated =
+					fact.since.packFormat === undefined ||
+					fact.status === "pending-source";
+				if (!gated) {
+					continue;
+				}
+				check.ok(
+					warnings.some(
+						(warning) =>
+							warning.level === "warning" &&
+							warning.message.includes(fact.fact),
+					),
+					`${fact.fact} surfaces a warning`,
+				);
+			}
+			for (const warning of warnings) {
+				check.equal(warning.level, "warning", "warning level only");
+			}
+			check.ok(
+				!JSON.stringify(warnings).toLowerCase().includes("error"),
+				"no error claim in gate warnings",
+			);
+		},
+	},
+	{
+		name: "fact activation boundary follows since.packFormat",
+		run: (check) => {
+			check.equal(
+				resolveVersionedFact(ITEMS_ATLAS_FACT, 1),
+				undefined,
+				"packFormat 1 predates the fact",
+			);
+			check.equal(
+				resolveVersionedFact(ITEMS_ATLAS_FACT, 74),
+				undefined,
+				"74 stays below since 75",
+			);
+			check.ok(
+				resolveVersionedFact(ITEMS_ATLAS_FACT, 75) !== undefined,
+				"75 activates the fact",
+			);
+			check.ok(
+				resolveVersionedFact(ITEMS_ATLAS_FACT, 999) !== undefined,
+				"later formats keep the fact",
+			);
+		},
+	},
+	{
+		name: "core keeps no compatibility references",
+		run: (check) => {
+			const coreDir = join(
+				dirname(fileURLToPath(import.meta.url)),
+				"../../src/core",
+			);
+			const files = readdirSync(coreDir)
+				.filter((file) => file.endsWith(".ts"))
+				.sort();
+			check.ok(files.length > 0, "core files found");
+			for (const file of files) {
+				const text = readFileSync(join(coreDir, file), "utf8");
+				check.ok(
+					!text.includes("pack.mcmeta"),
+					`${file} never reads pack.mcmeta`,
+				);
+				check.ok(
+					!text.includes("resource location"),
+					`${file} never names resource location`,
+				);
+				check.ok(
+					!text.includes("../profiles") &&
+						!text.includes("../validate") &&
+						!text.includes("../cli"),
+					`${file} imports no compatibility layer`,
+				);
+				if (file === "errors.ts") {
+					continue;
+				}
+				check.ok(!/atlas/i.test(text), `${file} never names atlas`);
+				check.ok(!/namespace/i.test(text), `${file} never names namespace`);
+			}
+			const errors = readFileSync(join(coreDir, "errors.ts"), "utf8");
+			for (const token of [
+				"ATLAS_REFERENCE_ERROR",
+				"TEXTURE_NOT_IN_REQUIRED_ATLAS",
+				"PACK_NAMESPACE_PROBLEM",
+				"PACK_TEXTURE_NOT_IN_ATLAS",
+			]) {
+				check.ok(errors.includes(token), `frozen code ${token} kept`);
+			}
 		},
 	},
 	{
