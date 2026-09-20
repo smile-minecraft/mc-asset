@@ -1,7 +1,12 @@
 import { McAssetError } from "../../src/core/errors.ts";
 import {
+	checkAnimationFrameIndices,
+	deriveAnimationGeometry,
 	deriveNineSliceRegions,
+	extractAnimationSection,
 	extractGuiScaling,
+	extractTextureSection,
+	mipmapCutoutMeanWarning,
 	NINE_SLICE_GUIDE,
 	nineSliceGeometryError,
 	paintNineSliceGuides,
@@ -353,6 +358,231 @@ export const MCMETA_CASES: McmetaCase[] = [
 				regions.center,
 				{ x: 0, y: 0, width: 4, height: 4 },
 				"center covers the sprite",
+			);
+		},
+	},
+	{
+		name: "texture section reads mipmap_strategy and alpha_cutoff_bias verbatim",
+		run: (check) => {
+			const texture = extractTextureSection(
+				parseMcmetaText(
+					JSON.stringify({
+						texture: {
+							mipmap_strategy: "mean",
+							alpha_cutoff_bias: 0.25,
+						},
+					}),
+				),
+			);
+			check.equal(texture.present, true, "present");
+			check.equal(texture.mipmapStrategy, "mean", "strategy verbatim");
+			check.equal(texture.alphaCutoffBias, 0.25, "bias verbatim");
+		},
+	},
+	{
+		name: "missing texture reports absent without warnings",
+		run: (check) => {
+			const texture = extractTextureSection(
+				parseMcmetaText(JSON.stringify({})),
+			);
+			check.equal(texture.present, false, "absent");
+			check.equal(texture.mipmapStrategy, undefined, "no strategy");
+			check.equal(texture.alphaCutoffBias, undefined, "no bias");
+		},
+	},
+	{
+		name: "bad texture shapes are INVALID_MCMETA",
+		run: (check) => {
+			throwsCode(
+				check,
+				() =>
+					extractTextureSection(
+						parseMcmetaText(JSON.stringify({ texture: 7 })),
+					),
+				"INVALID_MCMETA",
+			);
+			throwsCode(
+				check,
+				() =>
+					extractTextureSection(
+						parseMcmetaText(
+							JSON.stringify({ texture: { mipmap_strategy: 7 } }),
+						),
+					),
+				"INVALID_MCMETA",
+			);
+			throwsCode(
+				check,
+				() =>
+					extractTextureSection(
+						parseMcmetaText(
+							JSON.stringify({ texture: { alpha_cutoff_bias: "x" } }),
+						),
+					),
+				"INVALID_MCMETA",
+			);
+		},
+	},
+	{
+		name: "animation accepts bare-integer and object frames forms",
+		run: (check) => {
+			const mixed = extractAnimationSection(
+				parseMcmetaText(
+					JSON.stringify({
+						animation: {
+							frametime: 2,
+							interpolate: true,
+							width: 32,
+							height: 32,
+							frames: [0, { index: 2, time: 4 }, 3],
+						},
+					}),
+				),
+			);
+			check.equal(mixed.present, true, "present");
+			check.equal(mixed.frametime, 2, "frametime");
+			check.equal(mixed.interpolate, true, "interpolate");
+			check.equal(mixed.width, 32, "width");
+			check.equal(mixed.height, 32, "height");
+			check.equal(mixed.hasExplicitFrames, true, "explicit frames");
+			check.deepEqual(
+				mixed.frames,
+				[{ index: 0 }, { index: 2, time: 4 }, { index: 3 }],
+				"both element forms normalized",
+			);
+		},
+	},
+	{
+		name: "animation field order does not change the result",
+		run: (check) => {
+			const first = extractAnimationSection(
+				parseMcmetaText(
+					'{"animation":{"width":32,"frames":[1,0],"height":32,"interpolate":false,"frametime":3}}',
+				),
+			);
+			const second = extractAnimationSection(
+				parseMcmetaText(
+					'{"animation":{"frametime":3,"interpolate":false,"height":32,"frames":[1,0],"width":32}}',
+				),
+			);
+			check.deepEqual(second, first, "key order is irrelevant");
+		},
+	},
+	{
+		name: "bad animation shapes are INVALID_MCMETA with details.path",
+		run: (check) => {
+			const cases: Array<{ doc: unknown; path: string }> = [
+				{ doc: { animation: 7 }, path: "animation" },
+				{ doc: { animation: { frametime: 0 } }, path: "animation.frametime" },
+				{
+					doc: { animation: { interpolate: "yes" } },
+					path: "animation.interpolate",
+				},
+				{ doc: { animation: { width: -1 } }, path: "animation.width" },
+				{ doc: { animation: { frames: {} } }, path: "animation.frames" },
+				{
+					doc: { animation: { frames: [{ time: 2 }] } },
+					path: "animation.frames[0].index",
+				},
+				{
+					doc: { animation: { frames: [{ index: 1, time: 0 }] } },
+					path: "animation.frames[0].time",
+				},
+			];
+			for (const entry of cases) {
+				let caught: McAssetError | undefined;
+				try {
+					extractAnimationSection(parseMcmetaText(JSON.stringify(entry.doc)));
+				} catch (error) {
+					if (error instanceof McAssetError) {
+						caught = error;
+					} else {
+						check.fail(
+							`expected McAssetError(INVALID_MCMETA) for ${entry.path}`,
+						);
+					}
+				}
+				if (caught === undefined) {
+					check.fail(`expected INVALID_MCMETA for ${entry.path}`);
+				} else {
+					check.equal(caught.code, "INVALID_MCMETA", `code ${entry.path}`);
+					const details = caught.details as { path?: unknown };
+					check.equal(details.path, entry.path, `details.path ${entry.path}`);
+				}
+			}
+		},
+	},
+	{
+		name: "worked example: 32x128 sheet with 32x32 frames derives 4 frames",
+		run: (check) => {
+			const animation = extractAnimationSection(
+				parseMcmetaText(
+					JSON.stringify({
+						animation: { width: 32, height: 32, frames: [0, 1, 2, 3] },
+					}),
+				),
+			);
+			const geometry = deriveAnimationGeometry(32, 128, animation);
+			check.equal(geometry.frameWidth, 32, "frameWidth");
+			check.equal(geometry.frameHeight, 32, "frameHeight");
+			check.equal(geometry.frameCount, 4, "frameCount");
+			check.equal(geometry.layout, "vertical", "layout");
+			checkAnimationFrameIndices(animation, geometry.frameCount);
+		},
+	},
+	{
+		name: "frame index outside [0, count) reports details.path",
+		run: (check) => {
+			const animation = extractAnimationSection(
+				parseMcmetaText(
+					JSON.stringify({
+						animation: { width: 32, height: 32, frames: [0, 1, { index: 4 }] },
+					}),
+				),
+			);
+			const geometry = deriveAnimationGeometry(32, 128, animation);
+			check.equal(geometry.frameCount, 4, "frameCount");
+			try {
+				checkAnimationFrameIndices(animation, geometry.frameCount);
+				check.fail("expected INVALID_ANIMATION_FRAME");
+			} catch (error) {
+				if (error instanceof McAssetError) {
+					check.equal(
+						error.code,
+						"INVALID_ANIMATION_FRAME",
+						"out-of-range code",
+					);
+					const details = error.details as { path?: unknown; index?: unknown };
+					check.equal(
+						details.path,
+						"animation.frames[2].index",
+						"details.path pins the element",
+					);
+					check.equal(details.index, 4, "details.index");
+				} else {
+					check.fail("expected McAssetError(INVALID_ANIMATION_FRAME)");
+				}
+			}
+		},
+	},
+	{
+		name: "mipmap raw values ride along and cutout plus mean warns",
+		run: (check) => {
+			const texture = extractTextureSection(
+				parseMcmetaText(
+					JSON.stringify({
+						texture: { mipmap_strategy: "mean", alpha_cutoff_bias: 1 },
+					}),
+				),
+			);
+			const warning = mipmapCutoutMeanWarning("cutout", texture);
+			check.ok(warning !== undefined, "cutout plus mean warns");
+			check.equal(warning?.level, "warning", "warning level only");
+			check.equal(warning?.code, "MIPMAP_CUTOUT_MEAN", "warning code");
+			check.equal(
+				mipmapCutoutMeanWarning("solid", texture),
+				undefined,
+				"solid stays quiet",
 			);
 		},
 	},

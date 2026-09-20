@@ -1,7 +1,20 @@
 import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { McAssetError } from "../core/errors.ts";
+import {
+	checkAnimationFrameIndices,
+	deriveAnimationGeometry,
+	extractAnimationSection,
+	extractTextureSection,
+	mipmapCutoutMeanWarning,
+	parseMcmetaText,
+} from "../core/mcmeta.ts";
 import { decodePng } from "../io/png.ts";
-import { type ValidateReport, validateCanvas } from "../validate/checks.ts";
+import {
+	type ValidateFinding,
+	type ValidateReport,
+	validateCanvas,
+} from "../validate/checks.ts";
 import {
 	emitEnvelope,
 	emitLog,
@@ -21,6 +34,33 @@ export interface ValidateCommandOptions {
 	profile?: string | undefined;
 	minecraftVersion?: string | undefined;
 	resourcePackVersion?: string | undefined;
+	mcmeta?: string | undefined;
+}
+
+export interface ValidateMcmetaSection {
+	path: string;
+	texture: {
+		present: boolean;
+		mipmapStrategy?: string | undefined;
+		alphaCutoffBias?: number | undefined;
+	};
+	animation: {
+		present: boolean;
+		frametime?: number | undefined;
+		interpolate?: boolean | undefined;
+		width?: number | undefined;
+		height?: number | undefined;
+		frameCount?: number | undefined;
+		frameWidth?: number | undefined;
+		frameHeight?: number | undefined;
+		layout?: string | undefined;
+		frameIndices?: number[] | undefined;
+	};
+	mipmap: {
+		predictedClassification: string;
+		strategy?: string | undefined;
+		bias?: number | undefined;
+	};
 }
 
 export interface ValidateResult extends ValidateReport {
@@ -30,10 +70,14 @@ export interface ValidateResult extends ValidateReport {
 		packFormat?: number | undefined;
 	};
 	target: string;
+	mcmeta?: ValidateMcmetaSection | undefined;
 }
 
 /** Minimal human verdict: the JSON envelope is the primary output. */
-export function formatHumanReport(report: ValidateReport): string {
+export function formatHumanReport(
+	report: ValidateReport,
+	mcmeta?: ValidateMcmetaSection | undefined,
+): string {
 	const lines = [
 		`verdict: ${report.verdict}`,
 		`dimensions: ${report.dimensions.width}x${report.dimensions.height}`,
@@ -41,6 +85,17 @@ export function formatHumanReport(report: ValidateReport): string {
 		`alpha: predicted ${report.alpha.predictedClassification} (opaque=${report.alpha.opaquePixels} transparent=${report.alpha.transparentPixels} partial=${report.alpha.partialAlphaPixels})`,
 		`profile: ${report.profile.predictedDescription}`,
 	];
+	if (mcmeta !== undefined) {
+		lines.push(
+			`mcmeta: ${mcmeta.path} texture(strategy=${mcmeta.texture.mipmapStrategy ?? "none"} bias=${mcmeta.texture.alphaCutoffBias ?? "none"} predicted=${mcmeta.mipmap.predictedClassification})` +
+				(mcmeta.animation.present
+					? ` animation(frames=${mcmeta.animation.frameCount ?? 0} size=${mcmeta.animation.frameWidth ?? 0}x${mcmeta.animation.frameHeight ?? 0} layout=${mcmeta.animation.layout ?? "none"})`
+					: " animation(none)"),
+		);
+		lines.push(
+			`mipmap: strategy=${mcmeta.mipmap.strategy ?? "none"} bias=${mcmeta.mipmap.bias ?? "none"} predicted=${mcmeta.mipmap.predictedClassification}`,
+		);
+	}
 	for (const finding of report.findings) {
 		lines.push(`${finding.level} [${finding.code}] ${finding.message}`);
 	}
@@ -61,6 +116,98 @@ function summarize(report: ValidateReport): string {
 }
 
 /**
+ * Explicit `--mcmeta` wiring: read-only from start to finish. The mcmeta
+ * path is used verbatim — a sibling file is never derived — and neither
+ * the PNG nor the mcmeta bytes are written. Structural problems throw
+ * INVALID_MCMETA / INVALID_ANIMATION_FRAME (exit 2); a declared frame
+ * count that disagrees with the sheet becomes an error finding so the
+ * verdict fails (exit 3). Mipmap notes are warning-only and never block.
+ */
+async function applyMcmetaOption(
+	mcmetaPath: string,
+	report: ValidateReport,
+): Promise<{ mcmeta: ValidateMcmetaSection; findings: ValidateFinding[] }> {
+	let text: string;
+	try {
+		text = new TextDecoder("utf-8").decode(await readFile(mcmetaPath));
+	} catch {
+		throw new McAssetError(
+			"FILESYSTEM_ERROR",
+			`Cannot read mcmeta: ${mcmetaPath}.`,
+			{ path: mcmetaPath },
+		);
+	}
+	const document = parseMcmetaText(text, mcmetaPath);
+	const texture = extractTextureSection(document);
+	const animation = extractAnimationSection(document);
+	const section: ValidateMcmetaSection = {
+		path: basename(mcmetaPath),
+		texture: {
+			present: texture.present,
+			...(texture.mipmapStrategy !== undefined
+				? { mipmapStrategy: texture.mipmapStrategy }
+				: {}),
+			...(texture.alphaCutoffBias !== undefined
+				? { alphaCutoffBias: texture.alphaCutoffBias }
+				: {}),
+		},
+		animation: { present: animation.present },
+		mipmap: {
+			predictedClassification: report.alpha.predictedClassification,
+			...(texture.mipmapStrategy !== undefined
+				? { strategy: texture.mipmapStrategy }
+				: {}),
+			...(texture.alphaCutoffBias !== undefined
+				? { bias: texture.alphaCutoffBias }
+				: {}),
+		},
+	};
+	const findings: ValidateFinding[] = [];
+	const mipmapWarning = mipmapCutoutMeanWarning(
+		report.alpha.predictedClassification,
+		texture,
+	);
+	if (mipmapWarning !== undefined) {
+		findings.push({ ...mipmapWarning });
+	}
+	if (animation.present) {
+		const geometry = deriveAnimationGeometry(
+			report.dimensions.width,
+			report.dimensions.height,
+			animation,
+		);
+		checkAnimationFrameIndices(animation, geometry.frameCount);
+		section.animation = {
+			present: true,
+			...(animation.frametime !== undefined
+				? { frametime: animation.frametime }
+				: {}),
+			...(animation.interpolate !== undefined
+				? { interpolate: animation.interpolate }
+				: {}),
+			...(animation.width !== undefined ? { width: animation.width } : {}),
+			...(animation.height !== undefined ? { height: animation.height } : {}),
+			frameCount: geometry.frameCount,
+			frameWidth: geometry.frameWidth,
+			frameHeight: geometry.frameHeight,
+			layout: geometry.layout,
+			frameIndices: animation.frames.map((frame) => frame.index),
+		};
+		if (
+			animation.hasExplicitFrames &&
+			animation.frames.length !== geometry.frameCount
+		) {
+			findings.push({
+				code: "ANIMATION_FRAME_COUNT_MISMATCH",
+				level: "error",
+				message: `mcmeta declares ${animation.frames.length} frame(s) but the sheet holds ${geometry.frameCount}.`,
+			});
+		}
+	}
+	return { mcmeta: section, findings };
+}
+
+/**
  * Read-only verdict command: reads the input file, runs the pure engine,
  * prints the report. Exit 3 (VALIDATION_FAILED) means the tool worked but
  * the asset failed; every tool failure keeps its own exit code. The input
@@ -73,7 +220,7 @@ export async function runValidate(
 	streams: OutputStreams,
 ): Promise<number> {
 	const route = routeStreams({ json: globalJson, stdoutArtifact: false });
-	let failed: ValidateReport | undefined;
+	let failed: ValidateResult | undefined;
 	try {
 		if (asset === undefined || asset === "") {
 			throw new McAssetError(
@@ -98,16 +245,28 @@ export async function runValidate(
 		const decoded = decodePng(input);
 		const version = versionReportShape(target);
 		const targetSummary = formatVersionTarget(target);
-		const report: ValidateReport = validateCanvas(decoded.canvas, {
+		const base: ValidateReport = validateCanvas(decoded.canvas, {
 			profile,
 			packFormat: target.packFormat,
 			sourceWarnings: decoded.warnings,
 			filename: asset,
 		});
+		let report: ValidateReport = base;
+		let mcmeta: ValidateMcmetaSection | undefined;
+		if (options.mcmeta !== undefined && options.mcmeta !== "") {
+			const wired = await applyMcmetaOption(options.mcmeta, base);
+			mcmeta = wired.mcmeta;
+			const findings = [...base.findings, ...wired.findings];
+			const verdict = findings.some((finding) => finding.level === "error")
+				? "fail"
+				: base.verdict;
+			report = { ...base, findings, verdict };
+		}
 		const result: ValidateResult = {
 			...report,
 			version,
 			target: targetSummary,
+			...(mcmeta !== undefined ? { mcmeta } : {}),
 		};
 		if (report.verdict === "fail") {
 			failed = result;
@@ -117,7 +276,7 @@ export async function runValidate(
 			emitEnvelope(successEnvelope(result), streams, route);
 		} else {
 			emitLog(
-				`${formatHumanReport(report)}\ntarget: ${targetSummary}`,
+				`${formatHumanReport(report, mcmeta)}\ntarget: ${targetSummary}`,
 				streams,
 				route,
 			);
@@ -141,7 +300,7 @@ export async function runValidate(
 							? `\ntarget: ${failed.target}`
 							: "";
 					emitLog(
-						`${formatHumanReport(failed)}${targetLine}\nerror [VALIDATION_FAILED] ${message}`,
+						`${formatHumanReport(failed, failed.mcmeta)}${targetLine}\nerror [VALIDATION_FAILED] ${message}`,
 						streams,
 						route,
 					);

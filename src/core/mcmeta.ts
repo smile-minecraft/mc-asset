@@ -11,14 +11,19 @@ import { McAssetError } from "./errors.ts";
  * names (`stretch`, `tile`, `nine_slice`, `border`, `stretch_inner`) are
  * what the reports carry.
  *
- * Extension point for animation / mipmap work: add new section readers
- * beside `extractGuiScaling` (for example `extractAnimation` and
- * `extractMipmap`) that share `parseMcmetaText` and its INVALID_MCMETA
- * contract. Nothing in this module applies behavior: `stretch_inner` is
- * parsed and reported verbatim but never affects geometry or pixels.
+ * The animation and mipmap readers below share `parseMcmetaText` and its
+ * INVALID_MCMETA contract. Nothing in this module applies behavior:
+ * `stretch_inner`, `mipmap_strategy`, `alpha_cutoff_bias`, `frametime`, and
+ * `interpolate` are parsed and reported verbatim but never affect geometry
+ * or pixels. Only `animation.width` / `animation.height` feed the frame
+ * geometry derivation, and the value domain of the mipmap fields is
+ * intentionally unconfirmed: out-of-range values warn at the report layer,
+ * never error here beyond their JSON type.
  *
  * All pixel work stays integer; no randomness, no transcendental functions.
- * Same input plus same options always yields the same bytes.
+ * Same input plus same options always yields the same bytes. Section reads
+ * visit their keys in a fixed order, so key order in the JSON never changes
+ * the result.
  */
 
 export interface NineSliceBorder {
@@ -285,4 +290,317 @@ export function paintNineSliceGuides(
 			pixels[offset + 3] = NINE_SLICE_GUIDE.a;
 		}
 	}
+}
+
+/** Verbatim `texture` section: strategy stays a string, bias a number. */
+export interface McmetaTextureInfo {
+	present: boolean;
+	mipmapStrategy?: string | undefined;
+	alphaCutoffBias?: number | undefined;
+}
+
+/** One normalized animation frame: bare integers become `{ index }`. */
+export interface McmetaAnimationFrame {
+	index: number;
+	time?: number | undefined;
+}
+
+/** Verbatim `animation` section with both frames element forms accepted. */
+export interface McmetaAnimationInfo {
+	present: boolean;
+	frametime?: number | undefined;
+	interpolate?: boolean | undefined;
+	width?: number | undefined;
+	height?: number | undefined;
+	frames: McmetaAnimationFrame[];
+	hasExplicitFrames: boolean;
+}
+
+export type McmetaAnimationLayout = "vertical" | "horizontal";
+
+/** Frame geometry derived from the sheet plus the declared frame size. */
+export interface McmetaAnimationGeometry {
+	frameWidth: number;
+	frameHeight: number;
+	frameCount: number;
+	layout: McmetaAnimationLayout;
+}
+
+/** Warning-only mipmap note: classification is predicted, never effective. */
+export interface McmetaMipmapWarning {
+	level: "warning";
+	code: string;
+	message: string;
+}
+
+function isPositiveInt(value: unknown): value is number {
+	return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+function texturePath(path: string, details?: Record<string, unknown>) {
+	return invalidMcmeta(`Invalid texture section: ${path}.`, {
+		path,
+		...details,
+	});
+}
+
+function animationPath(path: string, details?: Record<string, unknown>) {
+	return invalidMcmeta(`Invalid animation section: ${path}.`, {
+		path,
+		...details,
+	});
+}
+
+/**
+ * Read the `texture` section of a parsed `.mcmeta` document. Absent texture
+ * reports `present: false`; `mipmap_strategy` stays a verbatim string and
+ * `alpha_cutoff_bias` a verbatim number. The two keys are visited in fixed
+ * order and every other key is ignored, so JSON key order never matters.
+ * Non-object sections or mistyped fields are INVALID_MCMETA; unconfirmed
+ * value domains never error here, they warn at the report layer.
+ */
+export function extractTextureSection(document: unknown): McmetaTextureInfo {
+	if (!isRecord(document)) {
+		throw invalidMcmeta("mcmeta root must be a JSON object.", {
+			document,
+		});
+	}
+	const texture = document.texture;
+	if (texture === undefined) {
+		return { present: false };
+	}
+	if (!isRecord(texture)) {
+		throw texturePath("texture", { texture });
+	}
+	const info: McmetaTextureInfo = { present: true };
+	const strategy = texture.mipmap_strategy;
+	if (strategy !== undefined) {
+		if (typeof strategy !== "string") {
+			throw texturePath("texture.mipmap_strategy", {
+				mipmap_strategy: strategy,
+			});
+		}
+		info.mipmapStrategy = strategy;
+	}
+	const bias = texture.alpha_cutoff_bias;
+	if (bias !== undefined) {
+		if (typeof bias !== "number") {
+			throw texturePath("texture.alpha_cutoff_bias", {
+				alpha_cutoff_bias: bias,
+			});
+		}
+		info.alphaCutoffBias = bias;
+	}
+	return info;
+}
+
+function parseAnimationFrame(
+	element: unknown,
+	position: number,
+): McmetaAnimationFrame {
+	const path =
+		typeof element === "number"
+			? `animation.frames[${position}]`
+			: `animation.frames[${position}].index`;
+	if (typeof element === "number") {
+		if (!Number.isInteger(element) || element < 0) {
+			throw animationPath(path, { index: element });
+		}
+		return { index: element };
+	}
+	if (!isRecord(element)) {
+		throw animationPath(`animation.frames[${position}]`, {
+			frame: element,
+		});
+	}
+	const index = element.index;
+	if (typeof index !== "number" || !Number.isInteger(index) || index < 0) {
+		throw animationPath(path, { index });
+	}
+	const frame: McmetaAnimationFrame = { index };
+	const time = element.time;
+	if (time !== undefined) {
+		if (!isPositiveInt(time)) {
+			throw animationPath(`animation.frames[${position}].time`, { time });
+		}
+		frame.time = time;
+	}
+	return frame;
+}
+
+/**
+ * Read the `animation` section of a parsed `.mcmeta` document. Absent
+ * animation reports `present: false` with no frames; `frametime` /
+ * `interpolate` / `width` / `height` stay verbatim and `frames[]` accepts
+ * bare integers and `{ index, time }` objects side by side. Fields are
+ * visited in the fixed order frametime, interpolate, width, height,
+ * frames, so JSON key order never matters. Structural problems are
+ * INVALID_MCMETA with the field location in `details.path`.
+ */
+export function extractAnimationSection(
+	document: unknown,
+): McmetaAnimationInfo {
+	if (!isRecord(document)) {
+		throw invalidMcmeta("mcmeta root must be a JSON object.", {
+			document,
+		});
+	}
+	const animation = document.animation;
+	if (animation === undefined) {
+		return { present: false, frames: [], hasExplicitFrames: false };
+	}
+	if (!isRecord(animation)) {
+		throw animationPath("animation", { animation });
+	}
+	const info: McmetaAnimationInfo = {
+		present: true,
+		frames: [],
+		hasExplicitFrames: false,
+	};
+	const frametime = animation.frametime;
+	if (frametime !== undefined) {
+		if (!isPositiveInt(frametime)) {
+			throw animationPath("animation.frametime", { frametime });
+		}
+		info.frametime = frametime;
+	}
+	const interpolate = animation.interpolate;
+	if (interpolate !== undefined) {
+		if (typeof interpolate !== "boolean") {
+			throw animationPath("animation.interpolate", { interpolate });
+		}
+		info.interpolate = interpolate;
+	}
+	const width = animation.width;
+	if (width !== undefined) {
+		if (!isPositiveInt(width)) {
+			throw animationPath("animation.width", { width });
+		}
+		info.width = width;
+	}
+	const height = animation.height;
+	if (height !== undefined) {
+		if (!isPositiveInt(height)) {
+			throw animationPath("animation.height", { height });
+		}
+		info.height = height;
+	}
+	const frames = animation.frames;
+	if (frames === undefined) {
+		return info;
+	}
+	if (!Array.isArray(frames)) {
+		throw animationPath("animation.frames", { frames });
+	}
+	info.hasExplicitFrames = true;
+	info.frames = frames.map((element, position) =>
+		parseAnimationFrame(element, position),
+	);
+	return info;
+}
+
+/**
+ * Derive the animation frame geometry from a sheet plus the declared frame
+ * size. Undeclared width falls back to the sheet width (a vertical strip);
+ * undeclared height falls back to the frame width (square frames). A sheet
+ * that is a vertical stack reports `vertical` with
+ * `frameCount = sheetHeight / frameHeight`; a horizontal strip reports
+ * `horizontal` with `frameCount = sheetWidth / frameWidth` — the same
+ * integer formulas as the frameset sheet math. Anything else is
+ * INVALID_ANIMATION_FRAME with the sheet and frame dimensions in details.
+ */
+export function deriveAnimationGeometry(
+	sheetWidth: number,
+	sheetHeight: number,
+	animation: McmetaAnimationInfo,
+): McmetaAnimationGeometry {
+	const frameWidth = animation.width ?? sheetWidth;
+	const frameHeight = animation.height ?? frameWidth;
+	if (
+		!Number.isInteger(frameWidth) ||
+		frameWidth < 1 ||
+		!Number.isInteger(frameHeight) ||
+		frameHeight < 1
+	) {
+		throw new McAssetError(
+			"INVALID_ANIMATION_FRAME",
+			`Animation frame size ${String(frameWidth)}x${String(frameHeight)} must be positive integers.`,
+			{ sheetWidth, sheetHeight, frameWidth, frameHeight },
+		);
+	}
+	if (sheetWidth === frameWidth && sheetHeight % frameHeight === 0) {
+		const frameCount = sheetHeight / frameHeight;
+		if (frameCount >= 1) {
+			return { frameWidth, frameHeight, frameCount, layout: "vertical" };
+		}
+	}
+	if (sheetHeight === frameHeight && sheetWidth % frameWidth === 0) {
+		const frameCount = sheetWidth / frameWidth;
+		if (frameCount >= 1) {
+			return { frameWidth, frameHeight, frameCount, layout: "horizontal" };
+		}
+	}
+	throw new McAssetError(
+		"INVALID_ANIMATION_FRAME",
+		`Sheet ${sheetWidth}x${sheetHeight} cannot hold ${frameWidth}x${frameHeight} animation frames.`,
+		{ layout: "vertical", sheetWidth, sheetHeight, frameWidth, frameHeight },
+	);
+}
+
+/**
+ * Check every declared frame index against `frameCount`: each index must
+ * land in `[0, frameCount)`. The first breach is INVALID_ANIMATION_FRAME
+ * with the element location in `details.path`
+ * (`animation.frames[i].index` for objects, `animation.frames[i]` for bare
+ * integers) plus the offending index and the frame count.
+ */
+export function checkAnimationFrameIndices(
+	animation: McmetaAnimationInfo,
+	frameCount: number,
+): void {
+	for (let position = 0; position < animation.frames.length; position += 1) {
+		const frame = animation.frames[position] as McmetaAnimationFrame;
+		if (
+			!Number.isInteger(frame.index) ||
+			frame.index < 0 ||
+			frame.index >= frameCount
+		) {
+			throw new McAssetError(
+				"INVALID_ANIMATION_FRAME",
+				`Animation frame index ${frame.index} is out of range [0, ${frameCount}).`,
+				{
+					path: `animation.frames[${position}].index`,
+					index: frame.index,
+					frameIndex: frame.index,
+					frameCount,
+				},
+			);
+		}
+	}
+}
+
+/**
+ * Cutout plus mean mipmap note, warning-only by construction. The predicted
+ * classification comes from PNG bytes only, and the strategy value domain
+ * is unconfirmed, so this never errors: a predicted-cutout texture paired
+ * with a verbatim `mean` strategy warns, everything else stays quiet, and
+ * the warning MUST NOT block output.
+ */
+export function mipmapCutoutMeanWarning(
+	predictedClassification: string,
+	texture: McmetaTextureInfo,
+): McmetaMipmapWarning | undefined {
+	if (
+		predictedClassification === "cutout" &&
+		texture.present &&
+		texture.mipmapStrategy === "mean"
+	) {
+		return {
+			level: "warning",
+			code: "MIPMAP_CUTOUT_MEAN",
+			message:
+				"predicted cutout with mipmap_strategy mean: mipmaps may blend transparent edges; left as-is with no auto-fix.",
+		};
+	}
+	return undefined;
 }

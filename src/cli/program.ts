@@ -250,6 +250,10 @@ export function buildProgram(): Command {
 			"Target resource packFormat as a positive integer (V0.1: 75).",
 			singleUseOption("--resource-pack-version"),
 		)
+		.option(
+			"--mcmeta <path>",
+			"Explicit mcmeta path for texture and animation checks; a sibling file is never derived.",
+		)
 		.action(
 			async (
 				asset: string,
@@ -865,6 +869,10 @@ export function buildProgram(): Command {
 		.option("--columns <N>", "Grid column count (required with grid).")
 		.option("--output-dir <path>", "Required explicit output directory.")
 		.option("--output <path>", "Rejected on unpack (ARGUMENT_CONFLICT).")
+		.option(
+			"--mcmeta <path>",
+			"Explicit mcmeta path for the frame geometry guard; a sibling file is never derived.",
+		)
 		.option("--force", "Allow overwriting existing frame files.")
 		.option("--mkdir", "Create missing parent directories.")
 		.option(
@@ -940,6 +948,10 @@ export function buildProgram(): Command {
 		.command("validate")
 		.description("Read-only geometry check of a frames directory.")
 		.option("--frames-dir <dir>", "Frames directory (one .mcpx per frame).")
+		.option(
+			"--mcmeta <path>",
+			"Explicit mcmeta path for the frame correspondence check; a sibling file is never derived.",
+		)
 		.option("--output <path>", "Rejected: reports take no file flags.")
 		.option("--stdout", "Rejected: reports take no file flags.")
 		.option("--output-dir <path>", "Rejected: reports take no file flags.")

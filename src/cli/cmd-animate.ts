@@ -15,6 +15,12 @@ import {
 	resizeFrameSet,
 	unpackSheetToFrameSet,
 } from "../core/frameset.ts";
+import {
+	checkAnimationFrameIndices,
+	deriveAnimationGeometry,
+	extractAnimationSection,
+	parseMcmetaText,
+} from "../core/mcmeta.ts";
 import type { ResizeMode } from "../core/transform.ts";
 import type { PixelCanvas } from "../core/types.ts";
 import { decodePng, encodePng } from "../io/png.ts";
@@ -65,6 +71,7 @@ export interface AnimateOptions {
 	resizeMode?: string | undefined;
 	ascii?: boolean | undefined;
 	profile?: string | undefined;
+	mcmeta?: string | undefined;
 }
 
 /** Byte-lexicographic order per section 100.3 (UTF-8 bytes, not UTF-16 units). */
@@ -170,6 +177,17 @@ function emitHumanWarnings(
 	for (const warning of warnings) {
 		emitLog(`warning [${warning.code}] ${warning.message}`, streams, route);
 	}
+}
+
+/**
+ * Read-only mcmeta intake shared by unpack (geometry guard) and validate
+ * (frame correspondence). The path is used verbatim — a sibling file is
+ * never derived — and nothing here writes. Syntax and structural problems
+ * surface as INVALID_MCMETA with the field location in details.path.
+ */
+async function readAnimationMcmeta(mcmetaPath: string) {
+	const text = await readInputText(mcmetaPath, "mcmeta");
+	return extractAnimationSection(parseMcmetaText(text, mcmetaPath));
 }
 
 async function runPack(
@@ -334,6 +352,56 @@ async function runUnpack(
 		const sheetLayer = decoded.canvas.layers[0];
 		if (sheetLayer === undefined) {
 			throw new McAssetError("INTERNAL_ERROR", "Decoded sheet has no layer.");
+		}
+		if (options.mcmeta !== undefined && options.mcmeta !== "") {
+			const animation = await readAnimationMcmeta(options.mcmeta);
+			if (animation.present) {
+				const geometry = deriveAnimationGeometry(
+					decoded.canvas.width,
+					decoded.canvas.height,
+					animation,
+				);
+				if (
+					geometry.frameWidth !== size.width ||
+					geometry.frameHeight !== size.height
+				) {
+					throw new McAssetError(
+						"INVALID_ANIMATION_FRAME",
+						`mcmeta frame size ${geometry.frameWidth}x${geometry.frameHeight} does not match --frame-size ${size.width}x${size.height}.`,
+						{
+							layout,
+							sheetWidth: decoded.canvas.width,
+							sheetHeight: decoded.canvas.height,
+							frameWidth: size.width,
+							frameHeight: size.height,
+							expected: {
+								width: geometry.frameWidth,
+								height: geometry.frameHeight,
+							},
+							actual: { width: size.width, height: size.height },
+						},
+					);
+				}
+				checkAnimationFrameIndices(animation, geometry.frameCount);
+				if (
+					animation.hasExplicitFrames &&
+					animation.frames.length !== geometry.frameCount
+				) {
+					throw new McAssetError(
+						"INVALID_ANIMATION_FRAME",
+						`mcmeta declares ${animation.frames.length} frame(s) but the sheet holds ${geometry.frameCount}.`,
+						{
+							layout,
+							sheetWidth: decoded.canvas.width,
+							sheetHeight: decoded.canvas.height,
+							frameWidth: size.width,
+							frameHeight: size.height,
+							expected: geometry.frameCount,
+							actual: animation.frames.length,
+						},
+					);
+				}
+			}
 		}
 		const frameSet = unpackSheetToFrameSet(
 			sheetLayer.pixels,
@@ -509,6 +577,43 @@ async function runValidate(
 		const loaded = await loadFramesDir(options.framesDir);
 		const frameSet = createFrameSet(loaded.frames);
 		const report = describeFrameSet(frameSet);
+		if (options.mcmeta !== undefined && options.mcmeta !== "") {
+			const animation = await readAnimationMcmeta(options.mcmeta);
+			if (animation.present) {
+				const expectedWidth = animation.width ?? frameSet.frameWidth;
+				const expectedHeight = animation.height ?? frameSet.frameHeight;
+				if (
+					expectedWidth !== frameSet.frameWidth ||
+					expectedHeight !== frameSet.frameHeight
+				) {
+					throw new McAssetError(
+						"INVALID_ANIMATION_FRAME",
+						`mcmeta frame size ${expectedWidth}x${expectedHeight} does not match frames ${frameSet.frameWidth}x${frameSet.frameHeight}.`,
+						{
+							expected: { width: expectedWidth, height: expectedHeight },
+							actual: {
+								width: frameSet.frameWidth,
+								height: frameSet.frameHeight,
+							},
+						},
+					);
+				}
+				checkAnimationFrameIndices(animation, frameSet.frames.length);
+				if (
+					animation.hasExplicitFrames &&
+					animation.frames.length !== frameSet.frames.length
+				) {
+					throw new McAssetError(
+						"VALIDATION_FAILED",
+						`animate validate failed: mcmeta declares ${animation.frames.length} frame(s) but the frames directory holds ${frameSet.frames.length}.`,
+						{
+							expected: animation.frames.length,
+							actual: frameSet.frames.length,
+						},
+					);
+				}
+			}
+		}
 		if (report.verdict === "fail") {
 			throw new McAssetError(
 				"VALIDATION_FAILED",
@@ -621,8 +726,9 @@ async function runPreview(
 
 /**
  * FrameSet command family: pack / unpack / reorder / resize write files
- * under the §98 guards, validate and preview stay read-only. --mcmeta
- * stays undeclared here; mcmeta reading arrives with its own task.
+ * under the §98 guards, validate and preview stay read-only. `unpack` and
+ * `validate` take an explicit `--mcmeta` for the read-only frame geometry
+ * correspondence; no mode derives a sibling file and no mode writes JSON.
  */
 export async function runAnimate(
 	mode: AnimateMode,

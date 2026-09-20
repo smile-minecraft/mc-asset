@@ -878,19 +878,22 @@ describe("animate wiring via spawn", () => {
 		}
 	}, 60_000);
 
-	test("--mcmeta stays undeclared on animate modes", async () => {
+	test("--mcmeta is a declared read-only option on animate validate", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-animate-"));
 		try {
 			const framesDir = await writeFramesDir(dir, "frames", [RED]);
+			const missing = join(dir, "missing.mcmeta");
 			const result = await runCli([
+				"--json",
 				"animate",
 				"validate",
 				"--frames-dir",
 				framesDir,
 				"--mcmeta",
-				join(dir, "x.mcmeta"),
+				missing,
 			]);
-			expect(result.code).toBe(2);
+			expect(result.code).toBe(4);
+			expect(mustError(parseJsonStdout(result)).code).toBe("FILESYSTEM_ERROR");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

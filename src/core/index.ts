@@ -90,6 +90,21 @@ export {
 	listMaterialIds,
 } from "./material.ts";
 export type {
+	McmetaAnimationFrame,
+	McmetaAnimationGeometry,
+	McmetaAnimationInfo,
+	McmetaAnimationLayout,
+	McmetaMipmapWarning,
+	McmetaTextureInfo,
+} from "./mcmeta.ts";
+export {
+	checkAnimationFrameIndices,
+	deriveAnimationGeometry,
+	extractAnimationSection,
+	extractTextureSection,
+	mipmapCutoutMeanWarning,
+} from "./mcmeta.ts";
+export type {
 	PaletteDominantColor,
 	PaletteInspectReport,
 	PaletteRoleSummary,
