@@ -1,8 +1,9 @@
 # mc-asset
 
 Pixel-native Minecraft asset toolchain. The V0.1 command set and the frozen
-V0.2, V0.3, V0.4, and V0.5 command sets all ship from this entry point;
-`--version` still prints `0.1.0` (commander-owned).
+V0.2, V0.3, V0.4, and V0.5 command sets all ship from this entry point, along
+with the V0.6 MCP server; `--version` still prints `0.1.0`
+(commander-owned).
 
 Entry point for development: `bun src/cli/index.ts`. For installation,
 `mc-asset` ships through Homebrew — see `docs/homebrew.md` and
@@ -507,6 +508,53 @@ entered the required atlas, while deleting that atlas definition returns the
 same pack to `pass` — an atlas that is undefined or only partially understood
 is skipped instead of judged.
 
+## V0.6: the MCP server
+
+`mc-asset mcp` starts a stdio MCP server. Stdout carries only MCP JSON-RPC,
+diagnostics go to stderr, and the process ends cleanly when stdin closes. The
+server hangs directly off Core, so each tool runs the same engine the CLI
+uses rather than a second image implementation.
+
+The frozen surface is seven tools (specification §90; the read/write contract
+is in `docs/mcp-surface.md`, inputs in `src/mcp/schema.ts`, and the full guide
+— setup, per-tool captures, error model, gaps — in `docs/mcp-guide.md`):
+
+| Tool | Reads | Writes | Result |
+|---|---|---|---|
+| `analyze_asset` | Raster image (PNG, JPEG, WebP) | Nothing | Read-only report: dimensions, palette, predicted alpha classification, pixel-art characteristics, recommendations |
+| `pixelize_asset` | Reference raster (PNG, JPEG, WebP; never `.mcpx`) | Optional explicit PNG / `.mcpx` paths | Deterministic pipeline output: PNG bytes and/or editable source |
+| `render_pixel_asset` | ASCII Grid: exactly one of inline `gridText` or a `gridPath` file, plus an optional batch | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
+| `apply_asset_operations` | Editable `.mcpx` source plus an operations array | Optional explicit PNG / `.mcpx` paths | Applied count with per-operation statuses; atomic by default |
+| `recolor_asset` | Editable `.mcpx` source, builtin material id, optional region id | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or recolored source with change counts |
+| `create_variants` | Editable `.mcpx` source, one or more builtin material ids | Required explicit output directory | Per-material `<stem>_<material>.png` plus `.mcpx` |
+| `validate_asset` | Asset file (PNG), optional explicit `.mcmeta` path used verbatim | Nothing | Read-only verdict with findings |
+
+Pixel work never needs hundreds of per-pixel calls: authorship at pixel
+granularity travels through the ASCII Grid document, the batch operations
+array, or the editable `.mcpx` source returned inline. There is no `set_pixel`
+tool on purpose.
+
+Register the server in the global OpenCode config
+(`~/.config/opencode/opencode.jsonc`) by adding this entry:
+
+```jsonc
+"mc-asset": {
+  "type": "local",
+  "command": ["/opt/homebrew/bin/mc-asset", "mcp"],
+  "enabled": true
+}
+```
+
+MCP servers load at startup, so the entry does nothing until OpenCode is
+fully restarted. Removing the block (or restoring a config backup) rolls the
+registration back.
+
+Limits to plan around before wiring an agent to it: every path is explicit, an
+existing output is `OUTPUT_EXISTS` with no force equivalent, a missing parent
+directory is `FILESYSTEM_ERROR` with no mkdir equivalent, and an omitted
+output path embeds the artifact (`pngBase64` or `mcpxText`) in the result. The
+surface exposes the V0.1–V0.2 engine set only.
+
 ## Batch operations (`--operations`)
 
 Pixel/rect/line/fill edits travel through `--operations <path>` on
@@ -651,8 +699,25 @@ What the toolchain guarantees, and where it was checked:
   carries it, because the PNG-only texture fact still lacks an official
   source (§95). It is warning-only by construction and can never fail
   validation.
-- **Later-version surface stays unimplemented**: V0.5 ships `validate-pack`,
-  so that gap is closed; the `mcp` command (V0.6) is still absent.
+- **Later-version surface stays unimplemented**: V0.5 ships `validate-pack`
+  and V0.6 ships `mc-asset mcp`, so both gaps are closed; no later version is
+  announced.
+- **The MCP surface is the V0.1–V0.2 engine set only**: the seven tools cover
+  analyze, pixelize, ASCII Grid render, batch operations, recolor, variant
+  fan-out, and validation. Newer engine capabilities (`tile`, `generate`,
+  `preview`, `animate`, `validate-pack`, version targeting) are not exposed,
+  and there is no `set_pixel` tool by design.
+- **MCP file rules are stricter than the CLI, with no escape hatch**: every
+  path is explicit; an existing output is `OUTPUT_EXISTS` (the message still
+  says "Pass --force to overwrite", but the MCP surface has no way to pass
+  it); a missing parent directory is `FILESYSTEM_ERROR` ("Pass --mkdir …",
+  likewise not passable); and an omitted output path embeds the artifact
+  instead of writing it. `docs/mcp-guide.md` documents the full set.
+- **MCP verification is demo-input only**: the seven tools were exercised
+  once against the installed build with `px-8x8.png` / `sword.mcpx` in a demo
+  directory. Other formats, `mcmetaPath`, `region`, and `atomic: false` were
+  not exercised, and no minimum Node version is declared (no `engines`
+  field).
 - **V0.5's `exit 5` path is untested in practice**: the
   `RESOURCE_LIMIT_EXCEEDED` guard for an oversized pack exists, but no live
   large-pack run exercises it.
