@@ -176,7 +176,7 @@
 
 ### transform_asset
 
-对位图或 `.mcpx` 应用一个几何操作（`flip`、`rotate` 等），另可指定选择范围。几何标志恰好只能给一个：给两个是 `ARGUMENT_CONFLICT`，都不给是 `INVALID_ARGUMENT`。
+对位图或 `.mcpx` 应用一个几何操作（`flip`、`rotate` 等）；选择范围不能与几何操作并用（`ARGUMENT_CONFLICT`）。几何标志恰好只能给一个：给两个是 `ARGUMENT_CONFLICT`，都不给是 `INVALID_ARGUMENT`。
 
 调用：
 

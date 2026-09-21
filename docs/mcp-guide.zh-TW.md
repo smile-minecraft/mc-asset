@@ -176,7 +176,7 @@
 
 ### transform_asset
 
-對點陣圖或 `.mcpx` 套用一個幾何操作（`flip`、`rotate` 等），另可指定選取範圍。幾何旗標恰好只能給一個：給兩個是 `ARGUMENT_CONFLICT`，都不給是 `INVALID_ARGUMENT`。
+對點陣圖或 `.mcpx` 套用一個幾何操作（`flip`、`rotate` 等）；選取範圍不能與幾何操作併用（`ARGUMENT_CONFLICT`）。幾何旗標恰好只能給一個：給兩個是 `ARGUMENT_CONFLICT`，都不給是 `INVALID_ARGUMENT`。
 
 呼叫：
 

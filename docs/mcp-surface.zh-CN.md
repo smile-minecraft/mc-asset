@@ -25,7 +25,7 @@
 | `validate_asset` | 资产文件（PNG）、可选的显式 `.mcmeta` 路径（原样使用） | 无 | 附发现项的只读判定 |
 | `import_asset` | 位图（PNG、JPEG、WebP）加可选的批处理 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
 | `build_asset` | 可编辑的 `.mcpx` 源码加可选的批处理 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或构建后的源码 |
-| `transform_asset` | 位图或 `.mcpx`、一个几何标志、可选的选择范围 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
+| `transform_asset` | 位图或 `.mcpx`、一个几何标志（搭配选择范围会报告 `ARGUMENT_CONFLICT`） | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
 | `quantize_asset` | 位图或 `.mcpx`、必需的颜色数、可选的选择范围 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
 | `cleanup_asset` | 位图或 `.mcpx`、可选的修复类别、可选的选择范围 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
 | `palette_asset` | 图像、一种 `mode`（`extract`／`inspect`） | 无 | 只读报告：不重复颜色，或分布、角色与对比度 |

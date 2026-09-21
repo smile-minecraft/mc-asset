@@ -216,9 +216,7 @@ Result (verbatim; `pngBase64` is truncated):
 
 ### transform_asset
 
-Applies one geometry operation (`flip`, `rotate`, …) to a raster image
-or `.mcpx`, with an optional selection. Exactly one geometry flag is
-required: two is `ARGUMENT_CONFLICT`, none is `INVALID_ARGUMENT`.
+Applies one geometry operation (`flip`, `rotate`, …) to a raster image or `.mcpx`; a selection cannot be combined with geometry operations (`ARGUMENT_CONFLICT`). Exactly one geometry flag is required: two is `ARGUMENT_CONFLICT`, none is `INVALID_ARGUMENT`.
 
 Call:
 

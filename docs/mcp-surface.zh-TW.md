@@ -25,7 +25,7 @@
 | `validate_asset` | 素材檔（PNG）、選用的明確 `.mcmeta` 路徑（原樣使用） | 無 | 附發現項目的唯讀判定 |
 | `import_asset` | 點陣圖（PNG、JPEG、WebP）加選用的批次 | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或可編輯來源 |
 | `build_asset` | 可編輯的 `.mcpx` 來源加選用的批次 | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或建置後的來源 |
-| `transform_asset` | 點陣圖或 `.mcpx`、一個幾何旗標、選用的選取範圍 | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或可編輯來源 |
+| `transform_asset` | 點陣圖或 `.mcpx`、一個幾何旗標（搭配選取範圍會回報 `ARGUMENT_CONFLICT`） | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或可編輯來源 |
 | `quantize_asset` | 點陣圖或 `.mcpx`、必需的色彩數、選用的選取範圍 | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或可編輯來源 |
 | `cleanup_asset` | 點陣圖或 `.mcpx`、選用的修復類別、選用的選取範圍 | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或可編輯來源 |
 | `palette_asset` | 圖片、一種 `mode`（`extract`／`inspect`） | 無 | 唯讀報告：不重複色彩，或分佈、角色與對比 |

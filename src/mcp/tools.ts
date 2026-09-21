@@ -70,7 +70,7 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 	{
 		name: "transform_asset",
 		description:
-			"Apply one spatial transformation (flip, rotate, crop, pad, resize, or translate) to a raster image or .mcpx source, optionally scoped by a selection. Returns PNG bytes and/or the editable source via explicit output paths or embedded artifacts; no force, mkdir, or in-place writes.",
+			"Apply one spatial transformation (flip, rotate, crop, pad, resize, or translate) to a raster image or .mcpx source. Returns PNG bytes and/or the editable source via explicit output paths or embedded artifacts; no force, mkdir, or in-place writes.",
 		inputSchema: TOOL_INPUT_SCHEMAS.transform_asset,
 	},
 	{

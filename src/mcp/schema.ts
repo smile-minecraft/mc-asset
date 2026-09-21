@@ -262,7 +262,9 @@ export const TOOL_INPUT_SCHEMAS = {
 			.string()
 			.min(1)
 			.optional()
-			.describe("Scope operations to rect:x,y,w,h or region:id."),
+			.describe(
+				"Scope operations to rect:x,y,w,h or region:id; cannot be combined with geometry operations (ARGUMENT_CONFLICT).",
+			),
 		profile: profileField,
 		outputPngPath: outputPngField,
 		outputMcpxPath: outputMcpxField,
@@ -406,7 +408,9 @@ export const TOOL_INPUT_SCHEMAS = {
 		layout: z
 			.enum(["vertical", "horizontal", "grid"])
 			.optional()
-			.describe("Sheet layout: vertical, horizontal, or grid."),
+			.describe(
+				"Sheet layout: vertical, horizontal, or grid. Required for pack, unpack, and preview.",
+			),
 		columns: z.number().optional().describe("Grid column count."),
 		frameSize: z.string().min(1).optional().describe("Frame size as N or WxH."),
 		resizeMode: z

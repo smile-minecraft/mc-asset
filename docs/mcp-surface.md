@@ -39,7 +39,7 @@ is no `set_pixel` tool on purpose.
 | `validate_asset` | Asset file (PNG), optional explicit `.mcmeta` path used verbatim | Nothing | Read-only verdict with findings |
 | `import_asset` | Raster image (PNG, JPEG, WebP) plus an optional batch | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
 | `build_asset` | Editable `.mcpx` source plus an optional batch | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or built source |
-| `transform_asset` | Raster image or `.mcpx`, one geometry flag, optional selection | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
+| `transform_asset` | Raster image or `.mcpx`, one geometry flag (a selection raises `ARGUMENT_CONFLICT`) | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
 | `quantize_asset` | Raster image or `.mcpx`, required color count, optional selection | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
 | `cleanup_asset` | Raster image or `.mcpx`, optional fix classes, optional selection | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
 | `palette_asset` | Image, one `mode` (`extract` / `inspect`) | Nothing | Read-only report: unique colors, or distribution, roles, and contrast |
