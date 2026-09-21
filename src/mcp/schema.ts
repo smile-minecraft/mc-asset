@@ -255,9 +255,9 @@ export const TOOL_INPUT_SCHEMAS = {
 			.describe("Translation offset as dx,dy."),
 		resize: z.string().min(1).optional().describe("Target size as WxH."),
 		resizeMode: z
-			.enum(["nearest", "box"])
+			.enum(["nearest", "box", "pixel-aware"])
 			.optional()
-			.describe("Resize sampling: nearest or box."),
+			.describe("Resize sampling: nearest, box, or pixel-aware."),
 		selection: z
 			.string()
 			.min(1)
@@ -414,9 +414,9 @@ export const TOOL_INPUT_SCHEMAS = {
 		columns: z.number().optional().describe("Grid column count."),
 		frameSize: z.string().min(1).optional().describe("Frame size as N or WxH."),
 		resizeMode: z
-			.enum(["nearest", "box"])
+			.enum(["nearest", "box", "pixel-aware"])
 			.optional()
-			.describe("Resize sampling: nearest or box."),
+			.describe("Resize sampling: nearest, box, or pixel-aware."),
 		order: z
 			.string()
 			.min(1)

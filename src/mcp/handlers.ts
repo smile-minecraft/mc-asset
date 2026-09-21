@@ -977,10 +977,10 @@ function parseMcpResizeMode(raw: string | undefined): ResizeMode | undefined {
 	if (raw === undefined || raw === "") {
 		return undefined;
 	}
-	if (raw !== "nearest" && raw !== "box") {
+	if (raw !== "nearest" && raw !== "box" && raw !== "pixel-aware") {
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"resizeMode must be nearest or box.",
+			"resizeMode must be nearest, box, or pixel-aware.",
 			{ value: raw },
 		);
 	}

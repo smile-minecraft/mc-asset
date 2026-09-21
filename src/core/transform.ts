@@ -446,9 +446,185 @@ function resizeBox(
 }
 
 /**
+ * Pixel-aware resize: per-axis nearest on upscale, per-cell color majority
+ * on downscale. Downscale cells reuse the box splitter, so every source
+ * pixel belongs to exactly one cell; the cell winner is the most frequent
+ * full RGBA value, breaking ties toward higher coverage, then higher
+ * alpha, then the earliest pixel in row-major scan order. The winner is
+ * copied verbatim, so no new color is ever synthesized and hidden RGB
+ * under alpha 0 survives unchanged. Masks stay binary via nearest.
+ */
+function resizePixelAware(
+	canvas: PixelCanvas,
+	newWidth: number,
+	newHeight: number,
+): void {
+	const oldWidth = canvas.width;
+	const oldHeight = canvas.height;
+	if (newWidth === oldWidth && newHeight === oldHeight) {
+		return;
+	}
+	if (newWidth >= oldWidth && newHeight >= oldHeight) {
+		remapCanvas(
+			canvas,
+			newWidth,
+			newHeight,
+			(x, y) => nearestSource(oldWidth, oldHeight, newWidth, newHeight, x, y),
+			false,
+		);
+		return;
+	}
+	const xEdges =
+		newWidth < oldWidth ? blockEdges(oldWidth, newWidth) : undefined;
+	const yEdges =
+		newHeight < oldHeight ? blockEdges(oldHeight, newHeight) : undefined;
+	const newLayers = canvas.layers.map((layer) => {
+		const next = new Uint8Array(newWidth * newHeight * 4);
+		for (let y = 0; y < newHeight; y += 1) {
+			let y0: number;
+			let y1: number;
+			if (yEdges === undefined) {
+				const src = nearestSource(
+					oldWidth,
+					oldHeight,
+					newWidth,
+					newHeight,
+					0,
+					y,
+				);
+				y0 = src.sy;
+				y1 = src.sy + 1;
+			} else {
+				y0 = yEdges[y] as number;
+				y1 = yEdges[y + 1] as number;
+			}
+			for (let x = 0; x < newWidth; x += 1) {
+				let x0: number;
+				let x1: number;
+				if (xEdges === undefined) {
+					const src = nearestSource(
+						oldWidth,
+						oldHeight,
+						newWidth,
+						newHeight,
+						x,
+						y,
+					);
+					x0 = src.sx;
+					x1 = src.sx + 1;
+				} else {
+					x0 = xEdges[x] as number;
+					x1 = xEdges[x + 1] as number;
+				}
+				const to = pixelOffset(newWidth, x, y);
+				if (x1 - x0 === 1 && y1 - y0 === 1) {
+					const from = pixelOffset(oldWidth, x0, y0);
+					next[to] = layer.pixels[from] as number;
+					next[to + 1] = layer.pixels[from + 1] as number;
+					next[to + 2] = layer.pixels[from + 2] as number;
+					next[to + 3] = layer.pixels[from + 3] as number;
+					continue;
+				}
+				const counts = new Map<
+					number,
+					{ count: number; alpha: number; first: number; from: number }
+				>();
+				let order = 0;
+				for (let sy = y0; sy < y1; sy += 1) {
+					for (let sx = x0; sx < x1; sx += 1) {
+						const from = pixelOffset(oldWidth, sx, sy);
+						const key =
+							(((layer.pixels[from] as number) * 256 +
+								(layer.pixels[from + 1] as number)) *
+								256 +
+								(layer.pixels[from + 2] as number)) *
+								256 +
+							(layer.pixels[from + 3] as number);
+						const seen = counts.get(key);
+						if (seen === undefined) {
+							counts.set(key, {
+								count: 1,
+								alpha: layer.pixels[from + 3] as number,
+								first: order,
+								from,
+							});
+						} else {
+							seen.count += 1;
+						}
+						order += 1;
+					}
+				}
+				let winner:
+					| { count: number; alpha: number; first: number; from: number }
+					| undefined;
+				for (const entry of counts.values()) {
+					if (winner === undefined) {
+						winner = entry;
+						continue;
+					}
+					if (entry.count !== winner.count) {
+						if (entry.count > winner.count) {
+							winner = entry;
+						}
+						continue;
+					}
+					if (entry.alpha !== winner.alpha) {
+						if (entry.alpha > winner.alpha) {
+							winner = entry;
+						}
+						continue;
+					}
+					if (entry.first < winner.first) {
+						winner = entry;
+					}
+				}
+				const from = (winner as { from: number }).from;
+				next[to] = layer.pixels[from] as number;
+				next[to + 1] = layer.pixels[from + 1] as number;
+				next[to + 2] = layer.pixels[from + 2] as number;
+				next[to + 3] = layer.pixels[from + 3] as number;
+			}
+		}
+		return next;
+	});
+	const newMasks = canvas.regions.map((region) => {
+		// Masks stay binary: nearest-map the destination pixel instead of voting.
+		const next = new Uint8Array(newWidth * newHeight);
+		for (let y = 0; y < newHeight; y += 1) {
+			for (let x = 0; x < newWidth; x += 1) {
+				const src = nearestSource(
+					oldWidth,
+					oldHeight,
+					newWidth,
+					newHeight,
+					x,
+					y,
+				);
+				next[y * newWidth + x] = region.mask[
+					src.sy * oldWidth + src.sx
+				] as number;
+			}
+		}
+		return next;
+	});
+	for (let i = 0; i < canvas.layers.length; i += 1) {
+		(canvas.layers[i] as { pixels: Uint8Array }).pixels = newLayers[
+			i
+		] as Uint8Array;
+	}
+	for (let i = 0; i < canvas.regions.length; i += 1) {
+		(canvas.regions[i] as { mask: Uint8Array }).mask = newMasks[
+			i
+		] as Uint8Array;
+	}
+	canvas.width = newWidth;
+	canvas.height = newHeight;
+}
+
+/**
  * Resize the canvas. The default is nearest-neighbor with no anti-aliasing.
- * pixel-aware is accepted by name but has no defined algorithm, so it is
- * explicitly refused instead of being silently served as nearest.
+ * pixel-aware upscales exactly like nearest and downscales by per-cell
+ * color majority without synthesizing new colors.
  */
 export function resize(
 	canvas: PixelCanvas,
@@ -458,13 +634,6 @@ export function resize(
 ): void {
 	assertValidCanvas(canvas);
 	const resolved = resolveResizeMode(mode);
-	if (resolved === "pixel-aware") {
-		throw new McAssetError(
-			"INVALID_ARGUMENT",
-			"pixel-aware resize is not implemented; use nearest or box.",
-			{ mode: resolved },
-		);
-	}
 	validateDimension(width);
 	validateDimension(height);
 	checkResourceLimits(
@@ -473,6 +642,10 @@ export function resize(
 		canvas.layers.length,
 		canvas.regions.length,
 	);
+	if (resolved === "pixel-aware") {
+		resizePixelAware(canvas, width, height);
+		return;
+	}
 	if (resolved === "box") {
 		resizeBox(canvas, width, height);
 		return;

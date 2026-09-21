@@ -960,7 +960,7 @@ export function buildProgram(): Command {
 		.option("--frame-size <size>", "Target frame size: N or WxH.")
 		.option(
 			"--resize-mode <mode>",
-			"Resize sampling (nearest, box). Default nearest.",
+			"Resize sampling (nearest, box, pixel-aware). Default nearest.",
 		)
 		.option("--output-dir <path>", "Required explicit output directory.")
 		.option("--output <path>", "Rejected on resize (ARGUMENT_CONFLICT).")

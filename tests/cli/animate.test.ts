@@ -703,11 +703,11 @@ describe("animate wiring via spawn", () => {
 		}
 	}, 90_000);
 
-	test("resize pixel-aware is refused with zero writes", async () => {
+	test("resize pixel-aware succeeds and reports the mode", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-animate-"));
 		try {
 			const framesDir = await writeFramesDir(dir, "frames", [RED]);
-			const before = await listAllFiles(dir);
+			const outDir = join(dir, "resized");
 			const result = await runCli([
 				"--json",
 				"animate",
@@ -719,11 +719,18 @@ describe("animate wiring via spawn", () => {
 				"--resize-mode",
 				"pixel-aware",
 				"--output-dir",
-				join(dir, "resized"),
+				outDir,
+				"--mkdir",
 			]);
-			expect(result.code).toBe(2);
-			expect(mustError(parseJsonStdout(result)).code).toBe("INVALID_ARGUMENT");
-			expect(await listAllFiles(dir)).toEqual(before);
+			expect(result.code).toBe(0);
+			const body = parseJsonStdout(result);
+			expect(body.success).toBe(true);
+			expect(mustResult(body).resizeMode).toBe("pixel-aware");
+			const canvas = parseMcpx(
+				await readFile(join(outDir, "frame_0.mcpx"), "utf-8"),
+			);
+			expect(canvas.width).toBe(8);
+			expect(canvas.height).toBe(8);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

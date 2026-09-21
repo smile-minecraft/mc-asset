@@ -542,8 +542,8 @@ export function reorderFrames<T>(items: T[], order: number[]): T[] {
 
 /**
  * The only entry that changes frame dimensions: every frame is resized
- * with the shared transform integer kernels (nearest default, box
- * optional). pixel-aware and unknown modes are INVALID_ARGUMENT and the
+ * with the shared transform integer kernels (nearest default, box or
+ * pixel-aware optional). Unknown modes are INVALID_ARGUMENT and the
  * FrameSet is left untouched.
  */
 export function resizeFrameSet(

@@ -601,20 +601,253 @@ export const TRANSFORM_CASES: TransformCase[] = [
 		},
 	},
 	{
-		name: "resize pixel-aware is accepted by name but explicitly refused",
+		name: "resize pixel-aware downsamples 4x4 to 2x2 by cell majority",
 		run: (check) => {
 			const { canvas, layerIds } = fresh(4, 4);
-			paintSeeded(canvas, layerIds[0] as string, 0xee);
-			const before = snapshot(canvas, layerIds[0] as string);
-			throwsCode(
-				check,
-				() => resize(canvas, 2, 2, "pixel-aware"),
-				"INVALID_ARGUMENT",
+			const layer = layerIds[0] as string;
+			const RED: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const GREEN: RGBA = { r: 0, g: 255, b: 0, a: 255 };
+			const BLUE: RGBA = { r: 0, g: 0, b: 255, a: 255 };
+			const WHITE: RGBA = { r: 255, g: 255, b: 255, a: 255 };
+			// Top-left cell: 3 red + 1 blue -> red wins.
+			setPixel(canvas, layer, 0, 0, RED);
+			setPixel(canvas, layer, 1, 0, RED);
+			setPixel(canvas, layer, 0, 1, RED);
+			setPixel(canvas, layer, 1, 1, BLUE);
+			// Top-right cell: 3 green + 1 white -> green wins.
+			setPixel(canvas, layer, 2, 0, GREEN);
+			setPixel(canvas, layer, 3, 0, GREEN);
+			setPixel(canvas, layer, 2, 1, GREEN);
+			setPixel(canvas, layer, 3, 1, WHITE);
+			// Bottom-left cell: unanimous blue.
+			for (let y = 2; y < 4; y += 1) {
+				for (let x = 0; x < 2; x += 1) {
+					setPixel(canvas, layer, x, y, BLUE);
+				}
+			}
+			// Bottom-right cell: 3 white + 1 red -> white wins.
+			setPixel(canvas, layer, 2, 2, WHITE);
+			setPixel(canvas, layer, 3, 2, WHITE);
+			setPixel(canvas, layer, 2, 3, WHITE);
+			setPixel(canvas, layer, 3, 3, RED);
+			resize(canvas, 2, 2, "pixel-aware");
+			check.equal(canvas.width, 2, "target width");
+			check.equal(canvas.height, 2, "target height");
+			check.deepEqual(getPixel(canvas, layer, 0, 0), RED, "cell (0,0)");
+			check.deepEqual(getPixel(canvas, layer, 1, 0), GREEN, "cell (1,0)");
+			check.deepEqual(getPixel(canvas, layer, 0, 1), BLUE, "cell (0,1)");
+			check.deepEqual(getPixel(canvas, layer, 1, 1), WHITE, "cell (1,1)");
+		},
+	},
+	{
+		name: "resize pixel-aware breaks count ties by earliest scan order",
+		run: (check) => {
+			const { canvas, layerIds } = fresh(2, 2);
+			const layer = layerIds[0] as string;
+			const RED: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			const GREEN: RGBA = { r: 0, g: 255, b: 0, a: 255 };
+			const BLUE: RGBA = { r: 0, g: 0, b: 255, a: 255 };
+			const WHITE: RGBA = { r: 255, g: 255, b: 255, a: 255 };
+			setPixel(canvas, layer, 0, 0, RED);
+			setPixel(canvas, layer, 1, 0, GREEN);
+			setPixel(canvas, layer, 0, 1, BLUE);
+			setPixel(canvas, layer, 1, 1, WHITE);
+			resize(canvas, 1, 1, "pixel-aware");
+			check.deepEqual(
+				getPixel(canvas, layer, 0, 0),
+				RED,
+				"four-way tie keeps the row-major earliest pixel",
 			);
-			check.equal(canvas.width, 4, "width untouched");
+		},
+	},
+	{
+		name: "resize pixel-aware prefers higher alpha on count ties",
+		run: (check) => {
+			const { canvas, layerIds } = fresh(2, 2);
+			const layer = layerIds[0] as string;
+			const DIM: RGBA = { r: 10, g: 0, b: 0, a: 200 };
+			const BRIGHT: RGBA = { r: 20, g: 0, b: 0, a: 255 };
+			setPixel(canvas, layer, 0, 0, DIM);
+			setPixel(canvas, layer, 1, 0, DIM);
+			setPixel(canvas, layer, 0, 1, BRIGHT);
+			setPixel(canvas, layer, 1, 1, BRIGHT);
+			resize(canvas, 1, 1, "pixel-aware");
+			check.deepEqual(
+				getPixel(canvas, layer, 0, 0),
+				BRIGHT,
+				"2-vs-2 tie resolves toward higher alpha",
+			);
+		},
+	},
+	{
+		name: "resize pixel-aware maps 3x3 to 2x2 with fixed remainder cells",
+		run: (check) => {
+			const { canvas, layerIds } = fresh(3, 3);
+			paintIndexPattern(canvas, layerIds[0] as string);
+			resize(canvas, 2, 2, "pixel-aware");
+			check.deepEqual(
+				redChannel(canvas, layerIds[0] as string, 2, 2),
+				[0, 2, 6, 8],
+				"first cell covers two sources per axis, last cell is 1x1",
+			);
+		},
+	},
+	{
+		name: "resize pixel-aware upscale matches nearest bit-for-bit",
+		run: (check) => {
+			const first = fresh(2, 2);
+			const second = fresh(2, 2);
+			paintIndexPattern(first.canvas, first.layerIds[0] as string);
+			paintIndexPattern(second.canvas, second.layerIds[0] as string);
+			resize(first.canvas, 4, 4, "pixel-aware");
+			resize(second.canvas, 4, 4, "nearest");
 			check.ok(
-				buffersEqual(before, snapshot(canvas, layerIds[0] as string)),
-				"refused resize writes nothing",
+				buffersEqual(
+					snapshot(first.canvas, first.layerIds[0] as string),
+					snapshot(second.canvas, second.layerIds[0] as string),
+				),
+				"upscale is nearest-identical",
+			);
+			check.deepEqual(
+				redChannel(first.canvas, first.layerIds[0] as string, 4, 4),
+				[0, 0, 1, 1, 0, 0, 1, 1, 2, 2, 3, 3, 2, 2, 3, 3],
+				"each source pixel becomes a 2x2 block",
+			);
+		},
+	},
+	{
+		name: "resize pixel-aware same size is the identity across layers and masks",
+		run: (check) => {
+			const { canvas, layerIds } = fresh(3, 2, ["a", "b"]);
+			paintSeeded(canvas, layerIds[0] as string, 0x11);
+			paintSeeded(canvas, layerIds[1] as string, 0x22);
+			const region = addRegion(canvas, { id: "sel" });
+			setRegionValue(canvas, region.id, 0, 0, 1);
+			setRegionValue(canvas, region.id, 2, 1, 1);
+			const beforeA = snapshot(canvas, layerIds[0] as string);
+			const beforeB = snapshot(canvas, layerIds[1] as string);
+			resize(canvas, 3, 2, "pixel-aware");
+			check.equal(canvas.width, 3, "width kept");
+			check.equal(canvas.height, 2, "height kept");
+			check.ok(
+				buffersEqual(beforeA, snapshot(canvas, layerIds[0] as string)),
+				"layer a byte-identical",
+			);
+			check.ok(
+				buffersEqual(beforeB, snapshot(canvas, layerIds[1] as string)),
+				"layer b byte-identical",
+			);
+			check.equal(getRegionValue(canvas, region.id, 0, 0), 1, "mask kept");
+			check.equal(getRegionValue(canvas, region.id, 2, 1), 1, "mask kept");
+		},
+	},
+	{
+		name: "resize pixel-aware mixes axes on 4x2 to 2x4",
+		run: (check) => {
+			const { canvas, layerIds } = fresh(4, 2);
+			paintIndexPattern(canvas, layerIds[0] as string);
+			resize(canvas, 2, 4, "pixel-aware");
+			check.equal(canvas.width, 2, "target width");
+			check.equal(canvas.height, 4, "target height");
+			check.deepEqual(
+				redChannel(canvas, layerIds[0] as string, 2, 4),
+				[0, 2, 0, 2, 4, 6, 4, 6],
+				"x shrinks by majority, y grows by nearest",
+			);
+		},
+	},
+	{
+		name: "resize pixel-aware never introduces new colors",
+		run: (check) => {
+			const { canvas, layerIds } = fresh(6, 5);
+			paintSeeded(canvas, layerIds[0] as string, 0xdd);
+			const seen = new Set<string>();
+			for (let y = 0; y < 5; y += 1) {
+				for (let x = 0; x < 6; x += 1) {
+					const p = getPixel(canvas, layerIds[0] as string, x, y);
+					seen.add(`${p.r},${p.g},${p.b},${p.a}`);
+				}
+			}
+			resize(canvas, 3, 2, "pixel-aware");
+			for (let y = 0; y < 2; y += 1) {
+				for (let x = 0; x < 3; x += 1) {
+					const p = getPixel(canvas, layerIds[0] as string, x, y);
+					check.ok(
+						seen.has(`${p.r},${p.g},${p.b},${p.a}`),
+						`resized pixel (${x},${y}) reuses a source color`,
+					);
+				}
+			}
+		},
+	},
+	{
+		name: "resize pixel-aware keeps hidden RGB under alpha 0 verbatim",
+		run: (check) => {
+			const { canvas, layerIds } = fresh(2, 2);
+			const layer = layerIds[0] as string;
+			const HIDDEN: RGBA = { r: 9, g: 8, b: 7, a: 0 };
+			const OTHER: RGBA = { r: 1, g: 2, b: 3, a: 0 };
+			setPixel(canvas, layer, 0, 0, HIDDEN);
+			setPixel(canvas, layer, 1, 0, HIDDEN);
+			setPixel(canvas, layer, 0, 1, HIDDEN);
+			setPixel(canvas, layer, 1, 1, OTHER);
+			resize(canvas, 1, 1, "pixel-aware");
+			check.deepEqual(
+				getPixel(canvas, layer, 0, 0),
+				HIDDEN,
+				"majority hidden color copied with its RGB intact",
+			);
+		},
+	},
+	{
+		name: "resize pixel-aware minority detail is covered by the cell majority",
+		run: (check) => {
+			const { canvas, layerIds } = fresh(4, 4);
+			const layer = layerIds[0] as string;
+			const WHITE: RGBA = { r: 255, g: 255, b: 255, a: 255 };
+			const RED: RGBA = { r: 255, g: 0, b: 0, a: 255 };
+			for (let y = 0; y < 4; y += 1) {
+				for (let x = 0; x < 4; x += 1) {
+					setPixel(canvas, layer, x, y, WHITE);
+				}
+			}
+			setPixel(canvas, layer, 1, 1, RED);
+			resize(canvas, 2, 2, "pixel-aware");
+			check.deepEqual(
+				redChannel(canvas, layerIds[0] as string, 2, 2),
+				[255, 255, 255, 255],
+				"single-pixel detail inside a 2x2 cell does not survive",
+			);
+		},
+	},
+	{
+		name: "resize pixel-aware remaps region masks with nearest",
+		run: (check) => {
+			const canvas = createCanvas(4, 4);
+			addLayer(canvas, { id: "base" });
+			const region = addRegion(canvas, { id: "sel" });
+			setRegionValue(canvas, region.id, 1, 1, 1);
+			setRegionValue(canvas, region.id, 2, 2, 1);
+			resize(canvas, 2, 2, "pixel-aware");
+			check.equal(
+				getRegionValue(canvas, region.id, 0, 0),
+				0,
+				"off-grid kept 0",
+			);
+			check.equal(
+				getRegionValue(canvas, region.id, 1, 0),
+				0,
+				"off-grid kept 0",
+			);
+			check.equal(
+				getRegionValue(canvas, region.id, 0, 1),
+				0,
+				"off-grid kept 0",
+			);
+			check.equal(
+				getRegionValue(canvas, region.id, 1, 1),
+				1,
+				"nearest-sampled mask cell",
 			);
 		},
 	},

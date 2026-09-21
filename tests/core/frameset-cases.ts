@@ -450,15 +450,48 @@ export const FRAMESET_CASES: ModelCase[] = [
 		},
 	},
 	{
-		name: "resize pixel-aware is refused",
+		name: "resize pixel-aware succeeds and keeps frame dimensions in sync",
 		run(check) {
-			const frameSet = createFrameSet([solidCanvas(2, 2, RED)]);
-			check.throwsCode(
-				() => resizeFrameSet(frameSet, 4, 4, "pixel-aware"),
-				"INVALID_ARGUMENT",
-				"pixel-aware refused",
+			const frameSet = createFrameSet([solidCanvas(4, 4, RED)]);
+			resizeFrameSet(frameSet, 2, 2, "pixel-aware");
+			check.equal(frameSet.frameWidth, 2, "width updated");
+			check.equal(frameSet.frameHeight, 2, "height updated");
+			const first = frameSet.frames[0];
+			if (first === undefined) {
+				check.fail("resized frame missing");
+				return;
+			}
+			check.deepEqual(
+				pixelOf(layerBytes(first), 2, 0, 0),
+				[255, 0, 0, 255],
+				"solid color survives the majority vote",
 			);
-			check.equal(frameSet.frameWidth, 2, "untouched width");
+		},
+	},
+	{
+		name: "resize pixel-aware is stable across identical frames",
+		run(check) {
+			const frameSet = createFrameSet([
+				solidCanvas(4, 4, RED),
+				solidCanvas(4, 4, RED),
+			]);
+			resizeFrameSet(frameSet, 2, 2, "pixel-aware");
+			const first = frameSet.frames[0];
+			const second = frameSet.frames[1];
+			if (first === undefined || second === undefined) {
+				check.fail("resized frames missing");
+				return;
+			}
+			const a = layerBytes(first);
+			const b = layerBytes(second);
+			check.equal(a.length, b.length, "same length");
+			let same = a.length === b.length;
+			for (let i = 0; i < a.length && same; i += 1) {
+				if (a[i] !== b[i]) {
+					same = false;
+				}
+			}
+			check.ok(same, "identical inputs give identical outputs");
 		},
 	},
 	{

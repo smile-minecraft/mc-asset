@@ -504,7 +504,7 @@ async function runResize(
 		const outputDir = requireOutputDir(options, "resize");
 		const loaded = await loadFramesDir(options.framesDir);
 		const frameSet = createFrameSet(loaded.frames);
-		// Engine rejects pixel-aware here, before any byte is written.
+		// The engine applies pixel-aware per frame before any byte is written.
 		resizeFrameSet(frameSet, size.width, size.height, mode);
 		const payloads: DirPayload[] = frameSet.frames.map((frame, index) => {
 			const name = frameFileName(index, frameSet.frames.length);
