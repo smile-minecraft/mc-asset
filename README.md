@@ -28,7 +28,7 @@ A pixel-native 2D asset creation engine and deterministic CLI/MCP toolchain for 
 brew tap smile-minecraft/tap
 brew install smile-minecraft/tap/mc-asset
 mc-asset --version
-# 0.3.0
+# 0.3.1
 ```
 
 ### Via Bun or Node.js (From Source)
@@ -39,7 +39,7 @@ cd mc-asset
 bun install --frozen-lockfile
 bun run build
 ./bin/mc-asset.js --version
-# 0.3.0
+# 0.3.1
 ```
 
 *Prerequisites*: tested with [Node.js](https://nodejs.org) 22 and [Bun](https://bun.sh) 1.3. `bun run build` needs Bun and `./bin/mc-asset.js` needs Node.js; with Bun alone, run `bun ./bin/mc-asset.js`.
