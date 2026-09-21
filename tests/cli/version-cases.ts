@@ -28,7 +28,7 @@ export interface VersionCase {
 	run(check: CaseCheck): void;
 }
 
-const SUPPORTED_ECHO = "1.21.11, 26.1, 26.1.1, 26.1.2, 26.2, 26.3";
+const VERSION_BAND_MARKERS = ["1.19.3", "through", "26.3"];
 
 export const VERSION_CASES: VersionCase[] = [
 	{
@@ -137,7 +137,61 @@ export const VERSION_CASES: VersionCase[] = [
 		},
 	},
 	{
-		name: "unknown minecraft version is INVALID_ARGUMENT with the full list",
+		name: "every supported release version maps to its resource-pack format",
+		run: (check) => {
+			const expected: ReadonlyArray<readonly [string, string]> = [
+				["1.19.3", "12.0"],
+				["1.19.4", "13.0"],
+				["1.20", "15.0"],
+				["1.20.1", "15.0"],
+				["1.20.2", "18.0"],
+				["1.20.3", "22.0"],
+				["1.20.4", "22.0"],
+				["1.20.5", "32.0"],
+				["1.20.6", "32.0"],
+				["1.21", "34.0"],
+				["1.21.1", "34.0"],
+				["1.21.2", "42.0"],
+				["1.21.3", "42.0"],
+				["1.21.4", "46.0"],
+				["1.21.5", "55.0"],
+				["1.21.6", "63.0"],
+				["1.21.7", "64.0"],
+				["1.21.8", "64.0"],
+				["1.21.9", "69.0"],
+				["1.21.10", "69.0"],
+				["1.21.11", "75.0"],
+				["26.1", "84.0"],
+				["26.1.1", "84.0"],
+				["26.1.2", "84.0"],
+				["26.2", "88.0"],
+				["26.3", "97.1"],
+			];
+			check.equal(expected.length, 26, "twenty-six supported releases");
+			for (const [version, packFormat] of expected) {
+				const resolved = resolveVersionTarget({
+					minecraftVersion: version,
+				});
+				check.equal(
+					resolved.packFormat,
+					packFormat,
+					`packFormat ${packFormat} for ${version}`,
+				);
+				check.equal(
+					resolved.minecraftVersion,
+					version,
+					`echo minecraft version for ${version}`,
+				);
+				check.equal(
+					resolved.resourcePackVersion,
+					packFormat,
+					`echo dotted resource pack version for ${version}`,
+				);
+			}
+		},
+	},
+	{
+		name: "unknown minecraft version is INVALID_ARGUMENT with the release band",
 		run: (check) => {
 			throwsCode(
 				check,
@@ -146,18 +200,19 @@ export const VERSION_CASES: VersionCase[] = [
 			);
 			throwsCode(
 				check,
-				() => resolveVersionTarget({ minecraftVersion: "1.20" }),
+				() => resolveVersionTarget({ minecraftVersion: "26.4" }),
 				"INVALID_ARGUMENT",
 			);
 			try {
-				resolveVersionTarget({ minecraftVersion: "1.20" });
-				check.fail("expected INVALID_ARGUMENT for 1.20");
+				resolveVersionTarget({ minecraftVersion: "26.4" });
+				check.fail("expected INVALID_ARGUMENT for 26.4");
 			} catch (error) {
-				check.ok(
-					error instanceof McAssetError &&
-						error.message.includes(SUPPORTED_ECHO),
-					"error message lists all six supported versions",
-				);
+				for (const marker of VERSION_BAND_MARKERS) {
+					check.ok(
+						error instanceof McAssetError && error.message.includes(marker),
+						`error message names the release band (${marker})`,
+					);
+				}
 			}
 		},
 	},

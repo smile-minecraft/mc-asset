@@ -211,7 +211,7 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--minecraft-version <version>",
-			"Target Minecraft version (1.21.11 through 26.3).",
+			"Target Minecraft version (release 1.19.3 through 26.3).",
 			singleUseOption("--minecraft-version"),
 		)
 		.option(
@@ -247,7 +247,7 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--minecraft-version <version>",
-			"Target Minecraft version (1.21.11 through 26.3).",
+			"Target Minecraft version (release 1.19.3 through 26.3).",
 			singleUseOption("--minecraft-version"),
 		)
 		.option(
@@ -283,7 +283,7 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--minecraft-version <version>",
-			"Target Minecraft version (1.21.11 through 26.3).",
+			"Target Minecraft version (release 1.19.3 through 26.3).",
 			singleUseOption("--minecraft-version"),
 		)
 		.option(

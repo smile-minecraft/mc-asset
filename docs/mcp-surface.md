@@ -57,8 +57,9 @@ is no `set_pixel` tool on purpose.
 - `profile` is one of `generic`, `minecraft:item`, `minecraft:block`,
   `minecraft:gui`, `minecraft:particle`; omitted means `generic`.
 - `minecraftVersion` / `resourcePackVersion` (analyze, validate,
-  validate-pack) select the compatibility behavior; accepts `1.21.11`
-  through `26.3` and resource-pack `N` or `N.M` (e.g. `84`, `97.1`),
+  validate-pack) select the compatibility behavior; accepts release
+  versions `1.19.3` through `26.3` (for example `1.19.3`, `1.21.4`,
+  `26.3`) and resource-pack `N` or `N.M` (e.g. `84`, `97.1`),
   normalized to `major.minor`. Omitted means engine defaults.
 - Subcommand tools merge CLI modes into a `mode` field: `palette_asset`
   (`extract` / `inspect`), `material_asset` (`list` / `show`),

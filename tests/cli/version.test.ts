@@ -218,14 +218,17 @@ describe("version flags via spawn (Red: flags do not exist yet)", () => {
 
 	test("unknown --minecraft-version is INVALID_ARGUMENT with exit 2", async () => {
 		await withPng(async (input) => {
-			const { stdout, stderr, code } = await runCli([
-				"analyze",
-				input,
-				"--minecraft-version",
-				"99.99",
-			]);
-			expect(code).toBe(2);
-			expect(stdout + stderr).toContain("INVALID_ARGUMENT");
+			for (const bad of ["99.99", "26.4"]) {
+				const { stdout, stderr, code } = await runCli([
+					"analyze",
+					input,
+					"--minecraft-version",
+					bad,
+				]);
+				expect(code).toBe(2);
+				expect(stdout + stderr).toContain("INVALID_ARGUMENT");
+				expect(stdout + stderr).toContain("1.19.3 through 26.3");
+			}
 		});
 	}, 30_000);
 

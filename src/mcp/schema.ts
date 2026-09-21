@@ -50,7 +50,7 @@ const minecraftVersionField = z
 	.min(1)
 	.optional()
 	.describe(
-		"Target Minecraft version: 1.21.11, 26.1, 26.1.1, 26.1.2, 26.2, or 26.3. Omitted means engine defaults.",
+		'Release Minecraft version 1.19.3 through 26.3 (for example "1.19.3", "1.21.4", "26.3"). Omitted means engine defaults.',
 	);
 
 const resourcePackVersionField = z
