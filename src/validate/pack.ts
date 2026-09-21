@@ -21,10 +21,22 @@ import {
 	atlasCoverageDetail,
 	atlasNameOf,
 	parseAtlasLayers,
-	requiredAtlasForModel,
+	requiredAtlasesForUsage,
 	spriteIdForTextureValue,
 } from "./atlas.ts";
 import type { ValidateFindingLevel } from "./checks.ts";
+import {
+	collectBlockstateModelRefs,
+	collectItemModelRefs,
+	computeModelReachability,
+	diagnoseTextureVariableExternal,
+	findParentCycles,
+	type ModelDocView,
+	type ModelUsage,
+	modelRelForValue,
+	parentRelForValue,
+	resolveTextureVariable,
+} from "./reference-graph.ts";
 import {
 	buildLayerIndex,
 	createResourceContext,
@@ -112,14 +124,15 @@ const FINDING_ORDER: Readonly<Record<string, number>> = {
 	PACK_INVALID_IMAGE_DIMENSION: 7,
 	PACK_INVALID_ANIMATION_SHEET: 8,
 	PACK_GUI_SCALING_BORDER: 9,
-	PACK_BROKEN_REFERENCE: 10,
-	PACK_MISSING_TEXTURE: 11,
-	PACK_MISSING_ASSET: 12,
-	PACK_ORPHAN_TEXTURE: 13,
-	PACK_VERSION_UNDETERMINED: 14,
-	PACK_TEXTURE_NOT_IN_ATLAS: 15,
-	PACK_UNRESOLVED_EXTERNAL: 16,
-	PACK_COVERAGE_SKIPPED: 17,
+	PACK_REFERENCE_CYCLE: 10,
+	PACK_BROKEN_REFERENCE: 11,
+	PACK_MISSING_TEXTURE: 12,
+	PACK_MISSING_ASSET: 13,
+	PACK_ORPHAN_TEXTURE: 14,
+	PACK_VERSION_UNDETERMINED: 15,
+	PACK_TEXTURE_NOT_IN_ATLAS: 16,
+	PACK_UNRESOLVED_EXTERNAL: 17,
+	PACK_COVERAGE_SKIPPED: 18,
 };
 
 const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -348,6 +361,12 @@ interface ScanState {
 	referencedTextures: Set<string>;
 	modelRels: string[];
 	itemRels: string[];
+	blockstateRels: string[];
+	cycleFiles: Set<string>;
+	itemSkips: PackCoverageSkip[];
+	itemSkipKeys: Set<string>;
+	blockEntries: string[];
+	itemEntries: string[];
 	atlasRefs: Array<{
 		modelRel: string;
 		field: string;
@@ -357,7 +376,12 @@ interface ScanState {
 	unresolved: Map<
 		string,
 		{
-			kind: "parent" | "texture" | "item-model";
+			kind:
+				| "parent"
+				| "texture"
+				| "item-model"
+				| "blockstate"
+				| "texture-variable-external";
 			field: string;
 			value: string;
 			firstRel: string;
@@ -612,18 +636,78 @@ function checkGuiScalingBorder(rel: string, state: ScanState): void {
 	}
 }
 
+/** Known model docs for variable and cycle analysis (current pack only). */
+function modelDocViews(state: ScanState): Map<string, ModelDocView> {
+	const views = new Map<string, ModelDocView>();
+	for (const rel of state.modelRels) {
+		const doc = state.docs.get(rel);
+		if (doc === undefined || !isRecord(doc)) {
+			continue;
+		}
+		const textures = isRecord(doc.textures)
+			? (doc.textures as Record<string, unknown>)
+			: {};
+		views.set(rel, { textures, parent: doc.parent });
+	}
+	return views;
+}
+
+/** Parent target rels over known model docs for cycle and reachability. */
+function parentOfModels(state: ScanState): Map<string, string | undefined> {
+	const out = new Map<string, string | undefined>();
+	for (const rel of state.modelRels) {
+		const doc = state.docs.get(rel);
+		if (doc === undefined || !isRecord(doc)) {
+			continue;
+		}
+		out.set(rel, parentRelForValue(doc.parent));
+	}
+	return out;
+}
+
+/** Emit one PACK_REFERENCE_CYCLE finding per file in a parent cycle. */
+function emitParentCycles(
+	parentOf: Map<string, string | undefined>,
+	state: ScanState,
+): void {
+	const known = new Map<string, string | undefined>();
+	for (const [rel, target] of parentOf) {
+		if (target !== undefined && parentOf.has(target)) {
+			known.set(rel, target);
+		} else {
+			known.set(rel, undefined);
+		}
+	}
+	for (const cycle of findParentCycles(known)) {
+		const chain = cycle.join(" -> ");
+		const members = [...new Set(cycle)];
+		for (const rel of members) {
+			push(
+				state.findings,
+				"PACK_REFERENCE_CYCLE",
+				"error",
+				`parent chain of "${rel}" forms a cycle: ${chain}.`,
+				rel,
+			);
+			state.errorFiles.add(rel);
+			state.cycleFiles.add(rel);
+		}
+	}
+}
+
 /** Model parent and textures references; missing targets stay distinct. */
 function checkModelReferences(
 	rel: string,
 	context: ResourceContext,
 	state: ScanState,
+	views: Map<string, ModelDocView>,
 ): void {
 	const doc = state.docs.get(rel);
 	if (doc === undefined || !isRecord(doc)) {
 		return;
 	}
 	const parent = doc.parent;
-	if (parent !== undefined) {
+	if (parent !== undefined && !state.cycleFiles.has(rel)) {
 		checkParentReference(rel, parent, context, state);
 	}
 	const textures = doc.textures;
@@ -649,6 +733,7 @@ function checkModelReferences(
 			textures[key],
 			context,
 			state,
+			views,
 		);
 	}
 }
@@ -659,7 +744,12 @@ function checkModelReferences(
  * single coverage skip. The first referrer lends the finding its path.
  */
 function recordUnresolved(
-	kind: "parent" | "texture" | "item-model",
+	kind:
+		| "parent"
+		| "texture"
+		| "item-model"
+		| "blockstate"
+		| "texture-variable-external",
 	field: string,
 	value: string,
 	target: string,
@@ -744,6 +834,7 @@ function checkTextureReference(
 	value: unknown,
 	context: ResourceContext,
 	state: ScanState,
+	views: Map<string, ModelDocView>,
 ): void {
 	if (typeof value !== "string" || value.trim() === "") {
 		push(
@@ -756,6 +847,72 @@ function checkTextureReference(
 		state.errorFiles.add(rel);
 		return;
 	}
+	// Texture variables resolve through the model's own definitions first,
+	// then up the parent chain. A `#` value is never a raw resource
+	// location, so it must not reach the location engine.
+	if (value.startsWith("#")) {
+		const variable = value.slice(1);
+		if (variable === "") {
+			push(
+				state.findings,
+				"PACK_BROKEN_REFERENCE",
+				"error",
+				`"${rel}" has a "${field}" reference ("${value}") that names no texture variable.`,
+				rel,
+			);
+			state.errorFiles.add(rel);
+			return;
+		}
+		const outcome = resolveTextureVariable(views, rel, variable);
+		if (outcome.status === "cycle") {
+			push(
+				state.findings,
+				"PACK_REFERENCE_CYCLE",
+				"error",
+				`"${field}" "${value}" in "${rel}" forms a texture variable cycle: ${outcome.chain.join(" -> ")}.`,
+				rel,
+			);
+			state.errorFiles.add(rel);
+			return;
+		}
+		if (outcome.status === "resolved") {
+			checkTextureValue(rel, field, outcome.value, context, state);
+			return;
+		}
+		if (outcome.status === "external") {
+			// The bare exit rel would collide with the parent/model record
+			// for the same target, so the variable value joins the dedup
+			// key; the reported skip target stays the bare exit rel.
+			recordUnresolved(
+				"texture-variable-external",
+				field,
+				value,
+				`${outcome.exitRel}\u0000${value}`,
+				rel,
+				state,
+			);
+			return;
+		}
+		push(
+			state.findings,
+			"PACK_BROKEN_REFERENCE",
+			"error",
+			`"${field}" "${value}" in "${rel}" refers to undefined texture variable "#${variable}".`,
+			rel,
+		);
+		state.errorFiles.add(rel);
+		return;
+	}
+	checkTextureValue(rel, field, value, context, state);
+}
+
+function checkTextureValue(
+	rel: string,
+	field: string,
+	value: string,
+	context: ResourceContext,
+	state: ScanState,
+): void {
 	if (value.toLowerCase().endsWith(".json")) {
 		push(
 			state.findings,
@@ -813,87 +970,158 @@ function checkTextureReference(
 	state.errorFiles.add(rel);
 }
 
+/** Shared model reference check for blockstate and item entries. */
+function checkModelRefValue(
+	rel: string,
+	fieldPath: string,
+	value: unknown,
+	context: ResourceContext,
+	state: ScanState,
+	kind: "blockstate" | "item-model",
+): boolean {
+	if (typeof value !== "string" || value.trim() === "") {
+		push(
+			state.findings,
+			"PACK_BROKEN_REFERENCE",
+			"error",
+			`"${rel}" has a "${fieldPath}" reference that is not a usable resource location.`,
+			rel,
+		);
+		state.errorFiles.add(rel);
+		return false;
+	}
+	if (value.toLowerCase().endsWith(".png")) {
+		push(
+			state.findings,
+			"PACK_BROKEN_REFERENCE",
+			"error",
+			`"${rel}" points "${fieldPath}" at an image ("${value}"); models must be JSON.`,
+			rel,
+		);
+		state.errorFiles.add(rel);
+		return false;
+	}
+	const problems = referenceLocationProblems(value);
+	if (problems.length > 0) {
+		for (const finding of problems) {
+			push(state.findings, finding.code, finding.level, finding.message, rel);
+			state.errorFiles.add(rel);
+		}
+		return false;
+	}
+	const target = resolveParentRel(value);
+	const resolved = resolveModelReference(context, value);
+	if (resolved.status === "resolved") {
+		return true;
+	}
+	const folded = findCaseVariant(context, "model", value);
+	if (folded !== undefined) {
+		push(
+			state.findings,
+			"PACK_CASE_MISMATCH",
+			"error",
+			`model "${value}" at "${fieldPath}" in "${rel}" differs from "${folded.target}" by case only.`,
+			rel,
+		);
+		state.errorFiles.add(rel);
+		return false;
+	}
+	if (resolved.status === "unresolved") {
+		recordUnresolved(kind, fieldPath, value, target, rel, state);
+		return true;
+	}
+	push(
+		state.findings,
+		"PACK_BROKEN_REFERENCE",
+		"error",
+		`model "${value}" at "${fieldPath}" in "${rel}" has no model at "${target}".`,
+		rel,
+	);
+	state.errorFiles.add(rel);
+	return false;
+}
+
 /**
- * Item model definition references (`assets/<namespace>/items/*.json`).
- * Each definition carries one Items model tree under its `model` field;
- * only `minecraft:model` leaves name a model file, reached through
- * `composite` / `condition` / `select` / `range_dispatch` branches. Tag
- * (`#`) references, `special` renderers, and any unknown shape or type
- * skip silently: an unresolvable shape is never an accusation.
+ * Blockstate references (`assets/<namespace>/blockstates/*.json`).
+ * Every `variants` and `multipart` model entry names a model file through
+ * the shared resolver; malformed shapes are PACK_BROKEN_REFERENCE. Format
+ * checks run for every file, reachable or not; reachability only gates
+ * atlas demand and orphan conclusions downstream.
  */
-function collectItemModelRefs(node: unknown, out: string[]): void {
-	if (typeof node === "string") {
-		if (node.trim() !== "" && !node.startsWith("#")) {
-			out.push(node);
+function checkBlockstateReferences(
+	state: ScanState,
+	context: ResourceContext,
+): void {
+	for (const rel of state.blockstateRels) {
+		const doc = state.docs.get(rel);
+		if (doc === undefined || !isRecord(doc)) {
+			continue;
 		}
-		return;
-	}
-	if (!isRecord(node)) {
-		return;
-	}
-	const rawType = node.type;
-	if (typeof rawType !== "string") {
-		return;
-	}
-	const cut = rawType.lastIndexOf(":");
-	const type = cut < 0 ? rawType : rawType.slice(cut + 1);
-	switch (type) {
-		case "model": {
-			collectItemModelRefs(node.model, out);
-			return;
+		const { refs, broken } = collectBlockstateModelRefs(doc);
+		for (const entry of broken) {
+			const where = entry.fieldPath === "" ? "(root)" : `"${entry.fieldPath}"`;
+			push(
+				state.findings,
+				"PACK_BROKEN_REFERENCE",
+				"error",
+				`"${rel}" has a broken blockstates entry at ${where}: ${entry.reason}.`,
+				rel,
+			);
+			state.errorFiles.add(rel);
 		}
-		case "composite": {
-			const models = node.models;
-			if (Array.isArray(models)) {
-				for (const child of models) {
-					collectItemModelRefs(child, out);
+		for (const ref of refs) {
+			const ok = checkModelRefValue(
+				rel,
+				ref.fieldPath,
+				ref.value,
+				context,
+				state,
+				"blockstate",
+			);
+			if (typeof ref.value === "string" && ref.value.trim() !== "") {
+				const target = modelRelForValue(ref.value);
+				if (target !== undefined) {
+					state.blockEntries.push(target);
 				}
 			}
-			return;
-		}
-		case "condition": {
-			collectItemModelRefs(node.on_true, out);
-			collectItemModelRefs(node.on_false, out);
-			return;
-		}
-		case "select": {
-			const cases = node.cases;
-			if (Array.isArray(cases)) {
-				for (const entry of cases) {
-					if (isRecord(entry)) {
-						collectItemModelRefs(entry.model, out);
-					}
-				}
-			}
-			collectItemModelRefs(node.fallback, out);
-			return;
-		}
-		case "range_dispatch": {
-			const entries = node.entries;
-			if (Array.isArray(entries)) {
-				for (const entry of entries) {
-					if (isRecord(entry)) {
-						collectItemModelRefs(entry.model, out);
-					}
-				}
-			}
-			collectItemModelRefs(node.fallback, out);
-			return;
-		}
-		default: {
-			// `empty`, `bundle/selected_item`, `special`, and anything
-			// unknown: no statically resolvable model reference.
-			return;
+			void ok;
 		}
 	}
+}
+
+function pushItemSkip(
+	rel: string,
+	kind: "item-model-node" | "item-model-special",
+	reason: "unknown-node-type" | "renderer-fields-not-interpreted",
+	fieldPath: string,
+	rawType: string,
+	state: ScanState,
+): void {
+	const detail =
+		kind === "item-model-node"
+			? `type "${rawType}" at "${fieldPath}" is not interpreted`
+			: `renderer fields at "${fieldPath}" are not interpreted`;
+	const key = `${kind}\u0000${reason}\u0000${rel}\u0000${detail}`;
+	if (state.itemSkipKeys.has(key)) {
+		return;
+	}
+	state.itemSkipKeys.add(key);
+	state.itemSkips.push({ kind, reason, target: rel, detail });
+	const message =
+		kind === "item-model-node"
+			? `item model node type "${rawType}" at "${fieldPath}" in "${rel}" is not interpreted; coverage recorded as skipped.`
+			: `item model special at "${fieldPath}" in "${rel}" leaves renderer fields uninterpreted; coverage recorded as skipped.`;
+	push(state.findings, "PACK_COVERAGE_SKIPPED", "warning", message, rel);
 }
 
 /**
  * Item model definition check, gated on the item-model-definitions fact
  * (since 46.0): below the gate, or with no determinable version, every
- * definition skips. Missing targets are PACK_BROKEN_REFERENCE and
- * case-only differences are PACK_CASE_MISMATCH; one bad file never drags
- * a second code along.
+ * definition skips. Only `minecraft` (or missing) namespaces run vanilla
+ * node semantics; foreign namespaces and unknown types become coverage
+ * skips, never accusations. `special.base` names a model file through the
+ * shared resolver; nested renderer fields stay uninterpreted with one
+ * coverage skip each.
  */
 function checkItemModelDefinitions(
 	state: ScanState,
@@ -919,58 +1147,55 @@ function checkItemModelDefinitions(
 		if (doc === undefined || !isRecord(doc)) {
 			continue;
 		}
-		const refs: string[] = [];
-		collectItemModelRefs(doc.model, refs);
-		for (const value of refs) {
+		const { refs, skips } = collectItemModelRefs(doc.model);
+		for (const skip of skips) {
+			pushItemSkip(
+				rel,
+				skip.kind,
+				skip.reason,
+				skip.fieldPath,
+				skip.rawType,
+				state,
+			);
+		}
+		for (const ref of refs) {
 			if (state.errorFiles.has(rel)) {
 				break;
 			}
-			const problems = referenceLocationProblems(value);
-			if (problems.length > 0) {
-				for (const finding of problems) {
-					push(
-						state.findings,
-						finding.code,
-						finding.level,
-						finding.message,
-						rel,
-					);
-				}
-				state.errorFiles.add(rel);
-				break;
-			}
-			const target = resolveParentRel(value);
-			const resolved = resolveModelReference(context, value);
-			if (resolved.status === "resolved") {
+			if (typeof ref.value === "string" && ref.value.startsWith("#")) {
 				continue;
 			}
-			const folded = findCaseVariant(context, "model", value);
-			if (folded !== undefined) {
-				push(
-					state.findings,
-					"PACK_CASE_MISMATCH",
-					"error",
-					`model "${value}" in "${rel}" differs from "${folded.target}" by case only.`,
-					rel,
-				);
-				state.errorFiles.add(rel);
-				break;
-			}
-			if (resolved.status === "unresolved") {
-				recordUnresolved("item-model", "", value, target, rel, state);
-				continue;
-			}
-			push(
-				state.findings,
-				"PACK_BROKEN_REFERENCE",
-				"error",
-				`model "${value}" in "${rel}" has no model at "${target}".`,
+			const ok = checkModelRefValue(
 				rel,
+				ref.fieldPath,
+				ref.value,
+				context,
+				state,
+				"item-model",
 			);
-			state.errorFiles.add(rel);
-			break;
+			if (typeof ref.value === "string" && ref.value.trim() !== "") {
+				const target = modelRelForValue(ref.value);
+				if (target !== undefined) {
+					state.itemEntries.push(target);
+				}
+			}
+			if (!ok && state.errorFiles.has(rel)) {
+				break;
+			}
 		}
 	}
+}
+
+/** Entry reachability over parent edges for atlas demand. */
+function computeReachability(
+	parentOf: Map<string, string | undefined>,
+	state: ScanState,
+): Map<string, ModelUsage> {
+	return computeModelReachability(
+		parentOf,
+		state.blockEntries,
+		state.itemEntries,
+	);
 }
 
 /**
@@ -995,6 +1220,7 @@ async function checkAtlasCoverage(
 	context: ResourceContext,
 	options: PackScanOptions | undefined,
 	mcmetaDoc: unknown,
+	reachability: Map<string, ModelUsage>,
 ): Promise<PackCoverageSkip[]> {
 	const packFormat =
 		options?.packFormat ?? resourcePackFormatFromMcmeta(mcmetaDoc);
@@ -1079,63 +1305,70 @@ async function checkAtlasCoverage(
 		if (state.errorFiles.has(ref.target)) {
 			continue;
 		}
-		const required = requiredAtlasForModel(ref.modelRel, {
-			itemAtlas: itemsAtlas.atlas,
-			blockAtlas: placement.blockAtlas,
-		});
-		if (required === undefined) {
+		// Atlas demand follows entry reachability, never the models/ path:
+		// unreachable models carry no atlas verdict at all.
+		const requiredList = requiredAtlasesForUsage(
+			reachability.get(ref.modelRel),
+			{
+				itemAtlas: itemsAtlas.atlas,
+				blockAtlas: placement.blockAtlas,
+			},
+		);
+		if (requiredList.length === 0) {
 			continue;
 		}
 		const sprite = spriteIdForTextureValue(ref.value);
 		if (sprite === undefined) {
 			continue;
 		}
-		if (!context.hasVanilla) {
-			// Without the vanilla tree the merged atlas is unknowable:
-			// vanilla sources could add or remove any sprite, so every
-			// query skips instead of accusing.
-			const rules = parsed.atlases.get(required);
-			const definition =
-				rules === undefined || rules.definitionFiles.length === 0
-					? undefined
-					: rules.definitionFiles[0];
-			pushSkip(
-				"atlas-source",
-				"vanilla-not-provided",
-				definition ?? required,
-				ref.modelRel,
-				`atlas "${required}" for sprite "${sprite}" in "${ref.modelRel}" cannot be completed without the vanilla resource tree; coverage recorded as skipped.`,
-				`sprite "${sprite}" needs the vanilla atlas sources`,
-			);
-			continue;
+		for (const required of requiredList) {
+			if (!context.hasVanilla) {
+				// Without the vanilla tree the merged atlas is unknowable:
+				// vanilla sources could add or remove any sprite, so every
+				// query skips instead of accusing.
+				const rules = parsed.atlases.get(required);
+				const definition =
+					rules === undefined || rules.definitionFiles.length === 0
+						? undefined
+						: rules.definitionFiles[0];
+				pushSkip(
+					"atlas-source",
+					"vanilla-not-provided",
+					definition ?? required,
+					ref.modelRel,
+					`atlas "${required}" for sprite "${sprite}" in "${ref.modelRel}" cannot be completed without the vanilla resource tree; coverage recorded as skipped.`,
+					`sprite "${sprite}" needs the vanilla atlas sources`,
+				);
+				continue;
+			}
+			const diagnosis = atlasCoverageDetail(parsed, required, sprite);
+			if (diagnosis.status === "covered") {
+				continue;
+			}
+			if (diagnosis.status === "not-covered") {
+				push(
+					state.findings,
+					"PACK_TEXTURE_NOT_IN_ATLAS",
+					"error",
+					`"${ref.field}" "${ref.value}" in "${ref.modelRel}" resolves to "${ref.target}" (sprite "${sprite}") which is not stitched into the "${required}" atlas.`,
+					ref.modelRel,
+				);
+				state.errorFiles.add(ref.modelRel);
+				continue;
+			}
+			if (!diagnosis.hasDefinitions) {
+				pushSkip(
+					"atlas-source",
+					"missing-atlas-definition",
+					required,
+					ref.modelRel,
+					`atlas "${required}" for sprite "${sprite}" in "${ref.modelRel}" has no definition in any visible layer; coverage recorded as skipped.`,
+					`sprite "${sprite}" has no atlas definition`,
+				);
+			}
+			// Any other unknown already carries its parse skip above; a query
+			// that is unknown without one is impossible by construction.
 		}
-		const diagnosis = atlasCoverageDetail(parsed, required, sprite);
-		if (diagnosis.status === "covered") {
-			continue;
-		}
-		if (diagnosis.status === "not-covered") {
-			push(
-				state.findings,
-				"PACK_TEXTURE_NOT_IN_ATLAS",
-				"error",
-				`"${ref.field}" "${ref.value}" in "${ref.modelRel}" resolves to "${ref.target}" (sprite "${sprite}") which is not stitched into the "${required}" atlas.`,
-				ref.modelRel,
-			);
-			state.errorFiles.add(ref.modelRel);
-			continue;
-		}
-		if (!diagnosis.hasDefinitions) {
-			pushSkip(
-				"atlas-source",
-				"missing-atlas-definition",
-				required,
-				ref.modelRel,
-				`atlas "${required}" for sprite "${sprite}" in "${ref.modelRel}" has no definition in any visible layer; coverage recorded as skipped.`,
-				`sprite "${sprite}" has no atlas definition`,
-			);
-		}
-		// Any other unknown already carries its parse skip above; a query
-		// that is unknown without one is impossible by construction.
 	}
 	return skipped;
 }
@@ -1236,6 +1469,12 @@ export async function scanPack(
 		referencedTextures: new Set(),
 		modelRels: [],
 		itemRels: [],
+		blockstateRels: [],
+		cycleFiles: new Set(),
+		itemSkips: [],
+		itemSkipKeys: new Set(),
+		blockEntries: [],
+		itemEntries: [],
 		atlasRefs: [],
 		unresolved: new Map(),
 	};
@@ -1269,6 +1508,12 @@ export async function scanPack(
 		) {
 			state.itemRels.push(rel);
 		}
+		if (
+			split?.rest.toLowerCase().startsWith("blockstates/") &&
+			lowRel.endsWith(".json")
+		) {
+			state.blockstateRels.push(rel);
+		}
 	}
 	// The root pack.mcmeta parses for INVALID_JSON and, with no version
 	// flag, lends its resolved resource-pack format (max_format, then
@@ -1297,15 +1542,21 @@ export async function scanPack(
 		checkAnimationSheet(rel, state);
 		checkGuiScalingBorder(rel, state);
 	}
+	const views = modelDocViews(state);
+	const parentOf = parentOfModels(state);
+	emitParentCycles(parentOf, state);
 	for (const rel of state.modelRels) {
-		checkModelReferences(rel, context, state);
+		checkModelReferences(rel, context, state, views);
 	}
+	checkBlockstateReferences(state, context);
 	checkItemModelDefinitions(state, context, options, mcmetaDoc);
+	const reachability = computeReachability(parentOf, state);
 	const atlasSkips = await checkAtlasCoverage(
 		state,
 		context,
 		options,
 		mcmetaDoc,
+		reachability,
 	);
 	// Orphan is warning-only over lowercase-.png textures that decoded
 	// cleanly, and it skips files that already carry an error, so one
@@ -1331,7 +1582,7 @@ export async function scanPack(
 			state.findings,
 			"PACK_ORPHAN_TEXTURE",
 			"warning",
-			`"${rel}" is never referenced by any model.`,
+			`"${rel}" is not referenced by any covered reference source; uncovered sources (renderer fields and other uninterpreted ranges) may still use it, so this is not a deletion signal.`,
 			rel,
 		);
 	}
@@ -1360,22 +1611,46 @@ export async function scanPack(
 	// fail the verdict; the coverage status carries the partial signal.
 	// Skips sort by (kind, target bytes, reason), so reruns stay
 	// byte-identical across every skip source.
-	const pending = [...state.unresolved.values()].sort((a, b) =>
-		compareBytes(a.value, b.value),
+	const pending = [...state.unresolved.entries()].sort((a, b) =>
+		compareBytes(a[1].value, b[1].value),
 	);
-	const skipped: PackCoverageSkip[] = [...atlasSkips];
-	for (const entry of pending) {
+	const skipped: PackCoverageSkip[] = [...atlasSkips, ...state.itemSkips];
+	for (const [target, entry] of pending) {
+		if (entry.kind === "texture-variable-external") {
+			const cut = target.indexOf(String.fromCharCode(0));
+			const exitRel = cut < 0 ? target : target.slice(0, cut);
+			const diagnosis = diagnoseTextureVariableExternal(
+				entry.field,
+				entry.value,
+				entry.firstRel,
+				exitRel,
+			);
+			skipped.push({
+				kind: "external-reference",
+				reason: diagnosis.reason,
+				target: diagnosis.target,
+			});
+			push(
+				state.findings,
+				"PACK_UNRESOLVED_EXTERNAL",
+				"warning",
+				diagnosis.message,
+				entry.firstRel,
+			);
+			continue;
+		}
 		skipped.push({
 			kind: "external-reference",
 			reason: "vanilla-not-provided",
 			target: entry.value,
 		});
+		const withField = entry.field === "" ? "" : ` at "${entry.field}"`;
 		const message =
 			entry.kind === "parent"
 				? `parent "${entry.value}" in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`
 				: entry.kind === "texture"
 					? `"${entry.field}" "${entry.value}" in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`
-					: `model "${entry.value}" in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`;
+					: `model "${entry.value}"${withField} in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`;
 		push(
 			state.findings,
 			"PACK_UNRESOLVED_EXTERNAL",

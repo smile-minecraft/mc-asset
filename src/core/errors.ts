@@ -53,6 +53,7 @@ export type ErrorCode =
 	| "PACK_GUI_SCALING_BORDER"
 	| "PACK_UNRESOLVED_EXTERNAL"
 	| "PACK_COVERAGE_SKIPPED"
+	| "PACK_REFERENCE_CYCLE"
 	| "TRANSACTION_FAILED";
 
 export type FixedErrorCode = Exclude<ErrorCode, "TRANSACTION_FAILED">;
@@ -116,6 +117,8 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	// Coverage gaps that stay warnings: the verdict only covers what was
 	// checked, and the coverage list carries what was skipped.
 	PACK_COVERAGE_SKIPPED: 3,
+	// Reference cycles (parent chains, texture variables) fail the verdict.
+	PACK_REFERENCE_CYCLE: 3,
 };
 
 export function isErrorCode(value: unknown): value is ErrorCode {

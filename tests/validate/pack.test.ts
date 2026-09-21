@@ -153,6 +153,13 @@ describe("validate-pack command via spawn", () => {
 		try {
 			await writePackFile(
 				dir,
+				"assets/minecraft/blockstates/stone.json",
+				modelJson({
+					variants: { "": { model: "minecraft:block/stone" } },
+				}),
+			);
+			await writePackFile(
+				dir,
 				"assets/minecraft/models/block/stone.json",
 				modelJson({ textures: { all: "minecraft:block/stone" } }),
 			);

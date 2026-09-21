@@ -15,6 +15,7 @@ export {
 	atlasNameOf,
 	atlasSpriteCoverageFor,
 	parseAtlasLayers,
+	requiredAtlasesForUsage,
 	requiredAtlasForModel,
 	spriteIdForTextureValue,
 } from "./atlas.ts";
@@ -39,6 +40,27 @@ export type {
 	PackScanOptions,
 } from "./pack.ts";
 export { scanPack } from "./pack.ts";
+export type {
+	BlockstateBroken,
+	BlockstateRef,
+	ItemRef,
+	ItemSkip,
+	ModelDocView,
+	ModelUsage,
+	ReferenceEdge,
+	ReferenceKind,
+	ReferenceStatus,
+	VariableResolution,
+} from "./reference-graph.ts";
+export {
+	collectBlockstateModelRefs,
+	collectItemModelRefs,
+	computeModelReachability,
+	findParentCycles,
+	modelRelForValue,
+	parentRelForValue,
+	resolveTextureVariable,
+} from "./reference-graph.ts";
 export type {
 	ResolutionKind,
 	ResolutionResult,

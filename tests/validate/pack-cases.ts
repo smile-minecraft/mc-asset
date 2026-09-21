@@ -406,8 +406,8 @@ export const PACK_CASES: PackCase[] = [
 				check.equal(report.verdict, "fail", "invalid JSON fails");
 				check.deepEqual(
 					uniqueCodes(report),
-					["PACK_COVERAGE_SKIPPED", "PACK_INVALID_JSON"],
-					"atlas skips without vanilla alongside the JSON error",
+					["PACK_INVALID_JSON"],
+					"unreachable models carry no atlas verdict alongside the JSON error",
 				);
 			});
 		},
@@ -690,6 +690,20 @@ export const PACK_CASES: PackCase[] = [
 			await withPackDir(async (dir) => {
 				await writePackFile(
 					dir,
+					"assets/minecraft/blockstates/stone.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/stone" } },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/sword" },
+					}),
+				);
+				await writePackFile(
+					dir,
 					"assets/minecraft/models/block/stone.json",
 					modelJson({ textures: { all: "minecraft:block/stone" } }),
 				);
@@ -756,6 +770,13 @@ export const PACK_CASES: PackCase[] = [
 		name: "fail: existing texture absent from the required atlas",
 		run: async (check) => {
 			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/blockstates/stone.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/stone" } },
+					}),
+				);
 				await writePackFile(
 					dir,
 					"assets/minecraft/models/block/stone.json",
@@ -837,6 +858,13 @@ export const PACK_CASES: PackCase[] = [
 		name: "fail: item texture outside the items atlas",
 		run: async (check) => {
 			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/sword" },
+					}),
+				);
 				await writePackFile(
 					dir,
 					"assets/minecraft/models/item/sword.json",
@@ -946,6 +974,13 @@ export const PACK_CASES: PackCase[] = [
 			await withPackDir(async (dir) => {
 				await writePackFile(
 					dir,
+					"assets/minecraft/blockstates/stone.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/stone" } },
+					}),
+				);
+				await writePackFile(
+					dir,
 					"assets/minecraft/models/block/stone.json",
 					modelJson({ textures: { all: "minecraft:block/stone" } }),
 				);
@@ -985,6 +1020,13 @@ export const PACK_CASES: PackCase[] = [
 		name: "pass: unknown atlas source types never accuse",
 		run: async (check) => {
 			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/blockstates/stone.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/stone" } },
+					}),
+				);
 				await writePackFile(
 					dir,
 					"assets/minecraft/models/block/stone.json",
@@ -1044,6 +1086,13 @@ export const PACK_CASES: PackCase[] = [
 			await withPackDir(async (dir) => {
 				await writePackFile(
 					dir,
+					"assets/minecraft/blockstates/stone.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/stone" } },
+					}),
+				);
+				await writePackFile(
+					dir,
 					"assets/minecraft/models/block/stone.json",
 					modelJson({ textures: { all: "minecraft:block/stone" } }),
 				);
@@ -1092,6 +1141,13 @@ export const PACK_CASES: PackCase[] = [
 			await withPackDir(async (dir) => {
 				await writePackFile(
 					dir,
+					"assets/minecraft/blockstates/stone.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/stone" } },
+					}),
+				);
+				await writePackFile(
+					dir,
 					"assets/minecraft/models/block/stone.json",
 					modelJson({ textures: { all: "minecraft:block/stone" } }),
 				);
@@ -1136,6 +1192,13 @@ export const PACK_CASES: PackCase[] = [
 		name: "pass: unsupported regex skips with a warning, never an error",
 		run: async (check) => {
 			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/blockstates/stone.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/stone" } },
+					}),
+				);
 				await writePackFile(
 					dir,
 					"assets/minecraft/models/block/stone.json",
@@ -1197,6 +1260,13 @@ export const PACK_CASES: PackCase[] = [
 		name: "pass: renamed single sprite covers the model reference",
 		run: async (check) => {
 			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/custom.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/custom" },
+					}),
+				);
 				await writePackFile(
 					dir,
 					"assets/minecraft/models/item/custom.json",
@@ -2121,6 +2191,654 @@ export const PACK_CASES: PackCase[] = [
 					uniqueCodes(report),
 					["PACK_GUI_SCALING_BORDER"],
 					"only that code",
+				);
+			});
+		},
+	},
+	{
+		name: "red: texture variable self expansion never misjudges as a path",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/sword.json",
+					modelJson({
+						textures: {
+							base: "testpack:item/real",
+							layer0: "#base",
+						},
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/item/real.png",
+					makePngBytes(),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.ok(
+					!codesOf(report).includes("PACK_INVALID_FILENAME"),
+					"no filename misjudgment for #var",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_WRONG_PATH"),
+					"no wrong-path misjudgment for #var",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_MISSING_TEXTURE"),
+					"resolved variable is not missing",
+				);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"self expansion passes",
+				);
+			});
+		},
+	},
+	{
+		name: "red: texture variable inherits along the parent chain",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/child.json",
+					modelJson({
+						parent: "testpack:item/base",
+						textures: { layer0: "#base" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/base.json",
+					modelJson({ textures: { base: "testpack:item/real" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/item/real.png",
+					makePngBytes(),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"parent inheritance passes",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"no broken reference when the parent defines the variable",
+				);
+			});
+		},
+	},
+	{
+		name: "red: texture variable cycle is PACK_REFERENCE_CYCLE",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/loop.json",
+					modelJson({ textures: { a: "#b", b: "#a" } }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "variable cycle fails");
+				check.ok(
+					codesOf(report).includes("PACK_REFERENCE_CYCLE"),
+					"cycle code present",
+				);
+			});
+		},
+	},
+	{
+		name: "red: parent cycle is PACK_REFERENCE_CYCLE with the chain",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/a.json",
+					modelJson({ parent: "testpack:item/b" }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/b.json",
+					modelJson({ parent: "testpack:item/a" }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "parent cycle fails");
+				check.ok(
+					codesOf(report).includes("PACK_REFERENCE_CYCLE"),
+					"cycle code present",
+				);
+				const cycle = report.findings.find(
+					(f) => f.code === "PACK_REFERENCE_CYCLE",
+				);
+				check.ok(
+					(cycle?.message ?? "").includes("a.json") &&
+						(cycle?.message ?? "").includes("b.json"),
+					"message carries the cycle chain",
+				);
+			});
+		},
+	},
+	{
+		name: "red: unresolved texture variable names the variable and field",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/sword.json",
+					modelJson({ textures: { layer0: "#missing_var" } }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "unresolved variable fails");
+				check.ok(
+					codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"broken reference present",
+				);
+				const broken = report.findings.find(
+					(f) => f.code === "PACK_BROKEN_REFERENCE",
+				);
+				check.ok(
+					(broken?.message ?? "").includes("#missing_var"),
+					"message names the variable",
+				);
+				check.ok(
+					(broken?.message ?? "").includes("textures.layer0"),
+					"message carries the field path",
+				);
+			});
+		},
+	},
+	{
+		name: "red: blockstates variants and multipart resolve with field paths",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/stone.json",
+					modelJson({ textures: {} }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/other.json",
+					modelJson({ textures: {} }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/stone.json",
+					modelJson({
+						variants: {
+							"axis=y": { model: "testpack:block/stone" },
+							"axis=x": [{ model: "testpack:block/other" }],
+						},
+						multipart: [
+							{ apply: { model: "testpack:block/stone" } },
+							{
+								apply: [
+									{ model: "testpack:block/other" },
+									{ model: "testpack:block/stone" },
+								],
+							},
+						],
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"well-formed blockstates pass",
+				);
+			});
+		},
+	},
+	{
+		name: "red: blockstates bad shape is PACK_BROKEN_REFERENCE",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/stone.json",
+					modelJson({ variants: { "axis=y": 123 } }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "bad blockstate shape fails");
+				check.ok(
+					codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"broken reference present",
+				);
+			});
+		},
+	},
+	{
+		name: "red: blockstates missing model carries its field path",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/stone.json",
+					modelJson({
+						variants: { "axis=y": { model: "testpack:block/gone" } },
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "missing blockstate model fails");
+				check.ok(
+					codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"non-minecraft miss is broken",
+				);
+				const broken = report.findings.find(
+					(f) => f.code === "PACK_BROKEN_REFERENCE",
+				);
+				check.ok(
+					(broken?.message ?? "").includes('variants["axis=y"].model'),
+					"message carries the variants field path",
+				);
+			});
+		},
+	},
+	{
+		name: "red: items special.base missing model is diagnosed with coverage",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/items/chest.json",
+					modelJson({
+						model: {
+							type: "minecraft:special",
+							base: "testpack:item/gone",
+							model: { type: "minecraft:chest" },
+						},
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "missing special base fails");
+				check.ok(
+					codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"broken reference present",
+				);
+				check.ok(
+					codesOf(report).includes("PACK_COVERAGE_SKIPPED"),
+					"renderer fields stay visible as coverage",
+				);
+				check.ok(
+					report.coverage.skipped.some(
+						(s) =>
+							s.kind === "item-model-special" &&
+							s.reason === "renderer-fields-not-interpreted",
+					),
+					"special skip recorded",
+				);
+			});
+		},
+	},
+	{
+		name: "red: items unknown namespace type skips without accusing",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/items/custom.json",
+					modelJson({
+						model: {
+							type: "custom:my_renderer",
+							model: "testpack:item/gone",
+						},
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"custom renderer never accuses",
+				);
+				check.ok(
+					report.coverage.skipped.some(
+						(s) =>
+							s.kind === "item-model-node" && s.reason === "unknown-node-type",
+					),
+					"unknown node skip recorded",
+				);
+			});
+		},
+	},
+	{
+		name: "red: items minecraft unknown type skips without accusing",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/future.json",
+					modelJson({
+						model: {
+							type: "minecraft:future_type",
+							model: "minecraft:item/gone",
+						},
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"unknown minecraft type never accuses",
+				);
+				check.ok(
+					report.coverage.skipped.some(
+						(s) =>
+							s.kind === "item-model-node" && s.reason === "unknown-node-type",
+					),
+					"unknown node skip recorded",
+				);
+			});
+		},
+	},
+	{
+		name: "red: items empty and bundle selected item never accuse",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/kit.json",
+					modelJson({
+						model: {
+							type: "minecraft:composite",
+							models: [
+								{ type: "minecraft:empty" },
+								{ type: "minecraft:bundle/selected_item" },
+								{ type: "bundle/selected_item" },
+							],
+						},
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"empty leaves pass",
+				);
+			});
+		},
+	},
+	{
+		name: "red: atlas follows items usage, not the models/ path",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/stone.json",
+					modelJson({ textures: { all: "testpack:block/stone" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/block/stone.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/items/stone.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "testpack:block/stone" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([{ type: "directory", source: "block", prefix: "block/" }]),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(
+						report.verdict,
+						"fail",
+						"items usage needs the items atlas",
+					);
+					check.ok(
+						codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"atlas miss present",
+					);
+					const miss = report.findings.find(
+						(f) => f.code === "PACK_TEXTURE_NOT_IN_ATLAS",
+					);
+					check.ok(
+						(miss?.message ?? "").includes('"items"'),
+						"miss names the items atlas, not blocks",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "red: atlas follows blockstate usage, not the models/ path",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/sword.json",
+					modelJson({ textures: { layer0: "testpack:item/sword" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/item/sword.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/sword.json",
+					modelJson({
+						variants: { "": { model: "testpack:item/sword" } },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([{ type: "single", resource: "testpack:item/sword" }]),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(
+						report.verdict,
+						"fail",
+						"blockstate usage needs the blocks atlas",
+					);
+					const miss = report.findings.find(
+						(f) => f.code === "PACK_TEXTURE_NOT_IN_ATLAS",
+					);
+					check.ok(
+						(miss?.message ?? "").includes('"blocks"'),
+						"miss names the blocks atlas, not items",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "red: atlas dual usage needs both atlases",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/stone.json",
+					modelJson({ textures: { all: "testpack:block/stone" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/block/stone.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/items/stone.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "testpack:block/stone" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/stone.json",
+					modelJson({
+						variants: { "": { model: "testpack:block/stone" } },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([{ type: "single", resource: "testpack:block/stone" }]),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(
+						report.verdict,
+						"fail",
+						"dual usage still needs the blocks atlas",
+					);
+					const miss = report.findings.find(
+						(f) => f.code === "PACK_TEXTURE_NOT_IN_ATLAS",
+					);
+					check.ok(
+						(miss?.message ?? "").includes('"blocks"'),
+						"miss names the blocks atlas even though items covers it",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "red: atlas unreachable models are never accused",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/stone.json",
+					modelJson({ textures: { all: "testpack:block/stone" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/block/stone.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(
+						report.verdict,
+						"pass",
+						"unreachable models skip the atlas verdict",
+					);
+					check.ok(
+						!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"no atlas accusation without an entry",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "red: orphan names covered sources instead of definite disuse",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/lonely.png",
+					makePngBytes(),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.deepEqual(
+					uniqueCodes(report),
+					["PACK_ORPHAN_TEXTURE"],
+					"only that code",
+				);
+				check.ok(
+					(report.findings[0]?.message ?? "").includes(
+						"covered reference source",
+					),
+					"orphan message describes covered sources",
+				);
+				check.ok(
+					!(report.findings[0]?.message ?? "").includes("never referenced"),
+					"old definite wording is gone",
+				);
+			});
+		},
+	},
+	{
+		name: "red: unreachable models still report format errors",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/lonely.json",
+					'{"textures": {"layer0": 123}}',
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "format errors still fail");
+				check.ok(
+					codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"broken reference present without any entry",
 				);
 			});
 		},

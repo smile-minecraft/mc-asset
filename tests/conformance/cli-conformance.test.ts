@@ -177,6 +177,13 @@ async function writeV05CleanPack(parent: string): Promise<string> {
 	const root = join(parent, "pack");
 	await writePackFile(
 		root,
+		"assets/minecraft/items/sword.json",
+		modelJson({
+			model: { type: "minecraft:model", model: "minecraft:item/sword" },
+		}),
+	);
+	await writePackFile(
+		root,
 		"assets/minecraft/models/item/sword.json",
 		modelJson({ textures: { layer0: "minecraft:item/sword" } }),
 	);

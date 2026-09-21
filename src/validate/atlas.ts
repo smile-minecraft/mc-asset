@@ -150,6 +150,29 @@ export function requiredAtlasForModel(
 }
 
 /**
+ * Required atlases from entry reachability: models reached through item
+ * definitions need the items atlas, models reached through blockstates
+ * need the blocks atlas, models reached through both need both. Path
+ * based guessing is never used here; unreachable models answer empty.
+ */
+export function requiredAtlasesForUsage(
+	usage: { items: boolean; blockstates: boolean } | undefined,
+	policy: AtlasPolicy,
+): string[] {
+	if (usage === undefined) {
+		return [];
+	}
+	const out: string[] = [];
+	if (usage.blockstates) {
+		out.push(policy.blockAtlas);
+	}
+	if (usage.items) {
+		out.push(policy.itemAtlas);
+	}
+	return [...new Set(out)];
+}
+
+/**
  * Sprite-centered execution model. One ordered layer stack carries
  * already-parsed atlas documents plus the file list of the same layer,
  * from the lowest priority layer (vanilla) through reversed dependencies
