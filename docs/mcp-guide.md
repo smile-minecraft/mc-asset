@@ -448,15 +448,16 @@ File-rule failures to expect:
   via `minecraftVersion` / `resourcePackVersion`.
 - **`validate_asset` checks a single PNG.** Pack-level and atlas-aware
   validation is `validate_pack_asset`.
-- **Determinism was checked for the demo inputs.** Same input plus same
-  arguments produced identical results; only the demo `px-8x8.png` /
-  `sword.mcpx` / `v04-anim-frames/` inputs and a clean pack were
-  exercised, so other formats stay unverified.
+- **Determinism was verified only for the demo inputs.** Same input plus same
+  arguments produced identical results for the demo `px-8x8.png` /
+  `sword.mcpx` / `v04-anim-frames/` inputs and a clean pack. Other inputs and
+  options (WebP, `WxH` sizes, `region`, `atomic: false`, `animate` `resize`)
+  were exercised, but not re-run to confirm they reproduce identically.
 - **Runtime.** The MCP path uses only `node:` imports, so the bundled `dist`
-  runs under plain Node; CI's `node` job uses Node 22. No minimum Node version
-  is declared (there is no `engines` field).
-- **Not exercised here**: `mcmetaPath`, `region`, `atomic: false`, JPEG/WebP
-  inputs, `WxH` sizes, the uncaptured `mode` branches (`palette`
-  `inspect`, `material` `show`, `preview` `palette-map` / `scale` /
-  `nine-slice`, `animate` `unpack` / `reorder` / `resize` / `validate` /
-  `preview`), and any error path other than the one captured above.
+  runs under plain Node; CI's `node` job uses Node 22. Node.js 22 or newer is
+  required, and the `engines` field declares `>=22`.
+- **Not exercised here**: `mcmetaPath`, JPEG input, the uncaptured `mode`
+  branches (`palette` `inspect`, `material` `show`, `preview` `palette-map` /
+  `scale` / `nine-slice`, `animate` `unpack` / `reorder` / `validate` /
+  `preview`), and any error path other than the captured `INVALID_ARGUMENT`
+  and the exercised `OUTPUT_EXISTS` / `FILESYSTEM_ERROR` cases.
