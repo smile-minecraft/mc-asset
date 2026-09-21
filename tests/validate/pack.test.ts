@@ -598,7 +598,7 @@ describe("validate-pack command via spawn", () => {
 					{
 						kind: "external-reference",
 						reason: "vanilla-not-provided",
-						target: "minecraft:item/sword",
+						target: "assets/minecraft/models/item/sword.json",
 					},
 				],
 			});

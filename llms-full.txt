@@ -2,7 +2,7 @@
 
 > mc-asset is a pixel-native 2D asset engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs. It turns raster references, hand-authored ASCII grids, and editable `.mcpx` sources into byte-reproducible PNG textures, animation sheets, palette reports, and validated resource packs — for human creators and AI coding agents.
 
-This file collects, in one place, what an agent needs to use the tool: install, registration, the nineteen MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest.
+This file collects, in one place, what an agent needs to use the tool: install, registration, the twenty MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest.
 
 ## When to use it
 
@@ -68,7 +68,7 @@ check the client's own documentation when unsure. The guide at
 `docs/mcp-guide.md` carries per-client examples (Claude Code, Claude Desktop,
 Cursor, VS Code, Cline, OpenCode).
 
-## The nineteen MCP tools
+## The twenty MCP tools
 
 | Tool | What it does | Required inputs |
 |---|---|---|
@@ -82,6 +82,7 @@ Cursor, VS Code, Cline, OpenCode).
 | `import_asset` | Decodes a raster (PNG/JPEG/WebP) into the canvas, with an optional batch. | `inputPath` |
 | `build_asset` | Builds an `.mcpx` source into PNG bytes and/or re-serialized source. | `sourcePath` |
 | `transform_asset` | Applies one geometry operation: `flip`, `rotate`, `crop`, `pad`, `translate`, or `resize`. | `inputPath` + exactly one geometry flag |
+| `scale_gui_asset` | Scales a GUI sprite with the mcmeta stretch/tile/nine_slice mapping; PNG only. | `inputPath`, `size` |
 | `quantize_asset` | Reduces distinct colors to a target count, with an optional selection. | `inputPath`, `colors` |
 | `cleanup_asset` | Detects, and optionally fixes, pixel defects (`isolated`, `noise`, `cluster`, `fringe`, `outlier`, `hole`, `aa`). | `inputPath` |
 | `palette_asset` | Read-only palette `extract` / `inspect` report (unique colors, distribution, roles, contrast). | `mode`, `inputPath` |
@@ -90,7 +91,7 @@ Cursor, VS Code, Cline, OpenCode).
 | `generate_asset` | Deterministic procedural texture from pattern, size, palette, and seed. | `pattern`, `size`, `palette`, `seed` |
 | `preview_asset` | `ascii` / `palette-map` reports, or `scale` / `nine-slice` guide PNGs. | `inputPath`, `mode` |
 | `animate_asset` | Animation sheets: `pack`, `unpack`, `reorder`, `resize`, `validate`, `preview`. | `mode` + that mode's input path (`layout` for `pack` / `unpack` / `preview`) |
-| `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, version targeting. | `packPath` |
+| `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, dependency/vanilla resolution, version targeting, with a coverage object in the report. | `packPath` |
 
 Required-input notes that the schema alone does not show: `pixelize_asset`
 raises `INVALID_ARGUMENT` when `size` is omitted, and `animate_asset` requires

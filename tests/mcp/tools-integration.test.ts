@@ -267,6 +267,7 @@ describe("mcp seven tools over stdio", () => {
 		});
 		expect(result.isError).toBe(false);
 		expect(result.json?.verdict).toBe("pass");
+		expect(result.json?.coverage).toEqual({ status: "complete", skipped: [] });
 	}, 30_000);
 
 	test("validate_asset reports fail as a normal result with findings", async () => {
@@ -418,6 +419,7 @@ describe("mcp seven tools over stdio", () => {
 		});
 		expect(result.isError).toBe(false);
 		expect(typeof result.json?.verdict).toBe("string");
+		expect(result.json?.coverage).toEqual({ status: "complete", skipped: [] });
 		const mcmeta = result.json?.mcmeta as
 			| { animation?: { frametime?: number } }
 			| undefined;

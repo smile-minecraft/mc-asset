@@ -4,7 +4,7 @@
 
 `mc-asset mcp` starts a stdio MCP server: stdout carries only MCP JSON-RPC,
 diagnostics go to stderr, and the process ends when stdin closes. The frozen
-surface — nineteen tool names, their inputs, and the read/write contract — lives
+surface — twenty tool names, their inputs, and the read/write contract — lives
 in `docs/mcp-surface.md`; the input fields are frozen in `src/mcp/schema.ts`.
 This guide covers registration, one verbatim capture per tool, the error
 model, and the limits.
@@ -106,7 +106,7 @@ directory; every path in them is relative to that directory. The seven
 original captures come from the installed build and the twelve additions from
 the local source server — the same server code runs either way.
 
-## The nineteen tools
+## The twenty tools
 
 ### analyze_asset
 
@@ -238,7 +238,7 @@ Call:
 Result (verbatim):
 
 ```text
-{"verdict":"pass","profile":{"id":"generic","predictedDescription":"predicted profile generic has no Minecraft-specific restrictions."},"dimensions":{"width":8,"height":8},"totalPixels":64,"colorCount":64,"findings":[{"code":"PARTIAL_ALPHA_CAUSES_TRANSLUCENT_RENDERING","level":"warning","message":"predicted translucent: 1 partial-alpha pixel(s) use the translucent render pass; left as-is with no auto-fix."}]}
+{"verdict":"pass","profile":{"id":"generic","predictedDescription":"predicted profile generic has no Minecraft-specific restrictions."},"dimensions":{"width":8,"height":8},"totalPixels":64,"colorCount":64,"alpha":{"predictedClassification":"translucent","opaquePixels":62,"transparentPixels":1,"partialAlphaPixels":1,"partialAlphaValues":[128],"opaqueRatio":"0.9688","transparentRatio":"0.0156","partialAlphaRatio":"0.0156","predictedNote":"predicted classification from PNG bytes only; not the final in-game render result."},"findings":[{"code":"PARTIAL_ALPHA_CAUSES_TRANSLUCENT_RENDERING","level":"warning","message":"predicted translucent: 1 partial-alpha pixel(s) use the translucent render pass; left as-is with no auto-fix."}],"version":{},"target":"default (engine defaults)","coverage":{"status":"complete","skipped":[]}}
 ```
 
 ### import_asset
@@ -422,6 +422,22 @@ Result (verbatim):
 {"mode":"ascii","profile":"generic","width":4,"height":4,"ascii":["[palette]",". = #00000000","R = #FF0000FF","G = #00FF00FF","","[grid]",".RR.","RGGR","RGGR",".RR."],"palette":{".":"#00000000","R":"#FF0000FF","G":"#00FF00FF"},"warnings":[]}
 ```
 
+### scale_gui_asset
+
+Scales a GUI sprite to an explicit target size with the mcmeta `stretch` / `tile` / `nine_slice` mapping; the `.mcmeta` path is used verbatim and an omitted one means `stretch`. An optional version target gates `stretch_inner`; the output is PNG only — an explicit `outputPngPath` writes the file, otherwise the bytes are embedded as `pngBase64`.
+
+Call:
+
+```json
+{"inputPath":"px-8x8.png","size":"16x16"}
+```
+
+Result (verbatim; `pngBase64` is truncated):
+
+```text
+{"size":"16x16","width":16,"height":16,"scaling":{"type":"stretch"},"version":{},"target":"default (engine defaults)","warnings":[],"pngBase64":"iVBORw0KGgoAAAANSUhEUgAAABAAAAAQ… (truncated) …"}
+```
+
 ### animate_asset
 
 Animation sheets in one `mode`: `pack` builds a sheet from a frames
@@ -445,7 +461,11 @@ Result (verbatim; `pngBase64` is truncated):
 
 Read-only verdict over a whole resource pack root; never writes. An
 optional `resourcePackVersion` selects the compatibility target. A
-`fail` verdict is a normal result, not an error.
+`fail` verdict is a normal result, not an error. `vanillaPath`
+(optional) supplies the vanilla resource tree and `dependencyPaths`
+(ordered, first wins) adds dependency roots; the report carries a
+`coverage` object, and supplying the vanilla tree completes the atlas
+checks that would otherwise be skipped.
 
 Call:
 
@@ -456,7 +476,7 @@ Call:
 Result (verbatim):
 
 ```text
-{"command":"validate-pack","path":"clean-pack","target":"resource-pack 75.0","verdict":"pass","findings":[],"version":{"resourcePackVersion":"75.0"}}
+{"command":"validate-pack","path":"clean-pack","target":"resource-pack 75.0","verdict":"pass","findings":[{"code":"PACK_COVERAGE_SKIPPED","level":"warning","message":"atlas \"items\" for sprite \"minecraft:item/sword\" in \"assets/minecraft/models/item/sword.json\" cannot be completed without the vanilla resource tree; coverage recorded as skipped.","path":"assets/minecraft/models/item/sword.json"}],"coverage":{"status":"partial","skipped":[{"kind":"atlas-source","reason":"vanilla-not-provided","target":"items","detail":"sprite \"minecraft:item/sword\" needs the vanilla atlas sources"}]},"version":{"resourcePackVersion":"75.0"}}
 ```
 
 ## How failures come back
@@ -504,10 +524,12 @@ File-rule failures to expect:
   result carries `pngBase64` (PNG) or `mcpxText` (`.mcpx`) instead of writing
   a file. This is decided per artifact: giving only `outputPngPath` writes the
   PNG and still returns the `.mcpx` text inline.
-- **Full CLI parity.** The nineteen tools cover intake and source build,
+- **Full CLI parity.** The twenty tools cover intake and source build,
   transforms, palette and quantization, the deterministic pixelize
   pipeline, procedural generation, tiles and previews, animation sheets,
-  and single-asset plus whole-pack validation; version targeting travels
+  and single-asset plus whole-pack validation, including
+  dependency/vanilla resolution and GUI sprite scaling; version
+  targeting travels
   through `analyze_asset`, `validate_asset`, and `validate_pack_asset`
   via `minecraftVersion` / `resourcePackVersion`.
 - **`validate_asset` checks a single PNG.** Pack-level and atlas-aware

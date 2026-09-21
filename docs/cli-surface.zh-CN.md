@@ -72,7 +72,7 @@ build  [source] [--stdin] [--output <png>] [--source <mcpx>] [--stdout] [--opera
 ```text
 transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
                   [--pad <l,t,r,b>] [--pad-color <hex|transparent>]
-                  [--resize <WxH>] [--resize-mode <nearest|box>]
+                  [--resize <WxH>] [--resize-mode <nearest|box|pixel-aware>]
                   [--translate <dx,dy>] [--selection <scope>] <file flags>
 ```
 
@@ -117,7 +117,7 @@ pixelize <image> --size <N|WxH> [--preset <item|block|gui|particle|generic>] <fi
 ```
 
 - 必须指定目标 `--size`（Minecraft 常见的正方形尺寸 16、32、64、128，或自定义 `WxH`）。
-- 预设（preset）会按资产用途设定颜色数与清理启发式。
+- 预设（preset）决定该用途的色彩预算、清理启发，以及会启用哪些管线阶段。`item` 预设会启用 crop、background、subject、edge、cluster；其余预设保持既有输出，按位不变。输入是单一张位图（不接受 `.mcpx`）；五个阶段都在这一个图层上执行。
 
 ---
 
@@ -128,14 +128,18 @@ pixelize <image> --size <N|WxH> [--preset <item|block|gui|particle|generic>] <fi
 | `tile <input>` | PNG、JPEG、WebP、`.mcpx` | 仅报告，或 PNG | 接缝分析、边缘重复分析，或平铺修复与预览。 |
 | `generate <pattern>` | 无 | PNG 和／或 `.mcpx` | 确定性的程序化贴图生成器。 |
 | `preview <input>` | PNG、JPEG、WebP、`.mcpx` | 仅报告，或 PNG | ASCII 预览、调色板映射、九宫格参考线，或最近邻放大。 |
+| `gui-scale <input>` | PNG、JPEG、WebP、`.mcpx` | PNG | 以 mcmeta 的 stretch／tile／nine_slice 映射，把 GUI 精灵图缩放到明确的目标尺寸。 |
 
 ```text
 tile     <input> [--preview <2x2|4x4|8x8>] [--edge-match <axis>] [--brightness-match <axis>]
-                 [--output <png>] [--stdout] <file flags>
+                  [--output <png>] [--stdout] <file flags>
 generate <pattern> --size <N|WxH> --palette <name|path> --seed <int>
-                 [--output <png>] [--source <mcpx>] [--stdout] <file flags>
+                  [--output <png>] [--source <mcpx>] [--stdout] <file flags>
 preview  <input> --ascii | --palette-map | --scale <N> | --nine-slice --mcmeta <path>
-                 [--output <png>] [--stdout] <file flags>
+                  [--output <png>] [--stdout] <file flags>
+gui-scale <input> --size <N|WxH> [--mcmeta <path>]
+                  [--minecraft-version <v>|--resource-pack-version <f>]
+                  [--output <png>] [--stdout] <file flags>
 ```
 
 - `generate` 支持的确定性图样有 `noise`、`clustered-noise`、`stripes`、`checker`、`gradient`、`brick`、`spots`、`veins`、`cracks`、`grain`，并以 `--seed`（整数 0–4294967295）决定种子。
@@ -144,6 +148,12 @@ preview  <input> --ascii | --palette-map | --scale <N> | --nine-slice --mcmeta <
   - `--palette-map`：输出 JSON 调色板索引。
   - `--scale <N>`：以最近邻法放大并输出 PNG。
   - `--nine-slice`：按 `.mcmeta` 评估 GUI 九宫格边界，并附视觉参考线。
+- `gui-scale` 以 `.mcmeta` 的 `gui.scaling`（stretch／tile／nine_slice）规则，把 GUI 精灵图映射到明确的目标尺寸：
+  - `--mcmeta` 必须是显式路径，绝不推导同名文件；省略即为 `stretch`。
+  - 输出只有 PNG。
+  - 九宫格边框不合法为 `INVALID_MCMETA`（状态码 2）。
+  - 目标版本早于 `stretch_inner`（资源包格式 42）且该字段为 true 时，忽略该字段并报告 `STRETCH_INNER_IGNORED` warning。
+  - 既有的 `preview --nine-slice` 保持 guide preview 语义，两者是不同入口。
 
 ---
 
@@ -155,7 +165,7 @@ preview  <input> --ascii | --palette-map | --scale <N> | --nine-slice --mcmeta <
 | `animate unpack <sheet>` | PNG 精灵图集 | 帧目录（`.mcpx`） | 将动画图集切分为单张帧。 |
 | `animate reorder` | 帧目录 | 帧目录 | 按索引列表重新排列动画帧。 |
 | `animate resize` | 帧目录 | 帧目录 | 缩放动画组内的所有帧。 |
-| `animate validate` | 帧目录（加 `.mcmeta`） | 仅报告 | 按 `.mcmeta` 验证帧尺寸与数量。 |
+| `animate validate` | 帧目录（加 `.mcmeta`） | 仅报告 | 按 `.mcmeta` 验证帧尺寸、播放序列索引与每步时间；重复或部分播放序列合法。 |
 | `animate preview` | 帧目录 | 报告或 ASCII 预览 | 预览动画序列。 |
 
 ```text
@@ -164,7 +174,7 @@ animate pack     --frames-dir <dir> --layout <vertical|horizontal|grid> [--colum
 animate unpack   <sheet.png> --layout <vertical|horizontal|grid> --frame-size <N|WxH>
                  [--columns <N>] [--mcmeta <path>] --output-dir <dir> <file flags>
 animate reorder  --frames-dir <dir> --order <i,j,...> --output-dir <dir> <file flags>
-animate resize   --frames-dir <dir> --frame-size <N|WxH> [--resize-mode <nearest|box>]
+animate resize   --frames-dir <dir> --frame-size <N|WxH> [--resize-mode <nearest|box|pixel-aware>]
                  --output-dir <dir> <file flags>
 animate validate --frames-dir <dir> [--mcmeta <path>] [--profile <name>] [--json]
 animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--columns <N>]
@@ -185,13 +195,17 @@ animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--colum
 analyze       <image> [--profile <p>] [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
 validate      <asset> [--profile <p>] [--minecraft-version <v>] [--resource-pack-version <n>]
                       [--mcmeta <path>] [--json]
-validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
+                       [--vanilla <path>] [--dependency <path>]... [--json]
 ```
 
 - 验证的状态码：通过为 0；验证检查失败为 3（`VALIDATION_FAILED`）；调用语法错误为 2；文件系统错误为 4。
 - 版本指定：`--minecraft-version` 接受 release 版本 `1.19.3` 到 `26.3`（例如 `1.19.3`、`1.21.4`、`26.3`；每个 release 对应其资源包格式）；`--resource-pack-version` 接受 `N` 或 `N.M`（例如 `84`、`97.1`），会规范化为 `major.minor`。两个标志互斥，都不给则保持引擎默认。
 - 版本回显：人类可读报告打印 `target: minecraft <v> / resource-pack <f>`、`target: resource-pack <f>` 或 `target: default (engine defaults)`；`--json` 携带 `version: { minecraftVersion?, resourcePackVersion? }`，均为规范化后的 dotted 字符串。
 - 无标志时的解析：不带版本标志的 `validate-pack` 会读取根目录 `pack.mcmeta`，依次取 `pack.max_format`、`pack.min_format`、旧制 `pack.pack_format`（整数、`[major, minor]` 数组或 dotted 字符串，均规范化为 `major.minor`）；解析出的目标打印为 `pack.mcmeta resource-pack <f>`。`supported_formats` 不参与目标选择；没有可用值时只警告一次（`PACK_VERSION_UNDETERMINED`），不套用任何默认。
+- `--vanilla`：调用端提供的原版资源树（pack 根目录形状，含 `assets/`）。提供后 `minecraft` 命名空间的引用会在该树中确认；未提供时报告 `PACK_UNRESOLVED_EXTERNAL` warning 并记入 coverage，不再直接判为缺失。
+- `--dependency`：依赖资源包的根目录，可重复；第一个优先级最高。
+- coverage：`validate` 与 `validate-pack` 的报告都带 `coverage: {status, skipped}`；`partial` 表示有检查因故跳过（例如 `vanilla-not-provided`、`unsupported-source-type`、`unsupported-regex`、`unknown-node-type`、`renderer-fields-not-interpreted`、`version-undetermined`、`model-documents-not-loaded`），每个 skip 都带 `kind`／`reason`／`target`。coverage 不改变状态码（通过仍为 0、失败仍为 3）。texture variable 的解析只读当前包的模型文件；超出该范围的变量以 `model-documents-not-loaded` coverage 报告，不跨依赖或原版包解析。
 
 ---
 
@@ -201,7 +215,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>] [-
 mc-asset mcp
 ```
 
-启动原生 Model Context Protocol（MCP）stdio 服务器，供 LLM Agent 集成，提供 19 个原生工具，无需另起子进程：
+启动原生 Model Context Protocol（MCP）stdio 服务器，供 LLM Agent 集成，提供 20 个原生工具，无需另起子进程：
 - `analyze_asset`
 - `pixelize_asset`
 - `render_pixel_asset`
@@ -221,6 +235,7 @@ mc-asset mcp
 - `preview_asset`
 - `animate_asset`
 - `validate_pack_asset`
+- `scale_gui_asset`
 
 ---
 

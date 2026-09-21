@@ -50,12 +50,14 @@ export type {
 	ReferenceEdge,
 	ReferenceKind,
 	ReferenceStatus,
+	TextureVariableExternalDiagnosis,
 	VariableResolution,
 } from "./reference-graph.ts";
 export {
 	collectBlockstateModelRefs,
 	collectItemModelRefs,
 	computeModelReachability,
+	diagnoseTextureVariableExternal,
 	findParentCycles,
 	modelRelForValue,
 	parentRelForValue,

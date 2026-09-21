@@ -5,7 +5,7 @@
 Docs:
 - [README](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/README.md): overview, installation, quickstart, command reference, batch operations, architecture.
 - [MCP guide](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/mcp-guide.md): registration, one verbatim capture per MCP tool, the error model, the limits.
-- [MCP surface](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/mcp-surface.md): the frozen nineteen-tool surface — names, inputs, and the read/write contract.
+- [MCP surface](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/mcp-surface.md): the frozen twenty-tool surface — names, inputs, and the read/write contract.
 - [CLI surface](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/cli-surface.md): the frozen CLI commands, the batch operations specification, and the exit-code registry.
 - [Full agent context](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/llms-full.txt): install, tools, error model, and limits in a single file.
 

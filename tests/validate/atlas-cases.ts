@@ -700,6 +700,10 @@ export const ATLAS_CASES: AtlasCase[] = [
 										{ type: "filter", pattern: { path: "\\Qstone\\E" } },
 										{ type: "filter", pattern: { path: "sto++" } },
 										{ type: "filter", pattern: { namespace: "\\p{L}+" } },
+										{ type: "filter", pattern: { path: "\\Astone" } },
+										{ type: "filter", pattern: { path: "stone\\Z" } },
+										{ type: "filter", pattern: { path: "stone\\z" } },
+										{ type: "filter", pattern: { namespace: "\\Gminecraft" } },
 									],
 								},
 							],
@@ -736,6 +740,30 @@ export const ATLAS_CASES: AtlasCase[] = [
 						target: "assets/minecraft/atlases/blocks.json",
 						atlas: "blocks",
 					},
+					{
+						kind: "atlas-filter",
+						reason: "unsupported-regex",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
+					{
+						kind: "atlas-filter",
+						reason: "unsupported-regex",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
+					{
+						kind: "atlas-filter",
+						reason: "unsupported-regex",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
+					{
+						kind: "atlas-filter",
+						reason: "unsupported-regex",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
 				],
 				"every unsupported filter is a skip",
 			);
@@ -748,6 +776,138 @@ export const ATLAS_CASES: AtlasCase[] = [
 				parsed.atlases.get("blocks")?.sprites.has("minecraft:block/stone") ===
 					true,
 				"skipped filters remove nothing",
+			);
+		},
+	},
+	{
+		name: "java-only escapes are not applied and stay visible",
+		run: (check) => {
+			const files = ["assets/minecraft/textures/block/stone.png"];
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+										{ type: "filter", pattern: { path: "sto\\hne" } },
+										{ type: "filter", pattern: { path: "sto\\Hne" } },
+										{ type: "filter", pattern: { path: "\\R" } },
+										{ type: "filter", pattern: { path: "\\V+" } },
+										{ type: "filter", pattern: { path: "\\Xstone" } },
+										{
+											type: "filter",
+											pattern: { path: "\\N{LATIN SMALL LETTER A}" },
+										},
+										{ type: "filter", pattern: { path: "st\\eone" } },
+										{ type: "filter", pattern: { path: "ston\\e" } },
+										{ type: "filter", pattern: { path: "ston\\ea" } },
+									],
+								},
+							],
+						],
+						files,
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.equal(parsed.skips.length, 9, "every java-only escape is a skip");
+			for (const skip of parsed.skips) {
+				check.equal(skip.kind, "atlas-filter", "skip kind");
+				check.equal(skip.reason, "unsupported-regex", "skip reason");
+				check.equal(
+					skip.target,
+					"assets/minecraft/atlases/blocks.json",
+					"skip target",
+				);
+			}
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
+				"unknown",
+				"partial knowledge never accuses",
+			);
+			check.ok(
+				parsed.atlases.get("blocks")?.sprites.has("minecraft:block/stone") ===
+					true,
+				"skipped filters remove nothing",
+			);
+		},
+	},
+	{
+		name: "legal javascript escapes still run as filters",
+		run: (check) => {
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+										{ type: "filter", pattern: { path: "dirt\\d" } },
+										{ type: "filter", pattern: { path: "sto\\x6ee" } },
+										{ type: "filter", pattern: { path: "a\\sb" } },
+										{ type: "filter", pattern: { path: "ston\\u0065" } },
+										{ type: "filter", pattern: { path: "\\bstone\\b" } },
+									],
+								},
+							],
+						],
+						[
+							"assets/minecraft/textures/block/stone.png",
+							"assets/minecraft/textures/block/dirt1.png",
+						],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.deepEqual(skipSummary(parsed), [], "legal escapes need no skip");
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
+				"not-covered",
+				"the hex and boundary filters still remove stone",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/dirt1"),
+				"not-covered",
+				"the digit filter still removes dirt1",
+			);
+		},
+	},
+	{
+		name: "escaped backslash before h is legal and needs no skip",
+		run: (check) => {
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+										{ type: "filter", pattern: { path: "\\\\h" } },
+									],
+								},
+							],
+						],
+						["assets/minecraft/textures/block/stone.png"],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.deepEqual(
+				skipSummary(parsed),
+				[],
+				"escaped backslash never trips the detector",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
+				"covered",
+				"the applied filter matches no sprite and the sprite stays",
 			);
 		},
 	},

@@ -500,6 +500,90 @@ describe("mcp v0.7 twelve tools over stdio", () => {
 		).toBe(true);
 	}, 60_000);
 
+	test("animate_asset validate passes repeated and partial playback sequences", async () => {
+		const connected = await connect();
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcp-anim-seq-"));
+		const repeatedMcmeta = join(dir, "repeated.mcmeta");
+		const partialMcmeta = join(dir, "partial.mcmeta");
+		await writeFile(
+			repeatedMcmeta,
+			JSON.stringify({
+				animation: { width: 4, height: 4, frames: [0, 1, 0] },
+			}),
+		);
+		await writeFile(
+			partialMcmeta,
+			JSON.stringify({ animation: { width: 4, height: 4, frames: [1] } }),
+		);
+		const repeated = await callTool(connected, "animate_asset", {
+			mode: "validate",
+			framesDir: FRAMES_DIR,
+			mcmetaPath: repeatedMcmeta,
+		});
+		expect(repeated.isError).toBe(false);
+		expect(repeated.json?.verdict).toBe("pass");
+		expect(repeated.json?.frameCount).toBe(2);
+		const partial = await callTool(connected, "animate_asset", {
+			mode: "validate",
+			framesDir: FRAMES_DIR,
+			mcmetaPath: partialMcmeta,
+		});
+		expect(partial.isError).toBe(false);
+		expect(partial.json?.verdict).toBe("pass");
+		expect(partial.json?.frameCount).toBe(2);
+	}, 60_000);
+
+	test("transform_asset resize honors the pixel-aware mode", async () => {
+		const connected = await connect();
+		const first = await callTool(connected, "transform_asset", {
+			inputPath: SWORD_MCPX,
+			resize: "2x2",
+			resizeMode: "pixel-aware",
+		});
+		expect(first.isError).toBe(false);
+		expect(first.json?.geometry).toBe("resize:2x2");
+		expect(first.json?.width).toBe(2);
+		expect(first.json?.height).toBe(2);
+		const pngBase64 = first.json?.pngBase64 as string | undefined;
+		expect(typeof pngBase64).toBe("string");
+		expect(
+			pngMagic(new Uint8Array(Buffer.from(pngBase64 as string, "base64"))),
+		).toBe(true);
+		const second = await callTool(connected, "transform_asset", {
+			inputPath: SWORD_MCPX,
+			resize: "2x2",
+			resizeMode: "pixel-aware",
+		});
+		expect(second.isError).toBe(false);
+		expect(second.text).toBe(first.text);
+	}, 30_000);
+
+	test("animate_asset resize honors the pixel-aware mode", async () => {
+		const connected = await connect();
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcp-anim-pa-"));
+		const outDir = join(dir, "frames");
+		await mkdir(outDir);
+		const result = await callTool(connected, "animate_asset", {
+			mode: "resize",
+			framesDir: FRAMES_DIR,
+			frameSize: "2",
+			resizeMode: "pixel-aware",
+			outputDir: outDir,
+		});
+		expect(result.isError).toBe(false);
+		expect(result.json?.frameCount).toBe(2);
+		expect(result.json?.frameWidth).toBe(2);
+		expect(result.json?.frameHeight).toBe(2);
+		expect(result.json?.resizeMode).toBe("pixel-aware");
+		const files = result.json?.files as string[] | undefined;
+		expect(files?.length).toBe(2);
+		expect(
+			(await readFile(join(outDir, files?.[0] as string), "utf-8")).startsWith(
+				"mcpx 1",
+			),
+		).toBe(true);
+	}, 60_000);
+
 	test("animate_asset pack without a frames directory is INVALID_ARGUMENT", async () => {
 		const connected = await connect();
 		const result = await callTool(connected, "animate_asset", {
@@ -597,7 +681,7 @@ describe("mcp v0.7 twelve tools over stdio", () => {
 					{
 						kind: "external-reference",
 						reason: "vanilla-not-provided",
-						target: "minecraft:item/sword",
+						target: "assets/minecraft/models/item/sword.json",
 					},
 				],
 			});
@@ -607,7 +691,7 @@ describe("mcp v0.7 twelve tools over stdio", () => {
 		}
 	}, 30_000);
 
-	test("validate_pack_asset searches every dependencyPaths layer in order", async () => {
+	test("validate_pack_asset resolves through dependency layers in priority order", async () => {
 		const connected = await connect();
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcp-pack-"));
 		const first = await mkdtemp(join(tmpdir(), "mc-asset-mcp-dep1-"));
@@ -620,27 +704,61 @@ describe("mcp v0.7 twelve tools over stdio", () => {
 				join(dir, "assets/testpack/models/item/sword.json"),
 				JSON.stringify({ parent: "testpack:item/base" }),
 			);
+			await writeFile(
+				join(dir, "assets/testpack/models/item/axe.json"),
+				JSON.stringify({ parent: "testpack:item/extra" }),
+			);
 			await mkdir(join(first, "assets/testpack/models/item"), {
 				recursive: true,
 			});
 			await writeFile(
-				join(first, "assets/testpack/models/item/unrelated.json"),
+				join(first, "assets/testpack/models/item/base.json"),
 				JSON.stringify({ textures: {} }),
 			);
 			await mkdir(join(second, "assets/testpack/models/item"), {
 				recursive: true,
 			});
 			await writeFile(
-				join(second, "assets/testpack/models/item/base.json"),
+				join(second, "assets/testpack/models/item/extra.json"),
 				JSON.stringify({ textures: {} }),
 			);
-			const result = await callTool(connected, "validate_pack_asset", {
+			const resolved = await callTool(connected, "validate_pack_asset", {
 				packPath: dir,
 				resourcePackVersion: "75",
 				dependencyPaths: [first, second],
 			});
-			expect(result.isError).toBe(false);
-			expect(result.json?.verdict).toBe("pass");
+			expect(resolved.isError).toBe(false);
+			expect(resolved.json?.verdict).toBe("pass");
+			expect(resolved.json?.coverage).toEqual({
+				status: "complete",
+				skipped: [],
+			});
+			const swapped = await callTool(connected, "validate_pack_asset", {
+				packPath: dir,
+				resourcePackVersion: "75",
+				dependencyPaths: [second, first],
+			});
+			expect(swapped.isError).toBe(false);
+			expect(swapped.json?.verdict).toBe("pass");
+			expect(swapped.json?.coverage).toEqual({
+				status: "complete",
+				skipped: [],
+			});
+			await writeFile(
+				join(dir, "assets/testpack/models/item/hammer.json"),
+				JSON.stringify({ parent: "testpack:item/nowhere" }),
+			);
+			const missing = await callTool(connected, "validate_pack_asset", {
+				packPath: dir,
+				resourcePackVersion: "75",
+				dependencyPaths: [first, second],
+			});
+			expect(missing.isError).toBe(false);
+			expect(missing.json?.verdict).toBe("fail");
+			const codes = (
+				missing.json?.findings as Array<{ code: string }> | undefined
+			)?.map((finding) => finding.code);
+			expect(codes).toContain("PACK_MISSING_ASSET");
 		} finally {
 			const { rm } = await import("node:fs/promises");
 			await rm(dir, { recursive: true, force: true });

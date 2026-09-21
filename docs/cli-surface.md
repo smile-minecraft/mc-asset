@@ -72,7 +72,7 @@ build  [source] [--stdin] [--output <png>] [--source <mcpx>] [--stdout] [--opera
 ```text
 transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
                   [--pad <l,t,r,b>] [--pad-color <hex|transparent>]
-                  [--resize <WxH>] [--resize-mode <nearest|box>]
+                  [--resize <WxH>] [--resize-mode <nearest|box|pixel-aware>]
                   [--translate <dx,dy>] [--selection <scope>] <file flags>
 ```
 
@@ -117,7 +117,7 @@ pixelize <image> --size <N|WxH> [--preset <item|block|gui|particle|generic>] <fi
 ```
 
 - Target `--size` is required (standard Minecraft squares: 16, 32, 64, 128, or custom `WxH`).
-- Preset sets color count and cleanup heuristics for specific asset roles.
+- Preset sets the color budget, cleanup heuristics, and which pipeline stages run for an asset role. The `item` preset enables the crop, background, subject, edge, and cluster stages; all other presets keep their existing output byte-identical. The input is a single raster (never `.mcpx`); the five stages run over that one layer.
 
 ---
 
@@ -128,14 +128,18 @@ pixelize <image> --size <N|WxH> [--preset <item|block|gui|particle|generic>] <fi
 | `tile <input>` | PNG, JPEG, WebP, `.mcpx` | Report only, or PNG | Seam analysis, edge repetition analysis, or tile fix/preview. |
 | `generate <pattern>` | None | PNG and/or `.mcpx` | Deterministic procedural texture generator. |
 | `preview <input>` | PNG, JPEG, WebP, `.mcpx` | Report only, or PNG | ASCII preview, palette map, 9-slice guide, or nearest upscale. |
+| `gui-scale <input>` | PNG, JPEG, WebP, `.mcpx` | PNG | Scales a GUI sprite to an explicit target size with the mcmeta stretch/tile/nine_slice mapping. |
 
 ```text
 tile     <input> [--preview <2x2|4x4|8x8>] [--edge-match <axis>] [--brightness-match <axis>]
-                 [--output <png>] [--stdout] <file flags>
+                  [--output <png>] [--stdout] <file flags>
 generate <pattern> --size <N|WxH> --palette <name|path> --seed <int>
-                 [--output <png>] [--source <mcpx>] [--stdout] <file flags>
+                  [--output <png>] [--source <mcpx>] [--stdout] <file flags>
 preview  <input> --ascii | --palette-map | --scale <N> | --nine-slice --mcmeta <path>
-                 [--output <png>] [--stdout] <file flags>
+                  [--output <png>] [--stdout] <file flags>
+gui-scale <input> --size <N|WxH> [--mcmeta <path>]
+                  [--minecraft-version <v>|--resource-pack-version <f>]
+                  [--output <png>] [--stdout] <file flags>
 ```
 
 - `generate` supports deterministic patterns (`noise`, `clustered-noise`, `stripes`, `checker`, `gradient`, `brick`, `spots`, `veins`, `cracks`, `grain`) seeded via `--seed` (integer 0–4294967295).
@@ -144,6 +148,12 @@ preview  <input> --ascii | --palette-map | --scale <N> | --nine-slice --mcmeta <
   - `--palette-map`: Emits JSON palette indexing.
   - `--scale <N>`: Nearest-neighbor upscale PNG output.
   - `--nine-slice`: Evaluates GUI 9-slice borders from `.mcmeta` with visual guides.
+- `gui-scale` maps a GUI sprite to an explicit target size with the `.mcmeta` `gui.scaling` stretch/tile/nine_slice rules:
+  - `--mcmeta` is an explicit path and is never derived from a same-named sibling; omitting it means `stretch`.
+  - Output is PNG only.
+  - Illegal nine_slice borders are `INVALID_MCMETA` (exit 2).
+  - When the target predates `stretch_inner` (resource-pack format 42) and the field is true, it is ignored with a `STRETCH_INNER_IGNORED` warning.
+  - The existing `preview --nine-slice` stays a guide preview; the two are separate entries.
 
 ---
 
@@ -155,7 +165,7 @@ preview  <input> --ascii | --palette-map | --scale <N> | --nine-slice --mcmeta <
 | `animate unpack <sheet>` | PNG sprite sheet | Frames directory (`.mcpx`) | Slices an animation sheet into individual frames. |
 | `animate reorder` | Frames directory | Frames directory | Re-sequences animation frames according to index list. |
 | `animate resize` | Frames directory | Frames directory | Rescales all frames in an animation set. |
-| `animate validate` | Frames directory (+ `.mcmeta`) | Report only | Validates frame dimensions and count against `.mcmeta`. |
+| `animate validate` | Frames directory (+ `.mcmeta`) | Report only | Validates frame dimensions, playback-sequence indices, and per-step times against `.mcmeta`; repeated or partial playback sequences are legal. |
 | `animate preview` | Frames directory | Report or ASCII preview | Previews animation sequence. |
 
 ```text
@@ -164,7 +174,7 @@ animate pack     --frames-dir <dir> --layout <vertical|horizontal|grid> [--colum
 animate unpack   <sheet.png> --layout <vertical|horizontal|grid> --frame-size <N|WxH>
                  [--columns <N>] [--mcmeta <path>] --output-dir <dir> <file flags>
 animate reorder  --frames-dir <dir> --order <i,j,...> --output-dir <dir> <file flags>
-animate resize   --frames-dir <dir> --frame-size <N|WxH> [--resize-mode <nearest|box>]
+animate resize   --frames-dir <dir> --frame-size <N|WxH> [--resize-mode <nearest|box|pixel-aware>]
                  --output-dir <dir> <file flags>
 animate validate --frames-dir <dir> [--mcmeta <path>] [--profile <name>] [--json]
 animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--columns <N>]
@@ -185,13 +195,17 @@ animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--colum
 analyze       <image> [--profile <p>] [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
 validate      <asset> [--profile <p>] [--minecraft-version <v>] [--resource-pack-version <n>]
                       [--mcmeta <path>] [--json]
-validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
+                       [--vanilla <path>] [--dependency <path>]... [--json]
 ```
 
 - Validation exit behavior: Exit 0 on pass; Exit 3 (`VALIDATION_FAILED`) when validation checks fail; Exit 2 on invocation syntax error; Exit 4 on filesystem error.
 - Version targeting: `--minecraft-version` accepts release versions `1.19.3` through `26.3` (for example `1.19.3`, `1.21.4`, `26.3`; each release maps to its resource-pack format); `--resource-pack-version` accepts `N` or `N.M` (e.g. `84`, `97.1`) and normalizes to `major.minor`. The two flags are mutually exclusive, and omitting both keeps engine defaults.
 - Version echo: human reports print `target: minecraft <v> / resource-pack <f>`, `target: resource-pack <f>`, or `target: default (engine defaults)`; `--json` carries `version: { minecraftVersion?, resourcePackVersion? }` with normalized dotted strings.
 - No-flag resolution: `validate-pack` without a version flag reads the root `pack.mcmeta` for `pack.max_format`, then `pack.min_format`, then legacy `pack.pack_format` (integer, `[major, minor]` array, or dotted string, normalized to `major.minor`); the resolved target prints as `pack.mcmeta resource-pack <f>`. `supported_formats` is ignored for targeting, and with no usable value the scan warns once (`PACK_VERSION_UNDETERMINED`) and applies no default.
+- `--vanilla`: caller-provided vanilla resource tree (pack-root shape, including `assets/`). Once provided, `minecraft`-namespace references are confirmed against that tree; without it they report a `PACK_UNRESOLVED_EXTERNAL` warning and a coverage entry instead of a missing-asset error.
+- `--dependency`: dependency pack roots, repeatable; the first occurrence has the highest priority.
+- Coverage: `validate` and `validate-pack` reports carry `coverage: {status, skipped}`; `partial` means some checks were skipped (for example `vanilla-not-provided`, `unsupported-source-type`, `unsupported-regex`, `unknown-node-type`, `renderer-fields-not-interpreted`, `version-undetermined`, `model-documents-not-loaded`), each skip with `kind` / `reason` / `target`. Coverage never changes the exit code (pass stays 0, fail stays 3). Texture-variable resolution reads the current pack's model documents only; a variable that leaves them is reported as `model-documents-not-loaded` coverage instead of being resolved across dependency or vanilla packs.
 
 ---
 
@@ -201,7 +215,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>] [-
 mc-asset mcp
 ```
 
-Runs the native Model Context Protocol (MCP) stdio server for LLM agent integration. Provides 19 native tools without subprocess spawning:
+Runs the native Model Context Protocol (MCP) stdio server for LLM agent integration. Provides 20 native tools without subprocess spawning:
 - `analyze_asset`
 - `pixelize_asset`
 - `render_pixel_asset`
@@ -221,6 +235,7 @@ Runs the native Model Context Protocol (MCP) stdio server for LLM agent integrat
 - `preview_asset`
 - `animate_asset`
 - `validate_pack_asset`
+- `scale_gui_asset`
 
 ---
 

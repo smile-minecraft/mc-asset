@@ -72,6 +72,14 @@ export interface ValidateResult extends ValidateReport {
 	};
 	target: string;
 	mcmeta?: ValidateMcmetaSection | undefined;
+	/**
+	 * Single-file coverage is always complete: one raster plus its
+	 * explicit mcmeta carry no external references, atlas sources, or
+	 * version-gated checks, so there is nothing to skip. The field
+	 * exists so validate-family reports share one machine-readable
+	 * shape with validate-pack.
+	 */
+	coverage: { status: "complete"; skipped: [] };
 }
 
 /** Minimal human verdict: the JSON envelope is the primary output. */
@@ -81,6 +89,7 @@ export function formatHumanReport(
 ): string {
 	const lines = [
 		`verdict: ${report.verdict}`,
+		`coverage: complete`,
 		`dimensions: ${report.dimensions.width}x${report.dimensions.height}`,
 		`colors: ${report.colorCount}`,
 		`alpha: predicted ${report.alpha.predictedClassification} (opaque=${report.alpha.opaquePixels} transparent=${report.alpha.transparentPixels} partial=${report.alpha.partialAlphaPixels})`,
@@ -277,6 +286,7 @@ export async function runValidate(
 			...report,
 			version,
 			target: targetSummary,
+			coverage: { status: "complete", skipped: [] },
 			...(mcmeta !== undefined ? { mcmeta } : {}),
 		};
 		if (report.verdict === "fail") {

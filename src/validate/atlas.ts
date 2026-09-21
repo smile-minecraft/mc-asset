@@ -656,9 +656,11 @@ function executeFilterSource(
 
 /**
  * Java regex subset the engine can run: compilable by JavaScript and free
- * of Java-only constructs (quoters, possessive quantifiers, atomic groups,
- * Java inline flags, unicode property classes). Anything else answers
- * undefined so the whole filter stays unapplied.
+ * of the detected Java-only constructs (quoters, possessive quantifiers,
+ * atomic groups, Java-only anchors and escapes, Java inline flags,
+ * unicode property classes). Anything detected answers undefined so the
+ * whole filter stays unapplied; equivalence with Java outside this
+ * detected set is not claimed.
  */
 function compileAtlasPattern(raw: string): RegExp | undefined {
 	if (hasUnsupportedRegexFeatures(raw)) {
@@ -671,11 +673,64 @@ function compileAtlasPattern(raw: string): RegExp | undefined {
 	}
 }
 
+/**
+ * Java-only escapes that JavaScript compiles as identity escapes matching
+ * the bare letter (\h would match "h"): line breaks, horizontal and
+ * vertical whitespace, grapheme clusters, named characters, the escape
+ * control character, and the bell character. The scan skips escaped
+ * backslashes (\\) so a literal backslash before one of these letters
+ * never trips the detector; every legal JavaScript sequence (\d \w \s
+ * \b \B \v \xHH \uHHHH \cX and friends) passes through untouched.
+ */
+function hasJavaOnlyEscape(raw: string): boolean {
+	for (let index = 0; index < raw.length; index += 1) {
+		if (raw[index] !== "\\") {
+			continue;
+		}
+		const next = raw[index + 1];
+		if (next === undefined) {
+			return false;
+		}
+		if (next === "\\") {
+			index += 1;
+			continue;
+		}
+		if (
+			next === "R" ||
+			next === "h" ||
+			next === "H" ||
+			next === "V" ||
+			next === "X" ||
+			next === "e" ||
+			next === "a"
+		) {
+			return true;
+		}
+		if (next === "N" && raw[index + 2] === "{") {
+			return true;
+		}
+	}
+	return false;
+}
+
 function hasUnsupportedRegexFeatures(raw: string): boolean {
 	if (raw.includes("\\Q") || raw.includes("\\E")) {
 		return true;
 	}
+	// Java-only anchors compile in JavaScript as literal letters (\A would
+	// match "A"), so a filter using them must stay unapplied, never run.
+	if (
+		raw.includes("\\A") ||
+		raw.includes("\\G") ||
+		raw.includes("\\Z") ||
+		raw.includes("\\z")
+	) {
+		return true;
+	}
 	if (raw.includes("(?>")) {
+		return true;
+	}
+	if (hasJavaOnlyEscape(raw)) {
 		return true;
 	}
 	if (/\\[pP]\{/.test(raw)) {

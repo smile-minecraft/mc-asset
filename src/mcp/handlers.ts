@@ -783,6 +783,7 @@ export async function handleValidateAsset(
 			...report,
 			version: versionReportShape(target),
 			target: formatVersionTarget(target),
+			coverage: { status: "complete", skipped: [] },
 			...(mcmeta !== undefined ? { mcmeta } : {}),
 		});
 	} catch (error) {

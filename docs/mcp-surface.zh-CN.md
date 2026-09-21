@@ -6,7 +6,7 @@
 
 工具名称已冻结。早期草稿把批处理编辑工具称为 `edit_asset`，冻结后的名称是 `apply_asset_operations`。
 
-当前版本（`v0.3.1`）把 Minecraft 版本支持扩大到 `1.19.3`–`26.3`。十二个工具（`import_asset` 到 `validate_pack_asset`；`palette_asset`、`material_asset`、`preview_asset`、`animate_asset` 把 CLI 子命令合并为 `mode` 字段）是在 `v0.3.0` 为了与 CLI 完全对等而新增的。名称与输入形状在此冻结；运行中的服务器已提供全部十九个工具。
+当前版本（`v0.3.1`）把 Minecraft 版本支持扩大到 `1.19.3`–`26.3`。十二个工具（`import_asset` 到 `validate_pack_asset`；`palette_asset`、`material_asset`、`preview_asset`、`animate_asset` 把 CLI 子命令合并为 `mode` 字段）是在 `v0.3.0` 为了与 CLI 完全对等而新增的。名称与输入形状在此冻结；能力补完新增 `scale_gui_asset`，运行中的服务器已提供全部二十个工具。
 
 能力基础：与 CLI 完全对等——素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证。
 
@@ -26,6 +26,7 @@
 | `import_asset` | 位图（PNG、JPEG、WebP）加可选的批处理 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
 | `build_asset` | 可编辑的 `.mcpx` 源码加可选的批处理 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或构建后的源码 |
 | `transform_asset` | 位图或 `.mcpx`、一个几何标志（搭配选择范围会报告 `ARGUMENT_CONFLICT`） | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
+| `scale_gui_asset` | 位图或 `.mcpx`、可选的显式 `.mcmeta` 路径 | 可选的显式 PNG 路径 | 缩放后的 PNG（显式路径或内嵌字节），附解析出的缩放摘要 |
 | `quantize_asset` | 位图或 `.mcpx`、必需的颜色数、可选的选择范围 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
 | `cleanup_asset` | 位图或 `.mcpx`、可选的修复类别、可选的选择范围 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
 | `palette_asset` | 图像、一种 `mode`（`extract`／`inspect`） | 无 | 只读报告：不重复颜色，或分布、角色与对比度 |
@@ -34,7 +35,7 @@
 | `generate_asset` | 无（图案加尺寸加调色板加种子） | 可选的显式 PNG／`.mcpx` 路径 | 确定性的程序化 PNG 字节和／或可编辑源码 |
 | `preview_asset` | 位图或 `.mcpx`、一种 `mode`（`ascii`／`palette-map`／`scale`／`nine-slice`） | 可选的显式 PNG 路径（`scale`、`nine-slice`） | 只读报告或预览 PNG |
 | `animate_asset` | 帧目录或 sprite sheet、一种 `mode`（`pack`／`unpack`／`reorder`／`resize`／`validate`／`preview`） | 显式的 PNG 路径（`pack`）或输出目录（`unpack`、`reorder`、`resize`） | Sheet PNG、帧或只读报告 |
-| `validate_pack_asset` | 资源包根目录 | 无 | 附发现项的只读判定 |
+| `validate_pack_asset` | 资源包根目录，外加可选的原版资源树与依赖根目录 | 无 | 附发现项与 coverage 对象的只读判定 |
 
 ## 输入语义
 
@@ -44,10 +45,14 @@
 - 子命令工具把 CLI 模式合并为 `mode` 字段：`palette_asset`（`extract`／`inspect`）、`material_asset`（`list`／`show`）、`preview_asset`（`ascii`／`palette-map`／`scale`／`nine-slice`）、`animate_asset`（`pack`／`unpack`／`reorder`／`resize`／`validate`／`preview`）。
 - `apply_asset_operations` 接收操作对象数组，每个对象都有一个 `type`（Core 批处理词汇：`setPixel`、`drawLine`、`fillRect`、`floodFill`、图层与区域操作等），再加该类型的参数。`atomic` 默认为 true。
 - 完整的操作参数表见 [CLI Surface](cli-surface.zh-CN.md)的「批处理操作规范」节；两个接口共用同一种 JSON 形状。
+- `scale_gui_asset` 接收 `size`（`N` 或 `WxH`）、可选的 `mcmetaPath`（省略即为 `stretch`）与可选的版本字段；输出只有 PNG。
+- `validate_pack_asset` 接收可选的 `vanillaPath` 与可选的有序 `dependencyPaths`（排前者优先）。
+- `transform_asset`／`animate_asset` 的 `resizeMode` 接受 `nearest`／`box`／`pixel-aware`。
 - 省略输出路径时，产物会内嵌在工具结果中（PNG 字节、`.mcpx` 文本），不写入磁盘。
 
 ## 输出语义
 
 - 只读工具（`analyze_asset`、`validate_asset`、`palette_asset`、`material_asset`、`validate_pack_asset`）返回报告；`validate_asset` 以 `fail` 加发现项表示失败，不会抛出错误。
+- 验证类报告带 `coverage: {status, skipped}`；`partial` 会逐项列出跳过的检查及其种类与原因，且不改变状态码。
 - 混合工具（`tile_asset`、`preview_asset`、`animate_asset`）在只读模式返回报告，在写入模式只写入显式指定的输出路径或目录。
 - 会产生文件的工具返回已应用的数量、各操作的状态、警告，以及实际写出的显式路径或内嵌的产物。

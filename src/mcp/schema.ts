@@ -7,8 +7,8 @@ import { z } from "zod";
  * the capability-completion scale_gui_asset. The
  * product document once listed `edit_asset` for the batch-edit slot, and
  * §90 wins, so the frozen name is `apply_asset_operations`. The input
- * shapes below are the frozen contract; handler behavior lands in the
- * next step.
+ * shapes below are the frozen contract; handler behavior lives in
+ * `src/mcp/handlers.ts`.
  */
 
 export const MCP_TOOL_NAMES = [

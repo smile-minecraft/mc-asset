@@ -1908,7 +1908,7 @@ export const PACK_CASES: PackCase[] = [
 							{
 								kind: "external-reference",
 								reason: "vanilla-not-provided",
-								target: "minecraft:item/sword",
+								target: "assets/minecraft/textures/item/sword.png",
 							},
 						],
 					},
@@ -1951,16 +1951,99 @@ export const PACK_CASES: PackCase[] = [
 							{
 								kind: "external-reference",
 								reason: "vanilla-not-provided",
-								target: "minecraft:item/generated_tex",
+								target: "assets/minecraft/models/item/sword.json",
 							},
 							{
 								kind: "external-reference",
 								reason: "vanilla-not-provided",
-								target: "minecraft:item/sword",
+								target: "assets/minecraft/textures/item/generated_tex.png",
 							},
 						],
 					},
 					"skips sort by target bytes",
+				);
+			});
+		},
+	},
+	{
+		name: "pass: dual spellings of one target share a single canonical skip",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/a.json",
+					modelJson({ parent: "minecraft:item/sword" }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/b.json",
+					modelJson({ parent: "item/sword" }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "pass", "unresolved never fails");
+				check.equal(
+					report.findings.filter(
+						(finding) => finding.code === "PACK_UNRESOLVED_EXTERNAL",
+					).length,
+					1,
+					"one warning for one target",
+				);
+				check.deepEqual(
+					report.coverage,
+					{
+						status: "partial",
+						skipped: [
+							{
+								kind: "external-reference",
+								reason: "vanilla-not-provided",
+								target: "assets/minecraft/models/item/sword.json",
+							},
+						],
+					},
+					"dual spellings share one canonical skip",
+				);
+			});
+		},
+	},
+	{
+		name: "pass: parent miss and texture-variable exit on one rel stay two skips",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/child.json",
+					modelJson({
+						parent: "minecraft:item/absent",
+						textures: { layer0: "#base" },
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "pass", "unresolved never fails");
+				check.equal(
+					report.findings.filter(
+						(finding) => finding.code === "PACK_UNRESOLVED_EXTERNAL",
+					).length,
+					2,
+					"parent and variable exits warn separately",
+				);
+				check.deepEqual(
+					report.coverage,
+					{
+						status: "partial",
+						skipped: [
+							{
+								kind: "external-reference",
+								reason: "model-documents-not-loaded",
+								target: "assets/minecraft/models/item/absent.json",
+							},
+							{
+								kind: "external-reference",
+								reason: "vanilla-not-provided",
+								target: "assets/minecraft/models/item/absent.json",
+							},
+						],
+					},
+					"one rel carries two independent skips",
 				);
 			});
 		},

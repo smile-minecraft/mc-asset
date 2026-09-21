@@ -1607,12 +1607,15 @@ export async function scanPack(
 		}
 	}
 	// Unresolved externals: one warning per distinct target, lending the
-	// first referrer's path, plus one coverage skip each. Warnings never
-	// fail the verdict; the coverage status carries the partial signal.
-	// Skips sort by (kind, target bytes, reason), so reruns stay
-	// byte-identical across every skip source.
+	// first referrer's path, plus one coverage skip each. The skip target
+	// is the canonical rel path (the dedup key), never the first
+	// referrer's raw spelling, so `item/sword` and `minecraft:item/sword`
+	// collapse into one skip for the same file. Warnings never fail the
+	// verdict; the coverage status carries the partial signal. Skips sort
+	// by (kind, target bytes, reason), so reruns stay byte-identical
+	// across every skip source.
 	const pending = [...state.unresolved.entries()].sort((a, b) =>
-		compareBytes(a[1].value, b[1].value),
+		compareBytes(a[0], b[0]),
 	);
 	const skipped: PackCoverageSkip[] = [...atlasSkips, ...state.itemSkips];
 	for (const [target, entry] of pending) {
@@ -1642,7 +1645,7 @@ export async function scanPack(
 		skipped.push({
 			kind: "external-reference",
 			reason: "vanilla-not-provided",
-			target: entry.value,
+			target,
 		});
 		const withField = entry.field === "" ? "" : ` at "${entry.field}"`;
 		const message =

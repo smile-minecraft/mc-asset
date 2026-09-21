@@ -11,11 +11,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `AGENTS.md`, `llms.txt`, `llms-full.txt`, and this changelog.
 - README badges, a Showcase section, and a For AI agents section in all three editions.
+- `gui-scale` command and `scale_gui_asset` MCP tool for GUI sprite scaling with stretch/tile/nine_slice mapping (nineteen to twenty tools).
+- `pixel-aware` resize mode for transform, animate resize, and MCP.
+- `validate-pack` resolution layers (`--vanilla` / `--dependency`), `coverage` reports, and `PACK_UNRESOLVED_EXTERNAL` / `PACK_COVERAGE_SKIPPED` diagnostics.
+- Sprite-ID-centered atlas validation (directory / single / filter / paletted_permutations) and `PACK_GUI_SCALING_BORDER`.
+- Resource reference graph: texture variable expansion, blockstates / items tracing, `PACK_REFERENCE_CYCLE`.
+- Five-stage pixelize pipeline for the item preset.
 
 ### Changed
 
 - The README and the MCP guide document the npm install path (`npx -y mc-asset mcp`, `npm install -g mc-asset`) alongside Homebrew and source builds.
 - The MCP guide's registration section covers multiple MCP clients instead of OpenCode alone.
+- Legal animation playback sequences (repeated or partial frames, per-step time) are no longer rejected.
+- nine_slice border equality (`==`) is now invalid.
+- `pixelize` item preset output changes (five stages enabled); other presets stay byte-identical.
+- Validation reports add `coverage`; `partial` never changes the exit code.
+- `preview --nine-slice` reports an error finding for equal borders (exit code unchanged).
+- Pixelize report `stages` is now per-stage status; MCP guide examples synced.
 
 ## [0.3.1] - 2026-09-21
 

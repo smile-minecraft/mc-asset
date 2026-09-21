@@ -174,6 +174,7 @@ describe("mcmeta wiring via spawn", () => {
 			expect(body.success).toBe(true);
 			const outcome = mustResult(body);
 			expect(outcome.verdict).toBe("pass");
+			expect(outcome.coverage).toEqual({ status: "complete", skipped: [] });
 			const info = outcome.mcmeta as Record<string, unknown>;
 			expect(info).toBeDefined();
 			expect(pngBefore).toBe(sha256(new Uint8Array(await readFile(sheet))));
@@ -404,6 +405,11 @@ describe("mcmeta wiring via spawn", () => {
 				mcmeta,
 			]);
 			expect(unpack.code).toBe(0);
+			const unpacked = mustResult(parseJsonStdout(unpack));
+			expect(unpacked.frameCount).toBe(2);
+			const unpackedFiles = unpacked.files as string[];
+			expect(unpackedFiles.length).toBe(2);
+			expect([...unpackedFiles].sort()).toEqual(await listAllFiles(outDir));
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

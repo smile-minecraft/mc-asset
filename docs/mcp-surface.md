@@ -15,7 +15,8 @@ The current release (`v0.3.1`) expands Minecraft version support to
 `validate_pack_asset`; `palette_asset`, `material_asset`, `preview_asset`,
 and `animate_asset` merge CLI subcommands into a `mode` field) were added
 in `v0.3.0` for full CLI parity. Their names and input shapes are frozen
-here; the running server exposes all nineteen tools.
+here; the capability-completion round adds `scale_gui_asset`, and
+the running server exposes all twenty tools.
 
 Capability base: full CLI parity — intake and source build, spatial
 transforms, palette and quantization, the deterministic pixelize
@@ -41,6 +42,7 @@ is no `set_pixel` tool on purpose.
 | `import_asset` | Raster image (PNG, JPEG, WebP) plus an optional batch | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
 | `build_asset` | Editable `.mcpx` source plus an optional batch | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or built source |
 | `transform_asset` | Raster image or `.mcpx`, one geometry flag (a selection raises `ARGUMENT_CONFLICT`) | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
+| `scale_gui_asset` | Raster image or `.mcpx`, optional explicit `.mcmeta` path | Optional explicit PNG path | Scaled PNG (explicit path or embedded bytes) with the parsed scaling summary |
 | `quantize_asset` | Raster image or `.mcpx`, required color count, optional selection | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
 | `cleanup_asset` | Raster image or `.mcpx`, optional fix classes, optional selection | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
 | `palette_asset` | Image, one `mode` (`extract` / `inspect`) | Nothing | Read-only report: unique colors, or distribution, roles, and contrast |
@@ -49,7 +51,7 @@ is no `set_pixel` tool on purpose.
 | `generate_asset` | None (pattern + size + palette + seed) | Optional explicit PNG / `.mcpx` paths | Deterministic procedural PNG bytes and/or editable source |
 | `preview_asset` | Raster image or `.mcpx`, one `mode` (`ascii` / `palette-map` / `scale` / `nine-slice`) | Optional explicit PNG path (`scale`, `nine-slice`) | Read-only report, or preview PNG |
 | `animate_asset` | Frames directory or sprite sheet, one `mode` (`pack` / `unpack` / `reorder` / `resize` / `validate` / `preview`) | Explicit PNG path (`pack`) or output directory (`unpack`, `reorder`, `resize`) | Sheet PNG, frames, or read-only report |
-| `validate_pack_asset` | Resource pack root directory | Nothing | Read-only verdict with findings |
+| `validate_pack_asset` | Resource pack root, plus optional vanilla tree and dependency roots | Nothing | Read-only verdict with findings and a coverage object |
 
 ## Input semantics
 
@@ -73,6 +75,13 @@ is no `set_pixel` tool on purpose.
   plus its per-type arguments. `atomic` defaults to true.
 - The full per-type parameter table lives in the “Batch Operations Specification”
   section of [CLI Surface](cli-surface.md); both surfaces share that JSON shape.
+- `scale_gui_asset` takes `size` (`N` or `WxH`), an optional
+  `mcmetaPath` (omitted means `stretch`), and optional version fields;
+  output is PNG only.
+- `validate_pack_asset` takes an optional `vanillaPath` and an optional
+  ordered `dependencyPaths` (earlier entries win).
+- `transform_asset` / `animate_asset` accept `nearest` / `box` /
+  `pixel-aware` for `resizeMode`.
 - When an output path is omitted, the artifact is embedded in the tool
   result (PNG bytes, `.mcpx` text) instead of written to disk.
 
@@ -81,6 +90,9 @@ is no `set_pixel` tool on purpose.
 - Read-only tools (`analyze_asset`, `validate_asset`, `palette_asset`,
   `material_asset`, `validate_pack_asset`) return reports;
   `validate_asset` reports `fail` with findings rather than raising.
+- Validation reports carry `coverage: {status, skipped}`; `partial`
+  lists each skipped check with its kind and reason, and never changes
+  the exit code.
 - Mixed tools (`tile_asset`, `preview_asset`, `animate_asset`) return
   reports in read-only modes and write only to the explicit output
   path or directory in writing modes.
