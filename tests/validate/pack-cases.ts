@@ -990,4 +990,356 @@ export const PACK_CASES: PackCase[] = [
 			});
 		},
 	},
+	{
+		name: "pass: items/ definition with a resolvable model reference",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/sword" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ textures: {} }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "pass", "resolvable items ref passes");
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"no error findings",
+				);
+			});
+		},
+	},
+	{
+		name: "fail: items/ definition pointing at a missing model",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/gone" },
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "missing items model fails");
+				check.deepEqual(
+					uniqueCodes(report),
+					["PACK_BROKEN_REFERENCE"],
+					"only that code",
+				);
+				check.equal(
+					report.findings[0]?.level,
+					"error",
+					"broken items reference is an error",
+				);
+				check.equal(
+					report.findings[0]?.path,
+					"assets/minecraft/items/sword.json",
+					"finding points at the items definition",
+				);
+			});
+		},
+	},
+	{
+		name: "fail: items/ composite, condition, select, and range_dispatch branches resolve",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/a.json",
+					modelJson({ textures: {} }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/b.json",
+					modelJson({ textures: {} }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: {
+							type: "minecraft:composite",
+							models: [
+								{ type: "minecraft:model", model: "minecraft:item/a" },
+								{
+									type: "minecraft:condition",
+									property: "minecraft:selected",
+									on_true: {
+										type: "minecraft:model",
+										model: "minecraft:item/a",
+									},
+									on_false: {
+										type: "minecraft:model",
+										model: "minecraft:item/b",
+									},
+								},
+								{
+									type: "minecraft:select",
+									property: "minecraft:display_context",
+									cases: [
+										{
+											when: "gui",
+											model: {
+												type: "minecraft:model",
+												model: "minecraft:item/b",
+											},
+										},
+									],
+									fallback: { type: "minecraft:empty" },
+								},
+								{
+									type: "minecraft:range_dispatch",
+									property: "minecraft:count",
+									entries: [
+										{
+											threshold: 0.5,
+											model: {
+												type: "minecraft:model",
+												model: "minecraft:item/gone",
+											},
+										},
+									],
+									fallback: {
+										type: "minecraft:model",
+										model: "minecraft:item/a",
+									},
+								},
+							],
+						},
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "nested missing model fails");
+				check.deepEqual(
+					uniqueCodes(report),
+					["PACK_BROKEN_REFERENCE"],
+					"only that code",
+				);
+				check.equal(
+					report.findings[0]?.path,
+					"assets/minecraft/items/sword.json",
+					"finding points at the items definition",
+				);
+			});
+		},
+	},
+	{
+		name: "pass: items/ special, tag, and unknown types never accuse",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/chest.json",
+					modelJson({
+						model: {
+							type: "minecraft:composite",
+							models: [
+								{
+									type: "minecraft:special",
+									model: { type: "minecraft:chest" },
+									base: "minecraft:item/gone",
+								},
+								{
+									type: "minecraft:model",
+									model: "#minecraft:unresolvable_tag",
+								},
+								{ type: "minecraft:empty" },
+								{ type: "minecraft:bundle/selected_item" },
+								{
+									type: "minecraft:future_type",
+									model: "minecraft:item/also_gone",
+								},
+							],
+						},
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "pass", "unresolvable shapes skip");
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"no error findings",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"no broken-reference accusation",
+				);
+			});
+		},
+	},
+	{
+		name: "pass: items/ check stays off below the 46.0 gate",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/gone" },
+					}),
+				);
+				const report = await scanPack(dir, {
+					packFormat: "42.0",
+					target: "resource-pack 42.0",
+				});
+				check.equal(report.verdict, "pass", "below-gate skips items");
+				check.ok(
+					!codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"no items accusation below the gate",
+				);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"no error findings",
+				);
+			});
+		},
+	},
+	{
+		name: "fail: items/ gate opens exactly at 46.0",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/gone" },
+					}),
+				);
+				const atGate = await scanPack(dir, {
+					packFormat: "46.0",
+					target: "resource-pack 46.0",
+				});
+				check.equal(atGate.verdict, "fail", "46.0 runs the items check");
+				check.deepEqual(
+					uniqueCodes(atGate),
+					["PACK_BROKEN_REFERENCE"],
+					"only that code at the gate",
+				);
+				const belowGate = await scanPack(dir, {
+					packFormat: "45.0",
+					target: "resource-pack 45.0",
+				});
+				check.equal(belowGate.verdict, "pass", "45.0 skips the items check");
+				check.ok(
+					!codesOf(belowGate).includes("PACK_BROKEN_REFERENCE"),
+					"no items accusation at 45.0",
+				);
+			});
+		},
+	},
+	{
+		name: "pass: items/ check stays off without a determinable version",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/gone" },
+					}),
+				);
+				const report = await scanPack(dir, {});
+				check.equal(report.verdict, "pass", "undetermined skips items");
+				check.ok(
+					codesOf(report).includes("PACK_VERSION_UNDETERMINED"),
+					"version warning present",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"no items accusation without a version",
+				);
+			});
+		},
+	},
+	{
+		name: "fail: items/ model reference differing by case only",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/Sword" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ textures: {} }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "case-only difference fails");
+				check.deepEqual(
+					uniqueCodes(report),
+					["PACK_CASE_MISMATCH"],
+					"only that code",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"never confused with a broken reference",
+				);
+			});
+		},
+	},
+	{
+		name: "pack.mcmeta integer max_format 64 resolves as the old-regime boundary",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writeCleanBaseline(dir);
+				await writePackFile(
+					dir,
+					"pack.mcmeta",
+					modelJson({ pack: { max_format: 64, description: "old regime" } }),
+				);
+				const report = await scanPack(dir, {});
+				check.equal(
+					report.target,
+					"pack.mcmeta resource-pack 64.0",
+					"integer 64 normalizes to dotted",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_VERSION_UNDETERMINED"),
+					"no undetermined warning at the old-regime boundary",
+				);
+			});
+		},
+	},
+	{
+		name: "pack.mcmeta dotted 69.0 range resolves as the new-regime boundary",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writeCleanBaseline(dir);
+				await writePackFile(
+					dir,
+					"pack.mcmeta",
+					modelJson({
+						pack: {
+							min_format: "69.0",
+							max_format: [69, 0],
+							description: "new regime",
+						},
+					}),
+				);
+				const report = await scanPack(dir, {});
+				check.equal(
+					report.target,
+					"pack.mcmeta resource-pack 69.0",
+					"max_format wins in dotted form",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_VERSION_UNDETERMINED"),
+					"no undetermined warning at the new-regime boundary",
+				);
+			});
+		},
+	},
 ];

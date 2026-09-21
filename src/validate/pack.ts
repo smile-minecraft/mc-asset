@@ -8,6 +8,7 @@ import {
 import { decodePng } from "../io/png.ts";
 import {
 	ITEM_ATLAS_PLACEMENT_FACT,
+	ITEM_MODEL_DEFINITIONS_FACT,
 	ITEMS_ATLAS_FACT,
 	normalizePackFormat,
 	resolveVersionedFact,
@@ -312,6 +313,7 @@ interface ScanState {
 	errorFiles: Set<string>;
 	referencedTextures: Set<string>;
 	modelRels: string[];
+	itemRels: string[];
 	atlasRefs: Array<{
 		modelRel: string;
 		field: string;
@@ -698,6 +700,162 @@ function checkTextureReference(
 }
 
 /**
+ * Item model definition references (`assets/<namespace>/items/*.json`).
+ * Each definition carries one Items model tree under its `model` field;
+ * only `minecraft:model` leaves name a model file, reached through
+ * `composite` / `condition` / `select` / `range_dispatch` branches. Tag
+ * (`#`) references, `special` renderers, and any unknown shape or type
+ * skip silently: an unresolvable shape is never an accusation.
+ */
+function collectItemModelRefs(node: unknown, out: string[]): void {
+	if (typeof node === "string") {
+		if (node.trim() !== "" && !node.startsWith("#")) {
+			out.push(node);
+		}
+		return;
+	}
+	if (!isRecord(node)) {
+		return;
+	}
+	const rawType = node.type;
+	if (typeof rawType !== "string") {
+		return;
+	}
+	const cut = rawType.lastIndexOf(":");
+	const type = cut < 0 ? rawType : rawType.slice(cut + 1);
+	switch (type) {
+		case "model": {
+			collectItemModelRefs(node.model, out);
+			return;
+		}
+		case "composite": {
+			const models = node.models;
+			if (Array.isArray(models)) {
+				for (const child of models) {
+					collectItemModelRefs(child, out);
+				}
+			}
+			return;
+		}
+		case "condition": {
+			collectItemModelRefs(node.on_true, out);
+			collectItemModelRefs(node.on_false, out);
+			return;
+		}
+		case "select": {
+			const cases = node.cases;
+			if (Array.isArray(cases)) {
+				for (const entry of cases) {
+					if (isRecord(entry)) {
+						collectItemModelRefs(entry.model, out);
+					}
+				}
+			}
+			collectItemModelRefs(node.fallback, out);
+			return;
+		}
+		case "range_dispatch": {
+			const entries = node.entries;
+			if (Array.isArray(entries)) {
+				for (const entry of entries) {
+					if (isRecord(entry)) {
+						collectItemModelRefs(entry.model, out);
+					}
+				}
+			}
+			collectItemModelRefs(node.fallback, out);
+			return;
+		}
+		default: {
+			// `empty`, `bundle/selected_item`, `special`, and anything
+			// unknown: no statically resolvable model reference.
+			return;
+		}
+	}
+}
+
+/**
+ * Item model definition check, gated on the item-model-definitions fact
+ * (since 46.0): below the gate, or with no determinable version, every
+ * definition skips. Missing targets are PACK_BROKEN_REFERENCE and
+ * case-only differences are PACK_CASE_MISMATCH; one bad file never drags
+ * a second code along.
+ */
+function checkItemModelDefinitions(
+	state: ScanState,
+	knownFiles: Set<string>,
+	lowerIndex: Map<string, string>,
+	options: PackScanOptions | undefined,
+	mcmetaDoc: unknown,
+): void {
+	const packFormat =
+		options?.packFormat ?? resourcePackFormatFromMcmeta(mcmetaDoc);
+	if (packFormat === undefined) {
+		return;
+	}
+	if (
+		resolveVersionedFact(ITEM_MODEL_DEFINITIONS_FACT, packFormat) === undefined
+	) {
+		return;
+	}
+	for (const rel of state.itemRels) {
+		if (state.errorFiles.has(rel)) {
+			continue;
+		}
+		const doc = state.docs.get(rel);
+		if (doc === undefined || !isRecord(doc)) {
+			continue;
+		}
+		const refs: string[] = [];
+		collectItemModelRefs(doc.model, refs);
+		for (const value of refs) {
+			if (state.errorFiles.has(rel)) {
+				break;
+			}
+			const problems = referenceLocationProblems(value);
+			if (problems.length > 0) {
+				for (const finding of problems) {
+					push(
+						state.findings,
+						finding.code,
+						finding.level,
+						finding.message,
+						rel,
+					);
+				}
+				state.errorFiles.add(rel);
+				break;
+			}
+			const target = resolveParentRel(value);
+			if (knownFiles.has(target)) {
+				continue;
+			}
+			const folded = lowerIndex.get(target.toLowerCase());
+			if (folded !== undefined) {
+				push(
+					state.findings,
+					"PACK_CASE_MISMATCH",
+					"error",
+					`model "${value}" in "${rel}" differs from "${folded}" by case only.`,
+					rel,
+				);
+				state.errorFiles.add(rel);
+				break;
+			}
+			push(
+				state.findings,
+				"PACK_BROKEN_REFERENCE",
+				"error",
+				`model "${value}" in "${rel}" has no model at "${target}".`,
+				rel,
+			);
+			state.errorFiles.add(rel);
+			break;
+		}
+	}
+}
+
+/**
  * Atlas verdicts over texture references that resolved to real files.
  * Missing files already carry PACK_MISSING_TEXTURE and never reach this
  * pass, so the two §53 errors stay mutually exclusive. The required atlas
@@ -777,6 +935,7 @@ export async function scanPack(
 		errorFiles: new Set(),
 		referencedTextures: new Set(),
 		modelRels: [],
+		itemRels: [],
 		atlasRefs: [],
 	};
 	for (const rel of rels) {
@@ -794,12 +953,20 @@ export async function scanPack(
 			);
 		}
 		await checkSingleFile(rel, bytes, state);
+		const lowRel = rel.toLowerCase();
 		if (
 			rel.startsWith("assets/") &&
-			rel.toLowerCase().endsWith(".json") &&
-			rel.toLowerCase().includes("/models/")
+			lowRel.endsWith(".json") &&
+			lowRel.includes("/models/")
 		) {
 			state.modelRels.push(rel);
+		}
+		const split = splitNamespace(rel);
+		if (
+			split?.rest.toLowerCase().startsWith("items/") &&
+			lowRel.endsWith(".json")
+		) {
+			state.itemRels.push(rel);
 		}
 	}
 	// The root pack.mcmeta parses for INVALID_JSON and, with no version
@@ -831,6 +998,7 @@ export async function scanPack(
 	for (const rel of state.modelRels) {
 		checkModelReferences(rel, knownFiles, lowerIndex, state);
 	}
+	checkItemModelDefinitions(state, knownFiles, lowerIndex, options, mcmetaDoc);
 	checkAtlasCoverage(state, options, mcmetaDoc);
 	// Orphan is warning-only over lowercase-.png textures that decoded
 	// cleanly, and it skips files that already carry an error, so one
