@@ -1,9 +1,14 @@
 import { Buffer } from "node:buffer";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { McAssetError } from "../../src/core/errors.ts";
 import { decodeImage, detectImageFormat } from "../../src/io/decode.ts";
+import {
+	WEBP_DEC_WASM_BASE64,
+	WEBP_DEC_WASM_BYTE_LENGTH,
+} from "../../src/io/webp-wasm-b64.ts";
 
 /**
  * Fixture provenance (self-made, no Mojang assets):
@@ -13,6 +18,20 @@ import { decodeImage, detectImageFormat } from "../../src/io/decode.ts";
  *   alpha) and encoded with jpeg-js 0.4.4 quality 90.
  * - px-lossless.webp: cwebp 1.6.0 `-lossless -exact` from px-8x8.png.
  * - px-lossy-q80.webp: cwebp 1.6.0 `-q 80` from px-8x8.png.
+ * - px-progressive.jpg: `jpegtran -progressive px-8x8.jpg` (libjpeg-turbo).
+ * - px-anim.webp: `img2webp -d 100 px-8x8.png -d 200 frame2-red.png`
+ *   (frame2 is a solid-red 8x8 PNG made with pngjs); 2 frames, lossless.
+ * - px-exif.webp: `webpmux -set exif min.exif px-lossless.webp`
+ *   (min.exif is an 18-byte `Exif\0\0` II* header stub).
+ * - px-icc.webp: `webpmux -set icc min.icc px-lossless.webp`
+ *   (min.icc is 1024 opaque bytes; the decoder ignores the payload).
+ * - wide-5000x16.jpg: python3-written 5000x16 flat PPM via
+ *   `cjpeg -quality 90` (width over the 4096 guard).
+ * - wide-5000x16.webp: `cwebp -q 80` from wide-5000x16.jpg.
+ * - px-bands-2048.png: pngjs-written 2048x2048 band pattern with the
+ *   same corner probes as px-8x8.png.
+ * - px-bands-1024.jpg: `cjpeg -quality 90` from the 1024x1024 variant
+ *   of the same band pattern.
  */
 
 const FIXTURES = join(
@@ -57,6 +76,36 @@ function pngProbe(
 		return [pixels[o], pixels[o + 1], pixels[o + 2], pixels[o + 3]];
 	};
 	check.deepEqual(at(0, 0), [200, 10, 90, 0], "hidden-RGB probe survives");
+}
+
+/** Minimal P6 (djpeg `-pnm`) header parser; djpeg never emits comments. */
+function parseP6(bytes: Uint8Array): {
+	width: number;
+	height: number;
+	data: Uint8Array;
+} {
+	let pos = 0;
+	const tokens: string[] = [];
+	while (tokens.length < 4) {
+		while (pos < bytes.length && (bytes[pos] ?? 0) <= 32) {
+			pos += 1;
+		}
+		if (pos >= bytes.length) {
+			throw new Error("truncated PPM header");
+		}
+		const start = pos;
+		while (pos < bytes.length && (bytes[pos] ?? 0) > 32) {
+			pos += 1;
+		}
+		tokens.push(Buffer.from(bytes.subarray(start, pos)).toString("ascii"));
+	}
+	if (tokens[0] !== "P6") {
+		throw new Error(`unexpected PPM magic ${tokens[0] ?? "?"}`);
+	}
+	const width = Number(tokens[1]);
+	const height = Number(tokens[2]);
+	pos += 1; // single delimiter after the maxval token
+	return { width, height, data: bytes.slice(pos, pos + width * height * 3) };
 }
 
 export const DECODE_CASES: DecodeCase[] = [
@@ -172,6 +221,135 @@ export const DECODE_CASES: DecodeCase[] = [
 				return;
 			}
 			check.fail("gif input must be rejected");
+		},
+	},
+	{
+		name: "progressive jpeg decodes to opaque 8x8",
+		run: async (check) => {
+			const decoded = await decodeImage(fixture("px-progressive.jpg"));
+			check.equal(decoded.format, "jpeg", "format");
+			check.equal(decoded.width, 8, "width");
+			check.equal(decoded.height, 8, "height");
+			check.equal(decoded.pixels[3], 255, "first alpha opaque");
+			check.equal(
+				decoded.pixels[decoded.pixels.length - 1],
+				255,
+				"last alpha opaque",
+			);
+		},
+	},
+	{
+		name: "jpeg matches djpeg reference within tolerance (baseline and progressive)",
+		run: async (check) => {
+			let compared = 0;
+			for (const name of ["px-8x8.jpg", "px-progressive.jpg"]) {
+				let ppm: Buffer;
+				try {
+					ppm = execFileSync("djpeg", ["-pnm", join(FIXTURES, name)], {
+						maxBuffer: 4 * 1024 * 1024,
+					});
+				} catch (error) {
+					if ((error as { code?: unknown } | null)?.code === "ENOENT") {
+						return; // djpeg absent: reference comparison skipped
+					}
+					throw error;
+				}
+				const ref = parseP6(new Uint8Array(ppm));
+				const decoded = await decodeImage(fixture(name));
+				check.equal(decoded.width, ref.width, `${name} width`);
+				check.equal(decoded.height, ref.height, `${name} height`);
+				let max = 0;
+				let sum = 0;
+				const count = ref.width * ref.height;
+				for (let i = 0; i < count; i += 1) {
+					for (let c = 0; c < 3; c += 1) {
+						const delta = Math.abs(
+							(decoded.pixels[i * 4 + c] ?? 0) - (ref.data[i * 3 + c] ?? 0),
+						);
+						if (delta > max) {
+							max = delta;
+						}
+						sum += delta;
+					}
+				}
+				check.ok(max <= 4, `${name} max channel delta ${max} within ±4`);
+				check.ok(sum / (count * 3) < 1, `${name} mean channel delta within 1`);
+				compared += 1;
+			}
+			check.equal(compared, 2, "both references compared");
+		},
+	},
+	{
+		name: "animated webp is rejected with UNSUPPORTED_IMAGE_FORMAT (single-frame scope)",
+		run: async (check) => {
+			await check.throwsCodeAsync(
+				() => decodeImage(fixture("px-anim.webp")),
+				"UNSUPPORTED_IMAGE_FORMAT",
+				"animated webp",
+			);
+		},
+	},
+	{
+		name: "webp with EXIF or ICC metadata decodes with probe intact",
+		run: async (check) => {
+			for (const name of ["px-exif.webp", "px-icc.webp"]) {
+				const decoded = await decodeImage(fixture(name));
+				check.equal(decoded.format, "webp", `${name} format`);
+				pngProbe(check, decoded.pixels, decoded.width, decoded.height);
+			}
+		},
+	},
+	{
+		name: "oversize jpeg and webp report INVALID_DIMENSION",
+		run: async (check) => {
+			await check.throwsCodeAsync(
+				() => decodeImage(fixture("wide-5000x16.jpg")),
+				"INVALID_DIMENSION",
+				"wide jpeg",
+			);
+			await check.throwsCodeAsync(
+				() => decodeImage(fixture("wide-5000x16.webp")),
+				"INVALID_DIMENSION",
+				"wide webp",
+			);
+		},
+	},
+	{
+		name: "embedded webp wasm payload matches declared length and magic",
+		run: async (check) => {
+			const bytes = new Uint8Array(
+				Buffer.from(WEBP_DEC_WASM_BASE64.join(""), "base64"),
+			);
+			check.equal(bytes.length, WEBP_DEC_WASM_BYTE_LENGTH, "payload length");
+			check.deepEqual(
+				Array.from(bytes.subarray(0, 4)),
+				[0, 0x61, 0x73, 0x6d],
+				"wasm magic",
+			);
+		},
+	},
+	{
+		name: "large images decode inside resource guards (2048 png, 1024 jpeg)",
+		run: async (check) => {
+			const png = await decodeImage(fixture("px-bands-2048.png"));
+			check.equal(png.format, "png", "png format");
+			check.equal(png.width, 2048, "png width");
+			check.equal(png.height, 2048, "png height");
+			check.deepEqual(
+				Array.from(png.pixels.subarray(0, 4)),
+				[200, 10, 90, 0],
+				"png corner probe",
+			);
+			const jpg = await decodeImage(fixture("px-bands-1024.jpg"));
+			check.equal(jpg.format, "jpeg", "jpeg format");
+			check.equal(jpg.width, 1024, "jpeg width");
+			check.equal(jpg.height, 1024, "jpeg height");
+			check.equal(jpg.pixels[3], 255, "jpeg first alpha opaque");
+			check.equal(
+				jpg.pixels[jpg.pixels.length - 1],
+				255,
+				"jpeg last alpha opaque",
+			);
 		},
 	},
 ];
