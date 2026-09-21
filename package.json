@@ -1,6 +1,6 @@
 {
 	"name": "mc-asset",
-	"version": "0.3.0",
+	"version": "0.3.1",
 	"description": "Pixel-native Minecraft asset toolchain (scaffold)",
 	"license": "MIT",
 	"type": "module",
