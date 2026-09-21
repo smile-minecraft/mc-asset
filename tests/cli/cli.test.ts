@@ -114,6 +114,7 @@ describe("cli atomic write and output guards", () => {
 				force: true,
 			});
 			let code = "";
+			let message = "";
 			try {
 				await atomicWriteFile(
 					target,
@@ -122,8 +123,10 @@ describe("cli atomic write and output guards", () => {
 				);
 			} catch (error) {
 				code = error instanceof McAssetError ? error.code : String(error);
+				message = error instanceof McAssetError ? error.message : String(error);
 			}
 			expect(code).toBe("OUTPUT_EXISTS");
+			expect(message).toContain("--force");
 			expect(await readFile(target, "utf-8")).toBe("original");
 			expect(await listTempFiles(dir)).toEqual([]);
 		} finally {
@@ -152,12 +155,15 @@ describe("cli atomic write and output guards", () => {
 		try {
 			const target = join(dir, "no-such-dir", "nested", "out.bin");
 			let code = "";
+			let message = "";
 			try {
 				await atomicWriteFile(target, new TextEncoder().encode("x"), {});
 			} catch (error) {
 				code = error instanceof McAssetError ? error.code : String(error);
+				message = error instanceof McAssetError ? error.message : String(error);
 			}
 			expect(code).toBe("FILESYSTEM_ERROR");
+			expect(message).toContain("--mkdir");
 			await expect(stat(join(dir, "no-such-dir"))).rejects.toThrow();
 		} finally {
 			await rm(dir, { recursive: true, force: true });

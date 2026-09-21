@@ -4,6 +4,9 @@
 	"description": "Pixel-native Minecraft asset toolchain (scaffold)",
 	"license": "MIT",
 	"type": "module",
+	"engines": {
+		"node": ">=22"
+	},
 	"bin": {
 		"mc-asset": "./bin/mc-asset.js"
 	},

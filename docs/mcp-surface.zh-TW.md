@@ -43,6 +43,7 @@
 - `minecraftVersion`／`resourcePackVersion`（analyze、validate、validate-pack）用來選擇相容性行為，接受 release 版本 `1.19.3` 到 `26.3`（例如 `1.19.3`、`1.21.4`、`26.3`），以及資源包版本 `N` 或 `N.M`（例如 `84`、`97.1`），會正規化為 `major.minor`。省略時使用引擎預設值。
 - 子命令工具把 CLI 模式合併為 `mode` 欄位：`palette_asset`（`extract`／`inspect`）、`material_asset`（`list`／`show`）、`preview_asset`（`ascii`／`palette-map`／`scale`／`nine-slice`）、`animate_asset`（`pack`／`unpack`／`reorder`／`resize`／`validate`／`preview`）。
 - `apply_asset_operations` 接收操作物件陣列，每個物件都有一個 `type`（Core 批次詞彙：`setPixel`、`drawLine`、`fillRect`、`floodFill`、圖層與區域操作等），再加該類型的參數。`atomic` 預設為 true。
+- 完整的操作參數表見 [CLI Surface](cli-surface.zh-TW.md)的「批次操作規格」節；兩個介面共用同一種 JSON 形狀。
 - 省略輸出路徑時，成品會內嵌在工具結果中（PNG 位元組、`.mcpx` 文字），不寫入磁碟。
 
 ## 輸出語意

@@ -70,6 +70,8 @@ is no `set_pixel` tool on purpose.
   with a `type` (the Core batch vocabulary: `setPixel`, `drawLine`,
   `fillRect`, `floodFill`, layer and region operations, and the rest)
   plus its per-type arguments. `atomic` defaults to true.
+- The full per-type parameter table lives in the “Batch Operations Specification”
+  section of [CLI Surface](cli-surface.md); both surfaces share that JSON shape.
 - When an output path is omitted, the artifact is embedded in the tool
   result (PNG bytes, `.mcpx` text) instead of written to disk.
 

@@ -240,6 +240,33 @@ mc-asset mcp
 ]
 ```
 
+同樣的 JSON 形狀也適用於 MCP 的 `apply_asset_operations`：可使用裸陣列或 `{"operations": [...]}` 包裹；空陣列是合法的無操作。每個操作都可附選用的字串 `id`（同一批次內不可重複）。單圖層畫布可省略 `layerId`（預設為唯一圖層）；多圖層畫布必須明確指定。色彩為 `transparent`、`#RRGGBB` 或 `#RRGGBBAA`；座標皆為整數，不做四捨五入。
+
+| `type` | 必填鍵 | 選填鍵 | 範例 |
+|---|---|---|---|
+| `setPixel` | `x`、`y`、`color` | `layerId`、`id` | `{"type": "setPixel", "x": 0, "y": 0, "color": "#FF0000FF"}` |
+| `clearPixel` | `x`、`y` | `layerId`、`id` | `{"type": "clearPixel", "x": 0, "y": 0}` |
+| `drawLine` | `from`、`to`、`color` | `layerId`、`id` | `{"type": "drawLine", "from": [0, 0], "to": [15, 15], "color": "#00FF00FF"}` |
+| `drawRect` | `rect`、`color` | `layerId`、`id` | `{"type": "drawRect", "rect": {"x": 2, "y": 2, "width": 4, "height": 4}, "color": "#0000FFFF"}` |
+| `fillRect` | `rect`、`color` | `layerId`、`id` | `{"type": "fillRect", "rect": {"x": 8, "y": 8, "width": 4, "height": 4}, "color": "#FFFF00FF"}` |
+| `floodFill` | `x`、`y`、`color` | `layerId`、`id` | `{"type": "floodFill", "x": 3, "y": 3, "color": "#FF00FFFF"}` |
+| `createLayer` | （無） | `layerId`（新 id）、`name`、`id` | `{"type": "createLayer", "layerId": "shade"}` |
+| `removeLayer` | `layerId` | `id` | `{"type": "removeLayer", "layerId": "shade"}` |
+| `renameLayer` | `layerId`、`name` | `id` | `{"type": "renameLayer", "layerId": "shade", "name": "shadow"}` |
+| `reorderLayer` | `layerId`、`toIndex` | `id` | `{"type": "reorderLayer", "layerId": "shade", "toIndex": 0}` |
+| `duplicateLayer` | `layerId` | `newLayerId`、`name`、`id` | `{"type": "duplicateLayer", "layerId": "shade", "newLayerId": "shade-copy"}` |
+| `mergeLayer` | `sourceId`、`targetId` | `id` | `{"type": "mergeLayer", "sourceId": "shade", "targetId": "base"}` |
+| `clearLayer` | `layerId` | `id` | `{"type": "clearLayer", "layerId": "shade"}` |
+| `fillLayer` | `layerId`、`color` | `id` | `{"type": "fillLayer", "layerId": "shade", "color": "#0000FFFF"}` |
+| `moveLayer` | `layerId`、`dx`、`dy` | `id` | `{"type": "moveLayer", "layerId": "shade", "dx": 1, "dy": -1}` |
+| `createRegion` | （無） | `regionId`（新 id）、`name`、`id` | `{"type": "createRegion", "regionId": "mask"}` |
+| `removeRegion` | `regionId` | `id` | `{"type": "removeRegion", "regionId": "mask"}` |
+| `renameRegion` | `regionId`、`name` | `id` | `{"type": "renameRegion", "regionId": "mask", "name": "cutout"}` |
+| `reorderRegion` | `regionId`、`toIndex` | `id` | `{"type": "reorderRegion", "regionId": "mask", "toIndex": 0}` |
+| `setRegionPixel` | `regionId`、`x`、`y`、`value` | `id` | `{"type": "setRegionPixel", "regionId": "mask", "x": 1, "y": 2, "value": 1}` |
+
+`from`／`to` 為 `[x, y]` 整數對；`rect` 為 `{x, y, width, height}`，寬高至少為 1；`toIndex` 為 0 或正整數；`value` 為 `0`（外部）或 `1`（內部）。未知的 `type` 為 `INVALID_ARGUMENT`；重複的 `id` 為 `DUPLICATE_OPERATION_ID`。
+
 批次執行是原子的：只要有一個操作無效，就會回復所有變更。
 
 ---

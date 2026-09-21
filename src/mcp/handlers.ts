@@ -201,15 +201,32 @@ function stripCodePrefix(message: string): string {
 	return message.replace(/^\[[A-Z0-9_]+\] /, "");
 }
 
+/**
+ * MCP has no --force/--mkdir flags, so the CLI hint sentences attached to
+ * OUTPUT_EXISTS and FILESYSTEM_ERROR are unactionable here and get dropped.
+ * Codes, shapes, and the remaining wording stay identical; the neutral
+ * remainder matches the assertOutputDirectory style below.
+ */
+function toMcpMessage(code: string, message: string): string {
+	if (code === "OUTPUT_EXISTS") {
+		return message.replace(" Pass --force to overwrite.", "");
+	}
+	if (code === "FILESYSTEM_ERROR") {
+		return message.replace(" Pass --mkdir to create it.", "");
+	}
+	return message;
+}
+
 function errorResult(error: unknown): McpTextResult {
 	if (error instanceof McAssetError) {
+		const message = toMcpMessage(error.code, stripCodePrefix(error.message));
 		return {
 			content: [
 				{
 					type: "text",
 					text: JSON.stringify({
 						code: error.code,
-						message: stripCodePrefix(error.message),
+						message,
 						...(error.details === undefined ? {} : { details: error.details }),
 					}),
 				},
