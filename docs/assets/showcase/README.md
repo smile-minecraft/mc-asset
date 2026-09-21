@@ -5,7 +5,7 @@ No external image tools were used. All procedural sources use fixed seeds, so
 the full set below is reproducible end to end. The showcase sources are
 deliberately chosen so each effect stays visible at README display size:
 high-detail noise for pixelize, a 64-band gradient for quantize, and a
-coarse brick for tiling.
+hand-built seamless brick for tiling.
 
 Conventions used in the commands: `OUT=docs/assets/showcase`,
 `SCRATCH=/tmp/showcase` (throwaway intermediates only; nothing is read from
@@ -22,7 +22,8 @@ crisp.
 | `quantize-before.png` | 256×256 | The 64-band gradient, ×4 nearest upscale (the "before") |
 | `quantize-after.png` | 256×256 | Same gradient through `quantize --colors 8`, then ×4 (the "after") |
 | `variant-iron.png` / `variant-gold.png` / `variant-wood.png` / `variant-crystal.png` | 64×64 each | One 16px spots swatch recolored into four builtin materials, ×4 nearest |
-| `tile-pattern.png` | 128×128 | Brick swatch (32px source, ×4 nearest) used as the tile source |
+| `tile-source.grid` | 32×32 ASCII grid | Hand-built running-bond brick: the tile source |
+| `tile-pattern.png` | 128×128 | The 32px hand-built source, ×4 nearest (the tile source) |
 | `tile-preview-2x2.png` | 256×256 | 2×2 repeat preview of the 32px source (64px preview, ×4 nearest) |
 | `anim/frame-1.grid` … `anim/frame-4.grid` | 16×16 ASCII grids | Hand-authored "central glow pulse" frames |
 | `anim-sheet.png` | 64×256 | The four frames packed vertically (16×64 sheet), ×4 nearest |
@@ -87,22 +88,45 @@ done
 
 ## 4. Tile pattern and 2×2 preview
 
-Base: `brick`, 32px, seed 5, palette `stone` — a coarse 3-color brick whose
-mortar lines stay legible at small sizes. Displayed ×4 nearest (128px); the
-2×2 preview is tiled from the same 32px source (64px) and shown ×4 (256px).
-Seam analysis of the source (seam=h:0.000000 v:0.263111 c:0.508674
-repeat=1.000000) is printed by the `tile` call itself.
+Source: `tile-source.grid`, a hand-built 32×32 `[grid]` brick in running
+bond, using the stone trio — mortar `#17171A`, even courses `#A3A3AB`, odd
+courses `#E8E8EE`. Every period divides 32 so the source tiles natively,
+with no edge-match or brightness-match corrections:
+
+- Vertical: 3px brick + 1px mortar × 8 courses (32 ÷ 4 = 8). One course
+  straddles the top/bottom edge (rows 31, 0, 1), so the top and bottom
+  lines are byte-equal and the 4px rhythm continues across the boundary.
+- Horizontal: 7px brick + 1px mortar, period 8 (32 ÷ 8 = 4 repeats per
+  row); odd courses shift by 4. Mortar sits at `x % 8 == 2` on even
+  courses and `x % 8 == 6` on odd courses, so both edges fall mid-brick
+  and the left and right lines are byte-equal; the 7+1 rhythm continues
+  across the boundary (5 + 2 bricks on even courses, 1 + 6 on odd).
+
+Rendered with `render` to 32×32, displayed ×4 nearest (128px); the 2×2
+preview is tiled from the same 32px source (64px) and shown ×4 (256px).
+Seam analysis of the source is printed by the `tile` call itself:
+seam=h:0.000000 v:0.000000 c:0.000000, tileFriendly=true. (The earlier
+`generate brick` source is retired: its 2px-brick + 1px-mortar rhythm has
+period 3, and 32 is not divisible by 3, so the vertical join dropped a
+mortar line. Edge-matching could zero the score but could not restore the
+rhythm, so the source was redrawn by hand instead.)
 
 ```sh
-mc-asset generate brick --size 32 --seed 5 --palette stone \
-  --output $SCRATCH/brick32.png --source $SCRATCH/brick32.mcpx
-mc-asset transform $SCRATCH/brick32.png --resize 128x128 --resize-mode nearest \
+mc-asset render $OUT/tile-source.grid \
+  --output $SCRATCH/tile32.png --source $SCRATCH/tile32.mcpx
+mc-asset tile $SCRATCH/tile32.png
+mc-asset transform $SCRATCH/tile32.png --resize 128x128 --resize-mode nearest \
   --output $OUT/tile-pattern.png
-mc-asset tile $SCRATCH/brick32.png --preview 2x2 \
-  --output $SCRATCH/brick-preview64.png
-mc-asset transform $SCRATCH/brick-preview64.png --resize 256x256 --resize-mode nearest \
+mc-asset tile $SCRATCH/tile32.png --preview 2x2 \
+  --output $SCRATCH/tile-preview64.png
+mc-asset transform $SCRATCH/tile-preview64.png --resize 256x256 --resize-mode nearest \
   --output $OUT/tile-preview-2x2.png
 ```
+
+Rhythm check (the acceptance test for the join): ASCII-read the 64px
+preview and confirm the mortar lines keep their 4px rhythm across the
+tile boundary at rows 31/32 — three brick rows, one mortar row, no
+double-height brick band where the tiles meet.
 
 ## 5. Animation: glow pulse sheet
 
