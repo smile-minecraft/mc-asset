@@ -6,7 +6,7 @@
 
 工具名稱已凍結。早期草稿把批次編輯工具稱為 `edit_asset`，凍結後的名稱是 `apply_asset_operations`。
 
-目前版本（`v0.3.0`）新增十二個工具（`import_asset` 到 `validate_pack_asset`；`palette_asset`、`material_asset`、`preview_asset`、`animate_asset` 把 CLI 子命令合併為 `mode` 欄位），達成與 CLI 完全對等。名稱與輸入形狀在此凍結；執行中的伺服器已提供全部十九個工具。
+目前版本（`v0.3.1`）把 Minecraft 版本支援擴大到 `1.19.3`–`26.3`。十二個工具（`import_asset` 到 `validate_pack_asset`；`palette_asset`、`material_asset`、`preview_asset`、`animate_asset` 把 CLI 子命令合併為 `mode` 欄位）是在 `v0.3.0` 為了與 CLI 完全對等而新增的。名稱與輸入形狀在此凍結；執行中的伺服器已提供全部十九個工具。
 
 能力基礎：與 CLI 完全對等——素材輸入與來源建置、空間變換、調色盤與減色、確定性像素化管線、程序化生成、磁磚與預覽、動畫 sprite sheet，以及單一素材與整個資源包的驗證。
 

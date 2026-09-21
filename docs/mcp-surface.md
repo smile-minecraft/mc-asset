@@ -10,11 +10,12 @@ reimplements image logic.
 Tool names are frozen. Earlier drafts called the batch-edit tool
 `edit_asset`; the frozen name is `apply_asset_operations`.
 
-The current release (`v0.3.0`) adds twelve tools (`import_asset` through `validate_pack_asset`;
-`palette_asset`, `material_asset`, `preview_asset`, and `animate_asset`
-merge CLI subcommands into a `mode` field) for full CLI parity. Their
-names and input shapes are frozen here; the running server exposes
-all nineteen tools.
+The current release (`v0.3.1`) expands Minecraft version support to
+`1.19.3`–`26.3`. The twelve tools (`import_asset` through
+`validate_pack_asset`; `palette_asset`, `material_asset`, `preview_asset`,
+and `animate_asset` merge CLI subcommands into a `mode` field) were added
+in `v0.3.0` for full CLI parity. Their names and input shapes are frozen
+here; the running server exposes all nineteen tools.
 
 Capability base: full CLI parity — intake and source build, spatial
 transforms, palette and quantization, the deterministic pixelize
