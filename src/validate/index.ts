@@ -1,4 +1,24 @@
 export type {
+	AtlasCoverage,
+	AtlasCoverageDiagnosis,
+	AtlasLayerInput,
+	AtlasLayersParseResult,
+	AtlasParseOptions,
+	AtlasPolicy,
+	AtlasSkip,
+	AtlasSkipKind,
+	AtlasSpriteEntry,
+	AtlasSpriteRules,
+} from "./atlas.ts";
+export {
+	atlasCoverageDetail,
+	atlasNameOf,
+	atlasSpriteCoverageFor,
+	parseAtlasLayers,
+	requiredAtlasForModel,
+	spriteIdForTextureValue,
+} from "./atlas.ts";
+export type {
 	ValidateFinding,
 	ValidateFindingLevel,
 	ValidateOptions,

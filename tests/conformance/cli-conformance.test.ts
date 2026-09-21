@@ -2280,14 +2280,50 @@ describe("conformance: V0.5 validate-pack verdict and determinism", () => {
 					command: string;
 					target: string;
 					verdict: string;
-					findings: unknown[];
+					findings: Array<{
+						code: string;
+						level: string;
+						message: string;
+						path?: string;
+					}>;
+					coverage: {
+						status: string;
+						skipped: Array<{
+							kind: string;
+							reason: string;
+							target: string;
+							detail?: string;
+						}>;
+					};
 				};
 			};
 			expect(envelope.success).toBe(true);
 			expect(envelope.result.command).toBe("validate-pack");
 			expect(envelope.result.verdict).toBe("pass");
 			expect(envelope.result.target).toContain("75");
-			expect(envelope.result.findings).toEqual([]);
+			// No vanilla tree means the merged items atlas is unknowable: one
+			// diagnosed warning plus one coverage skip, verdict still pass.
+			expect(envelope.result.findings).toEqual([
+				{
+					code: "PACK_COVERAGE_SKIPPED",
+					level: "warning",
+					message:
+						'atlas "items" for sprite "minecraft:item/sword" in "assets/minecraft/models/item/sword.json" cannot be completed without the vanilla resource tree; coverage recorded as skipped.',
+					path: "assets/minecraft/models/item/sword.json",
+				},
+			]);
+			expect(envelope.result.coverage).toEqual({
+				status: "partial",
+				skipped: [
+					{
+						kind: "atlas-source",
+						reason: "vanilla-not-provided",
+						target: "items",
+						detail:
+							'sprite "minecraft:item/sword" needs the vanilla atlas sources',
+					},
+				],
+			});
 			expect(result.stderr).not.toContain('"success":true');
 			expect(await snapshotTree(dir)).toBe(before);
 		} finally {
@@ -2503,12 +2539,33 @@ describe("conformance: validate-pack external resolution layers", () => {
 				success: boolean;
 				result: {
 					verdict: string;
-					coverage: { status: string; skipped: unknown[] };
+					coverage: {
+						status: string;
+						skipped: Array<{
+							kind: string;
+							reason: string;
+							target: string;
+							detail?: string;
+						}>;
+					};
 				};
 			};
 			expect(envelope.success).toBe(true);
 			expect(envelope.result.verdict).toBe("pass");
-			expect(envelope.result.coverage.status).toBe("complete");
+			// The same pack twice stays deterministic: one deduped atlas skip
+			// (no vanilla tree), verdict pass, exit 0.
+			expect(envelope.result.coverage).toEqual({
+				status: "partial",
+				skipped: [
+					{
+						kind: "atlas-source",
+						reason: "vanilla-not-provided",
+						target: "items",
+						detail:
+							'sprite "minecraft:item/sword" needs the vanilla atlas sources',
+					},
+				],
+			});
 			expect(await snapshotTree(dir)).toBe(before);
 		} finally {
 			await rm(dir, { recursive: true, force: true });

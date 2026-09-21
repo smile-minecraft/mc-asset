@@ -52,6 +52,7 @@ export type ErrorCode =
 	| "PACK_VERSION_UNDETERMINED"
 	| "PACK_GUI_SCALING_BORDER"
 	| "PACK_UNRESOLVED_EXTERNAL"
+	| "PACK_COVERAGE_SKIPPED"
 	| "TRANSACTION_FAILED";
 
 export type FixedErrorCode = Exclude<ErrorCode, "TRANSACTION_FAILED">;
@@ -112,6 +113,9 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	PACK_VERSION_UNDETERMINED: 3,
 	PACK_GUI_SCALING_BORDER: 3,
 	PACK_UNRESOLVED_EXTERNAL: 3,
+	// Coverage gaps that stay warnings: the verdict only covers what was
+	// checked, and the coverage list carries what was skipped.
+	PACK_COVERAGE_SKIPPED: 3,
 };
 
 export function isErrorCode(value: unknown): value is ErrorCode {

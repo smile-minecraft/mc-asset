@@ -41,12 +41,20 @@ export interface GuiStretchInnerValue {
 	field: "stretch_inner";
 }
 
+export interface AtlasSeparatorValue {
+	separator: "_";
+}
+
+export interface AtlasPaletteRootValue {
+	root: "textures/palettes/";
+}
+
 /**
  * §95 compatibility facts as version-interval data. Every fact carries its
  * sourced starting packFormat in `since` as a dotted string; the
  * version-to-format mapping itself lives in the version table
  * (`src/cli/version-options.ts`), which supersedes the retired
- * resource-pack-format fact. All nine facts are determined as of
+ * resource-pack-format fact. All eleven facts are determined as of
  * 2026-09-22; `pendingSourceWarnings` stays as the guard for any future
  * undetermined fact.
  */
@@ -146,6 +154,26 @@ export const GUI_STRETCH_INNER_FACT: VersionedFact<GuiStretchInnerValue> = {
 	checkedAt: "2026-09-22",
 };
 
+export const ATLAS_SEPARATOR_FACT: VersionedFact<AtlasSeparatorValue> = {
+	fact: "atlas-separator-field",
+	since: { packFormat: "55.0" },
+	value: { separator: "_" },
+	status: "verified",
+	source:
+		"§95; Minecraft Wiki Atlas (paletted_permutations separator, 1.21.5); Minecraft Wiki Template:Resource pack format (1.21.5 / RP 55.0)",
+	checkedAt: "2026-09-22",
+};
+
+export const ATLAS_PALETTE_ROOT_FACT: VersionedFact<AtlasPaletteRootValue> = {
+	fact: "atlas-palette-root",
+	since: { packFormat: "97.1" },
+	value: { root: "textures/palettes/" },
+	status: "verified",
+	source:
+		"§95; Minecraft Wiki Atlas (palette path textures/palettes, 26.3); Minecraft Wiki Template:Resource pack format (26.3-snap1 / RP 97.1)",
+	checkedAt: "2026-09-22",
+};
+
 export const COMPAT_FACTS: VersionedFact<unknown>[] = [
 	TRIM_PALETTE_FACT,
 	ITEMS_ATLAS_FACT,
@@ -156,6 +184,8 @@ export const COMPAT_FACTS: VersionedFact<unknown>[] = [
 	PNG_ONLY_FACT,
 	ITEM_MODEL_DEFINITIONS_FACT,
 	GUI_STRETCH_INNER_FACT,
+	ATLAS_SEPARATOR_FACT,
+	ATLAS_PALETTE_ROOT_FACT,
 ];
 
 /**

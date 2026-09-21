@@ -16,9 +16,13 @@ import {
 	resolveVersionedFact,
 } from "../profiles/versions.ts";
 import {
-	atlasCoverageFor,
-	parseAtlasDefinitions,
+	type AtlasLayerInput,
+	type AtlasSkip,
+	atlasCoverageDetail,
+	atlasNameOf,
+	parseAtlasLayers,
 	requiredAtlasForModel,
+	spriteIdForTextureValue,
 } from "./atlas.ts";
 import type { ValidateFindingLevel } from "./checks.ts";
 import {
@@ -78,6 +82,7 @@ export interface PackCoverageSkip {
 	kind: string;
 	reason: string;
 	target: string;
+	detail?: string | undefined;
 }
 
 export interface PackCoverage {
@@ -114,6 +119,7 @@ const FINDING_ORDER: Readonly<Record<string, number>> = {
 	PACK_VERSION_UNDETERMINED: 14,
 	PACK_TEXTURE_NOT_IN_ATLAS: 15,
 	PACK_UNRESOLVED_EXTERNAL: 16,
+	PACK_COVERAGE_SKIPPED: 17,
 };
 
 const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -972,31 +978,103 @@ function checkItemModelDefinitions(
  * Missing files already carry PACK_MISSING_TEXTURE and never reach this
  * pass, so the two §53 errors stay mutually exclusive. The required atlas
  * names and the version gate both come from the items/split facts: below
- * the split, or with no determinable version, every verdict skips. Item
- * models share one required atlas (the items value), which is exactly the
- * same-atlas constraint; block models take the blocks value. An undefined
- * or partially understood atlas answers `unknown` and skips, never
- * accuses, and a defective texture file never drags a second code along.
+ * the split, or with no determinable version, every verdict skips. Model
+ * texture references resolve onto atlas sprite ids (the resource location
+ * without its trailing `.png`), never onto same-named PNG paths. Atlas
+ * definitions merge every visible layer in load order (vanilla, reversed
+ * dependencies, current pack); without the vanilla tree the merged atlas
+ * is unknowable, so every query skips instead of accusing. An undefined
+ * or partially understood atlas answers `unknown` and records one
+ * PACK_COVERAGE_SKIPPED warning plus one coverage skip each, and
+ * PACK_TEXTURE_NOT_IN_ATLAS only fires on a complete atlas with a
+ * confirmed miss. A defective texture file never drags a second code
+ * along.
  */
-function checkAtlasCoverage(
+async function checkAtlasCoverage(
 	state: ScanState,
+	context: ResourceContext,
 	options: PackScanOptions | undefined,
 	mcmetaDoc: unknown,
-): void {
+): Promise<PackCoverageSkip[]> {
 	const packFormat =
 		options?.packFormat ?? resourcePackFormatFromMcmeta(mcmetaDoc);
 	if (packFormat === undefined) {
-		return;
+		// Version skips reuse the undetermined warning, never a second one.
+		if (state.atlasRefs.length === 0) {
+			return [];
+		}
+		return [
+			{
+				kind: "version",
+				reason: "version-undetermined",
+				target: "atlas",
+			},
+		];
 	}
 	const itemsAtlas = resolveVersionedFact(ITEMS_ATLAS_FACT, packFormat);
 	const placement = resolveVersionedFact(ITEM_ATLAS_PLACEMENT_FACT, packFormat);
 	if (itemsAtlas === undefined || placement === undefined) {
-		return;
+		return [];
 	}
 	if (placement.itemSameAtlas !== true) {
-		return;
+		return [];
 	}
-	const parsed = parseAtlasDefinitions(state.docs);
+	const layers = await collectAtlasLayers(state, context, options);
+	const parsed = parseAtlasLayers(layers, {
+		packFormat,
+		hasVanilla: context.hasVanilla,
+	});
+	const skipped: PackCoverageSkip[] = [];
+	const seen = new Set<string>();
+	const pushSkip = (
+		kind: string,
+		reason: string,
+		target: string,
+		path: string | undefined,
+		message: string,
+		detail?: string | undefined,
+	): void => {
+		const key = `${kind}${reason}${target}${detail ?? ""}`;
+		if (seen.has(key)) {
+			return;
+		}
+		seen.add(key);
+		if (detail === undefined) {
+			skipped.push({ kind, reason, target });
+		} else {
+			skipped.push({ kind, reason, target, detail });
+		}
+		push(state.findings, "PACK_COVERAGE_SKIPPED", "warning", message, path);
+	};
+	const skipKey = (skip: AtlasSkip): string =>
+		`${skip.kind}${skip.reason}${skip.target}${skip.detail ?? ""}`;
+	for (const skip of parsed.skips) {
+		if (seen.has(skipKey(skip))) {
+			continue;
+		}
+		seen.add(skipKey(skip));
+		if (skip.detail === undefined) {
+			skipped.push({
+				kind: skip.kind,
+				reason: skip.reason,
+				target: skip.target,
+			});
+		} else {
+			skipped.push({
+				kind: skip.kind,
+				reason: skip.reason,
+				target: skip.target,
+				detail: skip.detail,
+			});
+		}
+		push(
+			state.findings,
+			"PACK_COVERAGE_SKIPPED",
+			"warning",
+			`atlas "${skip.atlas}" from "${skip.target}" is incomplete (${skip.reason}${skip.detail === undefined ? "" : `: ${skip.detail}`}); coverage recorded as skipped.`,
+			skip.target,
+		);
+	}
 	for (const ref of state.atlasRefs) {
 		if (state.errorFiles.has(ref.target)) {
 			continue;
@@ -1008,18 +1086,121 @@ function checkAtlasCoverage(
 		if (required === undefined) {
 			continue;
 		}
-		if (atlasCoverageFor(parsed, required, ref.target) !== "not-covered") {
+		const sprite = spriteIdForTextureValue(ref.value);
+		if (sprite === undefined) {
 			continue;
 		}
-		push(
-			state.findings,
-			"PACK_TEXTURE_NOT_IN_ATLAS",
-			"error",
-			`"${ref.field}" "${ref.value}" in "${ref.modelRel}" resolves to "${ref.target}" which is not stitched into the "${required}" atlas.`,
-			ref.modelRel,
-		);
-		state.errorFiles.add(ref.modelRel);
+		if (!context.hasVanilla) {
+			// Without the vanilla tree the merged atlas is unknowable:
+			// vanilla sources could add or remove any sprite, so every
+			// query skips instead of accusing.
+			const rules = parsed.atlases.get(required);
+			const definition =
+				rules === undefined || rules.definitionFiles.length === 0
+					? undefined
+					: rules.definitionFiles[0];
+			pushSkip(
+				"atlas-source",
+				"vanilla-not-provided",
+				definition ?? required,
+				ref.modelRel,
+				`atlas "${required}" for sprite "${sprite}" in "${ref.modelRel}" cannot be completed without the vanilla resource tree; coverage recorded as skipped.`,
+				`sprite "${sprite}" needs the vanilla atlas sources`,
+			);
+			continue;
+		}
+		const diagnosis = atlasCoverageDetail(parsed, required, sprite);
+		if (diagnosis.status === "covered") {
+			continue;
+		}
+		if (diagnosis.status === "not-covered") {
+			push(
+				state.findings,
+				"PACK_TEXTURE_NOT_IN_ATLAS",
+				"error",
+				`"${ref.field}" "${ref.value}" in "${ref.modelRel}" resolves to "${ref.target}" (sprite "${sprite}") which is not stitched into the "${required}" atlas.`,
+				ref.modelRel,
+			);
+			state.errorFiles.add(ref.modelRel);
+			continue;
+		}
+		if (!diagnosis.hasDefinitions) {
+			pushSkip(
+				"atlas-source",
+				"missing-atlas-definition",
+				required,
+				ref.modelRel,
+				`atlas "${required}" for sprite "${sprite}" in "${ref.modelRel}" has no definition in any visible layer; coverage recorded as skipped.`,
+				`sprite "${sprite}" has no atlas definition`,
+			);
+		}
+		// Any other unknown already carries its parse skip above; a query
+		// that is unknown without one is impossible by construction.
 	}
+	return skipped;
+}
+
+/**
+ * Ordered atlas inputs in load order: the vanilla layer first, then
+ * dependencies from the lowest priority up, then the current pack. Depot
+ * and vanilla atlas documents are read off disk through their layer roots;
+ * an unreadable or unparseable depot document marks its atlas incomplete
+ * instead of failing the scan.
+ */
+async function collectAtlasLayers(
+	state: ScanState,
+	context: ResourceContext,
+	options: PackScanOptions | undefined,
+): Promise<AtlasLayerInput[]> {
+	const layers: AtlasLayerInput[] = [];
+	const dependencyPaths = options?.dependencyPaths ?? [];
+	if (context.vanilla !== undefined && options?.vanillaPath !== undefined) {
+		layers.push({
+			docs: await readLayerAtlasDocs(options.vanillaPath, context.vanilla),
+			files: context.vanilla.files,
+		});
+	}
+	for (let index = context.dependencies.length - 1; index >= 0; index -= 1) {
+		const layerIndex = context.dependencies[index] as LayerIndex;
+		layers.push({
+			docs: await readLayerAtlasDocs(
+				dependencyPaths[index] as string,
+				layerIndex,
+			),
+			files: layerIndex.files,
+		});
+	}
+	const currentDocs = new Map<string, unknown>();
+	for (const [rel, doc] of state.docs) {
+		if (atlasNameOf(rel) !== undefined) {
+			currentDocs.set(rel, doc);
+		}
+	}
+	layers.push({ docs: currentDocs, files: context.current.files });
+	return layers;
+}
+
+async function readLayerAtlasDocs(
+	root: string,
+	index: LayerIndex,
+): Promise<Map<string, unknown>> {
+	const docs = new Map<string, unknown>();
+	const rels = [...index.files].sort(compareBytes);
+	for (const rel of rels) {
+		if (atlasNameOf(rel) === undefined) {
+			continue;
+		}
+		try {
+			const bytes = await readFile(`${root}/${rel}`);
+			const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+			docs.set(rel, JSON.parse(text) as unknown);
+		} catch {
+			// Unreadable or unparseable depot documents stay in the map as
+			// unusable so the atlas they name still reads incomplete.
+			docs.set(rel, undefined);
+		}
+	}
+	return docs;
 }
 
 /**
@@ -1120,7 +1301,12 @@ export async function scanPack(
 		checkModelReferences(rel, context, state);
 	}
 	checkItemModelDefinitions(state, context, options, mcmetaDoc);
-	checkAtlasCoverage(state, options, mcmetaDoc);
+	const atlasSkips = await checkAtlasCoverage(
+		state,
+		context,
+		options,
+		mcmetaDoc,
+	);
 	// Orphan is warning-only over lowercase-.png textures that decoded
 	// cleanly, and it skips files that already carry an error, so one
 	// defect never drags a second code along.
@@ -1172,11 +1358,12 @@ export async function scanPack(
 	// Unresolved externals: one warning per distinct target, lending the
 	// first referrer's path, plus one coverage skip each. Warnings never
 	// fail the verdict; the coverage status carries the partial signal.
-	// Both lists sort by target bytes, so reruns stay byte-identical.
+	// Skips sort by (kind, target bytes, reason), so reruns stay
+	// byte-identical across every skip source.
 	const pending = [...state.unresolved.values()].sort((a, b) =>
 		compareBytes(a.value, b.value),
 	);
-	const skipped: PackCoverageSkip[] = [];
+	const skipped: PackCoverageSkip[] = [...atlasSkips];
 	for (const entry of pending) {
 		skipped.push({
 			kind: "external-reference",
@@ -1199,7 +1386,17 @@ export async function scanPack(
 	}
 	const coverage: PackCoverage = {
 		status: skipped.length === 0 ? "complete" : "partial",
-		skipped,
+		skipped: skipped.sort((a, b) => {
+			const byKind = compareBytes(a.kind, b.kind);
+			if (byKind !== 0) {
+				return byKind;
+			}
+			const byTarget = compareBytes(a.target, b.target);
+			if (byTarget !== 0) {
+				return byTarget;
+			}
+			return compareBytes(a.reason, b.reason);
+		}),
 	};
 	const findings = [...state.findings].sort((a, b) => {
 		const pa = a.path ?? "";

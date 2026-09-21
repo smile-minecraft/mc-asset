@@ -149,6 +149,7 @@ describe("validate-pack command via spawn", () => {
 
 	test("texture outside its atlas exits 3 with NOT_IN_ATLAS, inputs kept", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		const vanilla = await mkdtemp(join(tmpdir(), "mc-asset-vanilla-"));
 		try {
 			await writePackFile(
 				dir,
@@ -165,12 +166,19 @@ describe("validate-pack command via spawn", () => {
 				"assets/minecraft/atlases/blocks.json",
 				atlasJson([]),
 			);
+			await writePackFile(
+				vanilla,
+				"assets/minecraft/atlases/blocks.json",
+				atlasJson([]),
+			);
 			const before = await treeHash(dir);
 			const { stdout, code } = await runCli([
 				"validate-pack",
 				dir,
 				"--resource-pack-version",
 				"75",
+				"--vanilla",
+				vanilla,
 				"--json",
 			]);
 			expect(code).toBe(3);
@@ -192,6 +200,7 @@ describe("validate-pack command via spawn", () => {
 			expect(await treeHash(dir)).toBe(before);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
+			await rm(vanilla, { recursive: true, force: true });
 		}
 	}, 30_000);
 

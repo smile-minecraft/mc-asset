@@ -406,8 +406,8 @@ export const PACK_CASES: PackCase[] = [
 				check.equal(report.verdict, "fail", "invalid JSON fails");
 				check.deepEqual(
 					uniqueCodes(report),
-					["PACK_INVALID_JSON"],
-					"only that code",
+					["PACK_COVERAGE_SKIPPED", "PACK_INVALID_JSON"],
+					"atlas skips without vanilla alongside the JSON error",
 				);
 			});
 		},
@@ -701,7 +701,7 @@ export const PACK_CASES: PackCase[] = [
 				await writePackFile(
 					dir,
 					"assets/minecraft/atlases/blocks.json",
-					atlasJson([{ type: "directory", source: "block", prefix: "block" }]),
+					atlasJson([{ type: "directory", source: "block", prefix: "block/" }]),
 				);
 				await writePackFile(
 					dir,
@@ -718,17 +718,37 @@ export const PACK_CASES: PackCase[] = [
 					"assets/minecraft/atlases/items.json",
 					atlasJson([{ type: "single", resource: "minecraft:item/sword" }]),
 				);
-				const report = await scanPack(dir, VERSIONED);
-				check.equal(report.verdict, "pass", "covered textures pass");
-				check.equal(
-					report.findings.filter((f) => f.level === "error").length,
-					0,
-					"no error findings",
-				);
-				check.ok(
-					!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
-					"no atlas accusation",
-				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([{ type: "single", resource: "minecraft:block/stone" }]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([{ type: "single", resource: "minecraft:item/sword" }]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "pass", "covered textures pass");
+					check.equal(
+						report.findings.filter((f) => f.level === "error").length,
+						0,
+						"no error findings",
+					);
+					check.ok(
+						!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"no atlas accusation",
+					);
+					check.deepEqual(
+						report.coverage,
+						{ status: "complete", skipped: [] },
+						"merged layers agree with complete coverage",
+					);
+				});
 			});
 		},
 	},
@@ -751,27 +771,37 @@ export const PACK_CASES: PackCase[] = [
 					"assets/minecraft/atlases/blocks.json",
 					atlasJson([]),
 				);
-				const report = await scanPack(dir, VERSIONED);
-				check.equal(report.verdict, "fail", "unstitched texture fails");
-				check.deepEqual(
-					uniqueCodes(report),
-					["PACK_TEXTURE_NOT_IN_ATLAS"],
-					"only that code",
-				);
-				check.equal(
-					report.findings[0]?.level,
-					"error",
-					"atlas miss is an error",
-				);
-				check.equal(
-					report.findings[0]?.path,
-					"assets/minecraft/models/block/stone.json",
-					"finding points at the model",
-				);
-				check.ok(
-					!codesOf(report).includes("PACK_MISSING_TEXTURE"),
-					"never confused with a missing texture",
-				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "fail", "unstitched texture fails");
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_TEXTURE_NOT_IN_ATLAS"],
+						"only that code",
+					);
+					check.equal(
+						report.findings[0]?.level,
+						"error",
+						"atlas miss is an error",
+					);
+					check.equal(
+						report.findings[0]?.path,
+						"assets/minecraft/models/block/stone.json",
+						"finding points at the model",
+					);
+					check.ok(
+						!codesOf(report).includes("PACK_MISSING_TEXTURE"),
+						"never confused with a missing texture",
+					);
+				});
 			});
 		},
 	},
@@ -822,13 +852,23 @@ export const PACK_CASES: PackCase[] = [
 					"assets/minecraft/atlases/items.json",
 					atlasJson([]),
 				);
-				const report = await scanPack(dir, VERSIONED);
-				check.equal(report.verdict, "fail", "item outside items fails");
-				check.deepEqual(
-					uniqueCodes(report),
-					["PACK_TEXTURE_NOT_IN_ATLAS"],
-					"only that code",
-				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "fail", "item outside items fails");
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_TEXTURE_NOT_IN_ATLAS"],
+						"only that code",
+					);
+				});
 			});
 		},
 	},
@@ -924,13 +964,20 @@ export const PACK_CASES: PackCase[] = [
 					"pack.mcmeta",
 					modelJson({ pack: { pack_format: 75, description: "lends" } }),
 				);
-				const report = await scanPack(dir, {});
-				check.equal(report.verdict, "fail", "lent version activates atlas");
-				check.deepEqual(
-					uniqueCodes(report),
-					["PACK_TEXTURE_NOT_IN_ATLAS"],
-					"only that code",
-				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, { vanillaPath: vanillaDir });
+					check.equal(report.verdict, "fail", "lent version activates atlas");
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_TEXTURE_NOT_IN_ATLAS"],
+						"only that code",
+					);
+				});
 			});
 		},
 	},
@@ -953,12 +1000,296 @@ export const PACK_CASES: PackCase[] = [
 					"assets/minecraft/atlases/blocks.json",
 					atlasJson([{ type: "future-type", anything: true }]),
 				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "pass", "unknown sources skip");
+					check.ok(
+						!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"no accusation from an unreadable source",
+					);
+					check.ok(
+						codesOf(report).includes("PACK_COVERAGE_SKIPPED"),
+						"the gap stays visible as a warning",
+					);
+					check.deepEqual(
+						report.coverage,
+						{
+							status: "partial",
+							skipped: [
+								{
+									kind: "atlas-source",
+									reason: "unsupported-source-type",
+									target: "assets/minecraft/atlases/blocks.json",
+									detail: `source type "future-type" is not interpreted`,
+								},
+							],
+						},
+						"coverage records the skip",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "pass: atlas without vanilla is unknown, never an error",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/block/stone.json",
+					modelJson({ textures: { all: "minecraft:block/stone" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/block/stone.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([{ type: "directory", source: "block", prefix: "block/" }]),
+				);
 				const report = await scanPack(dir, VERSIONED);
-				check.equal(report.verdict, "pass", "unknown sources skip");
+				check.equal(report.verdict, "pass", "unknown never fails");
 				check.ok(
 					!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
-					"no accusation from an unreadable source",
+					"no accusation without the vanilla tree",
 				);
+				check.deepEqual(
+					uniqueCodes(report),
+					["PACK_COVERAGE_SKIPPED"],
+					"only the coverage warning",
+				);
+				check.deepEqual(
+					report.coverage,
+					{
+						status: "partial",
+						skipped: [
+							{
+								kind: "atlas-source",
+								reason: "vanilla-not-provided",
+								target: "assets/minecraft/atlases/blocks.json",
+								detail: `sprite "minecraft:block/stone" needs the vanilla atlas sources`,
+							},
+						],
+					},
+					"coverage records the missing context",
+				);
+			});
+		},
+	},
+	{
+		name: "fail: higher layer filter removes the vanilla sprite",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/block/stone.json",
+					modelJson({ textures: { all: "minecraft:block/stone" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/block/stone.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([{ type: "filter", pattern: { path: "stone" } }]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([
+							{ type: "directory", source: "block", prefix: "block/" },
+						]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/textures/block/stone.png",
+						"",
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "fail", "filtered sprite fails");
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_TEXTURE_NOT_IN_ATLAS"],
+						"only that code",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "pass: unsupported regex skips with a warning, never an error",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/block/stone.json",
+					modelJson({ textures: { all: "minecraft:block/stone" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/block/stone.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([
+						{ type: "directory", source: "block", prefix: "block/" },
+						{ type: "filter", pattern: { path: "(?>stone)" } },
+					]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "pass", "unsupported regex skips");
+					check.ok(
+						!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"no accusation from an unapplied filter",
+					);
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_COVERAGE_SKIPPED"],
+						"only the coverage warning",
+					);
+					check.deepEqual(
+						report.coverage,
+						{
+							status: "partial",
+							skipped: [
+								{
+									kind: "atlas-filter",
+									reason: "unsupported-regex",
+									target: "assets/minecraft/atlases/blocks.json",
+									detail: `filter pattern path "(?>stone)" needs a Java-only construct`,
+								},
+							],
+						},
+						"coverage records the filter skip",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "pass: renamed single sprite covers the model reference",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/custom.json",
+					modelJson({ textures: { layer0: "minecraft:item/renamed" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/renamed.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([
+						{
+							type: "single",
+							resource: "minecraft:item/sword",
+							sprite: "minecraft:item/renamed",
+						},
+					]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "pass", "renamed sprite passes");
+					check.ok(
+						!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"lookup follows the sprite, not the resource path",
+					);
+					check.deepEqual(
+						report.coverage,
+						{ status: "complete", skipped: [] },
+						"complete coverage",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "pass: paletted permutations with missing palettes stay unknown",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([
+						{
+							type: "paletted_permutations",
+							textures: ["minecraft:item/x"],
+							palette_key: "minecraft:palette/key",
+							permutations: { emerald: "minecraft:palette/emerald" },
+						},
+					]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "pass", "missing palettes skip");
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_COVERAGE_SKIPPED"],
+						"only the coverage warning",
+					);
+					check.deepEqual(
+						report.coverage,
+						{
+							status: "partial",
+							skipped: [
+								{
+									kind: "atlas-source",
+									reason: "missing-dependency",
+									target: "assets/minecraft/atlases/items.json",
+									detail: `sprite "minecraft:item/x_emerald" needs base texture "assets/minecraft/textures/item/x.png" (missing)`,
+								},
+							],
+						},
+						"coverage records the missing dependency",
+					);
+				});
 			});
 		},
 	},
@@ -1746,12 +2077,22 @@ export const PACK_CASES: PackCase[] = [
 		run: async (check) => {
 			await withPackDir(async (dir) => {
 				await writeCleanBaseline(dir);
-				const report = await scanPack(dir, VERSIONED);
-				check.deepEqual(
-					report.coverage,
-					{ status: "complete", skipped: [] },
-					"no skips means complete",
-				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([{ type: "single", resource: "minecraft:item/sword" }]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.deepEqual(
+						report.coverage,
+						{ status: "complete", skipped: [] },
+						"no skips means complete",
+					);
+				});
 			});
 		},
 	},

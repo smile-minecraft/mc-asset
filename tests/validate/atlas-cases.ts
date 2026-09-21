@@ -1,6 +1,7 @@
 import {
-	atlasCoverageFor,
-	parseAtlasDefinitions,
+	type AtlasLayerInput,
+	atlasSpriteCoverageFor,
+	parseAtlasLayers,
 	requiredAtlasForModel,
 } from "../../src/validate/atlas.ts";
 
@@ -21,69 +22,90 @@ function docsOf(entries: Array<[string, unknown]>): Map<string, unknown> {
 	return new Map(entries);
 }
 
+function layerOf(
+	docs: Array<[string, unknown]>,
+	files: string[],
+): AtlasLayerInput {
+	return { docs: docsOf(docs), files: new Set(files) };
+}
+
+function skipSummary(
+	parsed: ReturnType<typeof parseAtlasLayers>,
+): Array<{ kind: string; reason: string; target: string; atlas: string }> {
+	return parsed.skips.map((skip) => ({
+		kind: skip.kind,
+		reason: skip.reason,
+		target: skip.target,
+		atlas: skip.atlas,
+	}));
+}
+
 export const ATLAS_CASES: AtlasCase[] = [
 	{
 		name: "directory source covers its subtree only",
 		run: (check) => {
-			const parsed = parseAtlasDefinitions(
-				docsOf([
-					[
-						"assets/minecraft/atlases/blocks.json",
-						{
-							sources: [
-								{ type: "directory", source: "block", prefix: "block" },
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+									],
+								},
 							],
-						},
-					],
-				]),
+						],
+						[
+							"assets/minecraft/textures/block/stone.png",
+							"assets/minecraft/textures/item/sword.png",
+						],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
 			);
 			check.equal(
-				atlasCoverageFor(
-					parsed,
-					"blocks",
-					"assets/minecraft/textures/block/stone.png",
-				),
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
 				"covered",
 				"subtree texture is covered",
 			);
 			check.equal(
-				atlasCoverageFor(
-					parsed,
-					"blocks",
-					"assets/minecraft/textures/item/sword.png",
-				),
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:item/sword"),
 				"not-covered",
 				"outside texture is not covered",
 			);
-			check.deepEqual(parsed.unknownSourceTypes, [], "nothing skipped");
+			check.deepEqual(skipSummary(parsed), [], "nothing skipped");
 		},
 	},
 	{
 		name: "single source covers exactly its resource",
 		run: (check) => {
-			const parsed = parseAtlasDefinitions(
-				docsOf([
-					[
-						"assets/minecraft/atlases/items.json",
-						{ sources: [{ type: "single", resource: "minecraft:item/sword" }] },
-					],
-				]),
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/items.json",
+								{
+									sources: [
+										{ type: "single", resource: "minecraft:item/sword" },
+									],
+								},
+							],
+						],
+						[],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
 			);
 			check.equal(
-				atlasCoverageFor(
-					parsed,
-					"items",
-					"assets/minecraft/textures/item/sword.png",
-				),
+				atlasSpriteCoverageFor(parsed, "items", "minecraft:item/sword"),
 				"covered",
 				"listed texture is covered",
 			);
 			check.equal(
-				atlasCoverageFor(
-					parsed,
-					"items",
-					"assets/minecraft/textures/item/shield.png",
-				),
+				atlasSpriteCoverageFor(parsed, "items", "minecraft:item/shield"),
 				"not-covered",
 				"unlisted texture is not covered",
 			);
@@ -92,51 +114,71 @@ export const ATLAS_CASES: AtlasCase[] = [
 	{
 		name: "unknown source types are reported and never accuse",
 		run: (check) => {
-			const parsed = parseAtlasDefinitions(
-				docsOf([
-					[
-						"assets/minecraft/atlases/blocks.json",
-						{
-							sources: [
-								{ type: "directory", source: "block", prefix: "block" },
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
 								{
-									type: "paletted_permutations",
-									textures: ["minecraft:item/x"],
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+										{ type: "minecraft:filter", pattern: { path: "stone" } },
+										{
+											type: "paletted_permutations",
+											textures: ["minecraft:item/x"],
+											palette_key: "minecraft:palette/key",
+											permutations: { emerald: "minecraft:palette/emerald" },
+										},
+									],
 								},
-								{ type: "filter", pattern: { namespace: "minecraft" } },
 							],
-						},
-					],
-				]),
+						],
+						[
+							"assets/minecraft/textures/block/stone.png",
+							"assets/minecraft/textures/block/dirt.png",
+							"assets/minecraft/textures/item/x.png",
+							"assets/minecraft/textures/palette/key.png",
+							"assets/minecraft/textures/palette/emerald.png",
+						],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
 			);
 			check.deepEqual(
 				parsed.unknownSourceTypes,
-				["filter", "paletted_permutations"],
-				"skipped types are reported back, sorted",
+				[],
+				"understood types are never reported",
 			);
-			// One skipped source poisons the whole atlas: membership is no
-			// longer determinable, so every query answers unknown.
+			check.deepEqual(skipSummary(parsed), [], "nothing skipped");
+			// Filters and permutations execute like any other source: the
+			// filtered sprite is confirmed absent while its sibling stays.
 			check.equal(
-				atlasCoverageFor(
-					parsed,
-					"blocks",
-					"assets/minecraft/textures/block/stone.png",
-				),
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
+				"not-covered",
+				"filtered sprite is confirmed absent",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/dirt"),
+				"covered",
+				"unfiltered sprite stays covered",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "items", "minecraft:item/x_emerald"),
 				"unknown",
-				"partial knowledge never accuses",
+				"missing items definition stays unknown, never not-covered",
 			);
 		},
 	},
 	{
 		name: "missing atlas answers unknown, never not-covered",
 		run: (check) => {
-			const parsed = parseAtlasDefinitions(docsOf([]));
+			const parsed = parseAtlasLayers([], {
+				packFormat: "75.0",
+				hasVanilla: true,
+			});
 			check.equal(
-				atlasCoverageFor(
-					parsed,
-					"blocks",
-					"assets/minecraft/textures/block/stone.png",
-				),
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
 				"unknown",
 				"undefined atlas skips",
 			);
@@ -145,41 +187,659 @@ export const ATLAS_CASES: AtlasCase[] = [
 	{
 		name: "unusable atlas documents skip without inventing members",
 		run: (check) => {
-			const parsed = parseAtlasDefinitions(
-				docsOf([
-					["assets/minecraft/atlases/blocks.json", { sources: "nope" }],
-					["assets/minecraft/atlases/items.json", ["not", "an", "object"]],
-					["assets/minecraft/atlases/nested/deep.json", { sources: [] }],
-					["assets/minecraft/textures/block/stone.png", { sources: [] }],
-				]),
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							["assets/minecraft/atlases/blocks.json", { sources: "nope" }],
+							["assets/minecraft/atlases/items.json", ["not", "an", "object"]],
+							["assets/minecraft/atlases/nested/deep.json", { sources: [] }],
+							["assets/minecraft/textures/block/stone.png", { sources: [] }],
+						],
+						[],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
 			);
 			check.equal(
-				atlasCoverageFor(
-					parsed,
-					"blocks",
-					"assets/minecraft/textures/block/stone.png",
-				),
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
 				"unknown",
 				"non-array sources skip",
 			);
 			check.equal(
-				atlasCoverageFor(
-					parsed,
-					"items",
-					"assets/minecraft/textures/item/sword.png",
-				),
+				atlasSpriteCoverageFor(parsed, "items", "minecraft:item/sword"),
 				"unknown",
 				"non-object document skips",
 			);
 			check.equal(
-				atlasCoverageFor(
-					parsed,
-					"deep",
-					"assets/minecraft/textures/block/stone.png",
-				),
+				atlasSpriteCoverageFor(parsed, "deep", "minecraft:block/stone"),
 				"unknown",
 				"nested atlas files are ignored",
 			);
+			check.deepEqual(
+				skipSummary(parsed),
+				[
+					{
+						kind: "atlas-source",
+						reason: "invalid-source",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
+					{
+						kind: "atlas-source",
+						reason: "invalid-source",
+						target: "assets/minecraft/atlases/items.json",
+						atlas: "items",
+					},
+				],
+				"unusable documents are diagnosed skips",
+			);
+		},
+	},
+	{
+		name: "directory maps sprites across namespaces with its prefix",
+		run: (check) => {
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+									],
+								},
+							],
+						],
+						[
+							"assets/minecraft/textures/block/stone.png",
+							"assets/minecraft/textures/block/deepslate/brick.png",
+							"assets/minecraft/textures/block/stone.png.mcmeta",
+							"assets/minecraft/textures/item/sword.png",
+							"assets/testpack/textures/block/custom.png",
+						],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
+				"covered",
+				"subtree texture is covered",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(
+					parsed,
+					"blocks",
+					"minecraft:block/deepslate/brick",
+				),
+				"covered",
+				"nested subdirectory texture is covered",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:item/sword"),
+				"not-covered",
+				"outside texture is not covered",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "testpack:block/custom"),
+				"covered",
+				"other namespaces are searched with the same prefix",
+			);
+			check.deepEqual(skipSummary(parsed), [], "nothing skipped");
+		},
+	},
+	{
+		name: "single maps its resource onto an optional renamed sprite",
+		run: (check) => {
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/items.json",
+								{
+									sources: [
+										{
+											type: "single",
+											resource: "minecraft:item/sword",
+											sprite: "minecraft:item/renamed",
+										},
+										{ type: "single", resource: "minecraft:item/shield" },
+									],
+								},
+							],
+						],
+						[],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "items", "minecraft:item/renamed"),
+				"covered",
+				"renamed sprite is covered",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "items", "minecraft:item/sword"),
+				"not-covered",
+				"resource without the rename is not the sprite",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "items", "minecraft:item/shield"),
+				"covered",
+				"sprite defaults to the resource",
+			);
+			check.deepEqual(skipSummary(parsed), [], "nothing skipped");
+		},
+	},
+	{
+		name: "filter removes sprites by nested find patterns in order",
+		run: (check) => {
+			const docs: Array<[string, unknown]> = [
+				[
+					"assets/minecraft/atlases/blocks.json",
+					{
+						sources: [
+							{ type: "directory", source: "block", prefix: "block/" },
+							{ type: "filter", pattern: { path: "sto" } },
+						],
+					},
+				],
+			];
+			const files = [
+				"assets/minecraft/textures/block/stone.png",
+				"assets/minecraft/textures/block/dirt.png",
+				"assets/testpack/textures/block/stone.png",
+			];
+			const parsed = parseAtlasLayers([layerOf(docs, files)], {
+				packFormat: "75.0",
+				hasVanilla: true,
+			});
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
+				"not-covered",
+				"substring pattern removes the sprite",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/dirt"),
+				"covered",
+				"non-matching sprite stays",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "testpack:block/stone"),
+				"not-covered",
+				"path-only pattern spans namespaces",
+			);
+			const namespaced = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+										{ type: "filter", pattern: { namespace: "testpack" } },
+									],
+								},
+							],
+						],
+						files,
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.equal(
+				atlasSpriteCoverageFor(namespaced, "blocks", "testpack:block/stone"),
+				"not-covered",
+				"namespace-only pattern removes that namespace",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(namespaced, "blocks", "minecraft:block/stone"),
+				"covered",
+				"other namespaces stay",
+			);
+			const readded = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+										{ type: "filter", pattern: { path: "stone" } },
+										{ type: "directory", source: "block", prefix: "block/" },
+									],
+								},
+							],
+						],
+						files,
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.equal(
+				atlasSpriteCoverageFor(readded, "blocks", "minecraft:block/stone"),
+				"covered",
+				"a later source re-adds the filtered sprite",
+			);
+			const matchAll = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+										{ type: "filter", pattern: {} },
+									],
+								},
+							],
+						],
+						files,
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.equal(
+				atlasSpriteCoverageFor(matchAll, "blocks", "minecraft:block/dirt"),
+				"not-covered",
+				"missing fields match everything",
+			);
+		},
+	},
+	{
+		name: "paletted permutations generate sprites gated by version",
+		run: (check) => {
+			const docs: Array<[string, unknown]> = [
+				[
+					"assets/minecraft/atlases/items.json",
+					{
+						sources: [
+							{
+								type: "paletted_permutations",
+								textures: ["minecraft:item/x"],
+								palette_key: "minecraft:palette/key",
+								permutations: { emerald: "minecraft:palette/emerald" },
+							},
+						],
+					},
+				],
+			];
+			const legacyFiles = [
+				"assets/minecraft/textures/item/x.png",
+				"assets/minecraft/textures/palette/key.png",
+				"assets/minecraft/textures/palette/emerald.png",
+			];
+			const legacy = parseAtlasLayers([layerOf(docs, legacyFiles)], {
+				packFormat: "75.0",
+				hasVanilla: true,
+			});
+			check.equal(
+				atlasSpriteCoverageFor(legacy, "items", "minecraft:item/x_emerald"),
+				"covered",
+				"generated id joins texture and key with the default separator",
+			);
+			check.deepEqual(skipSummary(legacy), [], "resolvable deps skip nothing");
+			const renamed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/items.json",
+								{
+									sources: [
+										{
+											type: "paletted_permutations",
+											textures: ["minecraft:item/x"],
+											palette_key: "minecraft:palette/key",
+											permutations: { emerald: "minecraft:palette/emerald" },
+											separator: "-",
+										},
+									],
+								},
+							],
+						],
+						legacyFiles,
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.equal(
+				atlasSpriteCoverageFor(renamed, "items", "minecraft:item/x-emerald"),
+				"covered",
+				"separator applies once its version gate is active",
+			);
+			const gated = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/items.json",
+								{
+									sources: [
+										{
+											type: "paletted_permutations",
+											textures: ["minecraft:item/x"],
+											palette_key: "minecraft:palette/key",
+											permutations: { emerald: "minecraft:palette/emerald" },
+											separator: "-",
+										},
+									],
+								},
+							],
+						],
+						legacyFiles,
+					),
+				],
+				{ packFormat: "46.0", hasVanilla: true },
+			);
+			check.equal(
+				atlasSpriteCoverageFor(gated, "items", "minecraft:item/x_emerald"),
+				"covered",
+				"separator is ignored below its gate",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(gated, "items", "minecraft:item/x-emerald"),
+				"not-covered",
+				"ignored separator generates nothing",
+			);
+			const movedFiles = [
+				"assets/minecraft/textures/item/x.png",
+				"assets/minecraft/textures/palettes/palette/key.png",
+				"assets/minecraft/textures/palettes/palette/emerald.png",
+			];
+			const moved = parseAtlasLayers([layerOf(docs, movedFiles)], {
+				packFormat: "97.1",
+				hasVanilla: true,
+			});
+			check.equal(
+				atlasSpriteCoverageFor(moved, "items", "minecraft:item/x_emerald"),
+				"covered",
+				"palette root moves at its version gate",
+			);
+			const stale = parseAtlasLayers([layerOf(docs, legacyFiles)], {
+				packFormat: "97.1",
+				hasVanilla: true,
+			});
+			check.equal(
+				atlasSpriteCoverageFor(stale, "items", "minecraft:item/x_emerald"),
+				"unknown",
+				"old palette location is no longer resolved",
+			);
+			check.deepEqual(
+				skipSummary(stale),
+				[
+					{
+						kind: "atlas-source",
+						reason: "missing-dependency",
+						target: "assets/minecraft/atlases/items.json",
+						atlas: "items",
+					},
+				],
+				"missing palette is a diagnosed skip",
+			);
+		},
+	},
+	{
+		name: "paletted permutations without a vanilla tree stay unknown",
+		run: (check) => {
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/items.json",
+								{
+									sources: [
+										{
+											type: "paletted_permutations",
+											textures: ["minecraft:item/x"],
+											palette_key: "minecraft:palette/key",
+											permutations: { emerald: "minecraft:palette/emerald" },
+										},
+									],
+								},
+							],
+						],
+						[],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: false },
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "items", "minecraft:item/x_emerald"),
+				"unknown",
+				"unconfirmable deps never accuse",
+			);
+			check.deepEqual(
+				skipSummary(parsed),
+				[
+					{
+						kind: "atlas-source",
+						reason: "unresolved-dependency",
+						target: "assets/minecraft/atlases/items.json",
+						atlas: "items",
+					},
+				],
+				"unresolved deps are a diagnosed skip",
+			);
+		},
+	},
+	{
+		name: "unsupported sources never accuse and stay visible as skips",
+		run: (check) => {
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+										{ type: "unstitch", reason: "nope" },
+										{ type: "future-type", anything: true },
+									],
+								},
+							],
+						],
+						["assets/minecraft/textures/block/stone.png"],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.deepEqual(
+				parsed.unknownSourceTypes,
+				["future-type", "unstitch"],
+				"skipped types are reported back, sorted",
+			);
+			check.deepEqual(
+				skipSummary(parsed),
+				[
+					{
+						kind: "atlas-source",
+						reason: "unsupported-source-type",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
+					{
+						kind: "atlas-source",
+						reason: "unsupported-source-type",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
+				],
+				"one skip per unsupported source",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
+				"unknown",
+				"partial knowledge never accuses",
+			);
+		},
+	},
+	{
+		name: "unsupported regex filters are not applied and stay visible",
+		run: (check) => {
+			const files = ["assets/minecraft/textures/block/stone.png"];
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+										{ type: "filter", pattern: { path: "(?>stone)" } },
+										{ type: "filter", pattern: { path: "\\Qstone\\E" } },
+										{ type: "filter", pattern: { path: "sto++" } },
+										{ type: "filter", pattern: { namespace: "\\p{L}+" } },
+									],
+								},
+							],
+						],
+						files,
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.deepEqual(
+				skipSummary(parsed),
+				[
+					{
+						kind: "atlas-filter",
+						reason: "unsupported-regex",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
+					{
+						kind: "atlas-filter",
+						reason: "unsupported-regex",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
+					{
+						kind: "atlas-filter",
+						reason: "unsupported-regex",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
+					{
+						kind: "atlas-filter",
+						reason: "unsupported-regex",
+						target: "assets/minecraft/atlases/blocks.json",
+						atlas: "blocks",
+					},
+				],
+				"every unsupported filter is a skip",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
+				"unknown",
+				"partial knowledge never accuses",
+			);
+			check.ok(
+				parsed.atlases.get("blocks")?.sprites.has("minecraft:block/stone") ===
+					true,
+				"skipped filters remove nothing",
+			);
+		},
+	},
+	{
+		name: "layers merge in load order with later sources winning",
+		run: (check) => {
+			const parsed = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+										{ type: "filter", pattern: { path: "stone" } },
+									],
+								},
+							],
+						],
+						[
+							"assets/minecraft/textures/block/stone.png",
+							"assets/minecraft/textures/block/dirt.png",
+						],
+					),
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+									],
+								},
+							],
+						],
+						["assets/minecraft/textures/block/stone.png"],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/stone"),
+				"covered",
+				"higher layer re-adds the filtered sprite",
+			);
+			check.equal(
+				atlasSpriteCoverageFor(parsed, "blocks", "minecraft:block/dirt"),
+				"covered",
+				"lower layer sprites survive",
+			);
+			check.equal(
+				parsed.atlases.get("blocks")?.sprites.get("minecraft:block/stone")
+					?.entity,
+				"assets/minecraft/textures/block/stone.png",
+				"entity names the winning file",
+			);
+			const filtered = parseAtlasLayers(
+				[
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [
+										{ type: "directory", source: "block", prefix: "block/" },
+									],
+								},
+							],
+						],
+						["assets/minecraft/textures/block/dirt.png"],
+					),
+					layerOf(
+						[
+							[
+								"assets/minecraft/atlases/blocks.json",
+								{
+									sources: [{ type: "filter", pattern: { path: "dirt" } }],
+								},
+							],
+						],
+						[],
+					),
+				],
+				{ packFormat: "75.0", hasVanilla: true },
+			);
+			check.equal(
+				atlasSpriteCoverageFor(filtered, "blocks", "minecraft:block/dirt"),
+				"not-covered",
+				"higher layer filter removes lower layer sprites",
+			);
+			check.deepEqual(skipSummary(filtered), [], "filters need no skip");
 		},
 	},
 	{
