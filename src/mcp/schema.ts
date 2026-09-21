@@ -1,9 +1,10 @@
 import { z } from "zod";
 
 /**
- * Frozen MCP tool surface: nineteen tools for v0.7 CLI parity — the seven
+ * Frozen MCP tool surface: twenty tools for v0.7 CLI parity — the seven
  * original §90 tools plus twelve v0.7 additions (import through
- * validate-pack, with palette/material/preview/animate mode merges). The
+ * validate-pack, with palette/material/preview/animate mode merges) plus
+ * the capability-completion scale_gui_asset. The
  * product document once listed `edit_asset` for the batch-edit slot, and
  * §90 wins, so the frozen name is `apply_asset_operations`. The input
  * shapes below are the frozen contract; handler behavior lands in the
@@ -30,6 +31,7 @@ export const MCP_TOOL_NAMES = [
 	"preview_asset",
 	"animate_asset",
 	"validate_pack_asset",
+	"scale_gui_asset",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -439,5 +441,22 @@ export const TOOL_INPUT_SCHEMAS = {
 		packPath: z.string().min(1).describe("Resource pack root directory."),
 		minecraftVersion: minecraftVersionField,
 		resourcePackVersion: resourcePackVersionField,
+	},
+	scale_gui_asset: {
+		inputPath: z
+			.string()
+			.min(1)
+			.describe("Raster image or .mcpx path to scale as a GUI sprite."),
+		size: z.string().min(1).describe("Target size: N or WxH."),
+		mcmetaPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Explicit .mcmeta path for the scaling section, used verbatim; omitted means stretch.",
+			),
+		minecraftVersion: minecraftVersionField,
+		resourcePackVersion: resourcePackVersionField,
+		outputPngPath: outputPngField,
 	},
 } satisfies Record<McpToolName, Record<string, z.ZodTypeAny>>;

@@ -50,6 +50,7 @@ export type ErrorCode =
 	| "PACK_INVALID_IMAGE_DATA"
 	| "PACK_INVALID_FILENAME"
 	| "PACK_VERSION_UNDETERMINED"
+	| "PACK_GUI_SCALING_BORDER"
 	| "TRANSACTION_FAILED";
 
 export type FixedErrorCode = Exclude<ErrorCode, "TRANSACTION_FAILED">;
@@ -108,6 +109,7 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	PACK_INVALID_IMAGE_DATA: 3,
 	PACK_INVALID_FILENAME: 3,
 	PACK_VERSION_UNDETERMINED: 3,
+	PACK_GUI_SCALING_BORDER: 3,
 };
 
 export function isErrorCode(value: unknown): value is ErrorCode {

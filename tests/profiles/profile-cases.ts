@@ -301,10 +301,10 @@ export const MODEL_CASES: ModelCase[] = [
 		},
 	},
 	{
-		name: "eight §95 facts carry source, check date, and sourced since",
+		name: "nine compat facts carry source, check date, and sourced since",
 		run: (check) => {
 			const byName = new Map(COMPAT_FACTS.map((fact) => [fact.fact, fact]));
-			check.equal(COMPAT_FACTS.length, 8, "eight facts");
+			check.equal(COMPAT_FACTS.length, 9, "nine facts");
 			check.ok(
 				!byName.has("resource-pack-format"),
 				"resource-pack-format fact is retired",
@@ -371,6 +371,13 @@ export const MODEL_CASES: ModelCase[] = [
 					since: "46.0",
 					sourcePart: "1.21.4 / RP 46.0",
 					checkedAt: "2026-09-21",
+				},
+				{
+					fact: "gui-stretch-inner",
+					status: "verified",
+					since: "42.0",
+					sourcePart: "1.21.2",
+					checkedAt: "2026-09-22",
 				},
 			];
 			for (const want of expected) {

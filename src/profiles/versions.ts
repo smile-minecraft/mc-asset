@@ -37,13 +37,17 @@ export interface ItemModelDefinitionsValue {
 	directory: "items/";
 }
 
+export interface GuiStretchInnerValue {
+	field: "stretch_inner";
+}
+
 /**
  * §95 compatibility facts as version-interval data. Every fact carries its
  * sourced starting packFormat in `since` as a dotted string; the
  * version-to-format mapping itself lives in the version table
  * (`src/cli/version-options.ts`), which supersedes the retired
- * resource-pack-format fact. All eight facts are determined as of
- * 2026-09-21; `pendingSourceWarnings` stays as the guard for any future
+ * resource-pack-format fact. All nine facts are determined as of
+ * 2026-09-22; `pendingSourceWarnings` stays as the guard for any future
  * undetermined fact.
  */
 export const TRIM_PALETTE_FACT: VersionedFact<TrimPaletteValue> = {
@@ -132,6 +136,16 @@ export const ITEM_MODEL_DEFINITIONS_FACT: VersionedFact<ItemModelDefinitionsValu
 		checkedAt: "2026-09-21",
 	};
 
+export const GUI_STRETCH_INNER_FACT: VersionedFact<GuiStretchInnerValue> = {
+	fact: "gui-stretch-inner",
+	since: { packFormat: "42.0" },
+	value: { field: "stretch_inner" },
+	status: "verified",
+	source:
+		"capability-completion §A5; pack format 42 = 1.21.2 per the §95 version table; Minecraft Java Edition 1.21.2 release notes; minecraft.wiki Resource_pack GUI section (stretch_inner, nine_slice only)",
+	checkedAt: "2026-09-22",
+};
+
 export const COMPAT_FACTS: VersionedFact<unknown>[] = [
 	TRIM_PALETTE_FACT,
 	ITEMS_ATLAS_FACT,
@@ -141,6 +155,7 @@ export const COMPAT_FACTS: VersionedFact<unknown>[] = [
 	BLOCK_FORCE_TRANSLUCENT_FACT,
 	PNG_ONLY_FACT,
 	ITEM_MODEL_DEFINITIONS_FACT,
+	GUI_STRETCH_INNER_FACT,
 ];
 
 /**

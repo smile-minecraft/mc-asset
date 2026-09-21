@@ -52,6 +52,7 @@ import {
 	resizeFrameSet,
 	unpackSheetToFrameSet,
 } from "../core/frameset.ts";
+import { parseGuiSize, scaleGuiCanvas } from "../core/gui-scaling.ts";
 import {
 	getMaterial,
 	getMaterialPalette,
@@ -65,6 +66,7 @@ import {
 	extractAnimationSection,
 	extractGuiScaling,
 	extractTextureSection,
+	type GuiScaling,
 	mipmapCutoutMeanWarning,
 	type NineSliceFinding,
 	nineSliceGeometryError,
@@ -116,6 +118,7 @@ import type { PixelCanvas, Rect, RGBA } from "../core/types.ts";
 import { validateDimension } from "../core/validate.ts";
 import { decodePng, encodePng, flattenCanvas } from "../io/png.ts";
 import { collectCanvasColors, colorKeyOf, parseMcpx } from "../mcpx/index.ts";
+import { GUI_STRETCH_INNER_FACT, isFactActive } from "../profiles/versions.ts";
 import type { ValidateFinding, ValidateReport } from "../validate/checks.ts";
 import { validateCanvas } from "../validate/checks.ts";
 import { scanPack } from "../validate/pack.ts";
@@ -195,6 +198,9 @@ export type AnimateAssetInput = z.infer<
 >;
 export type ValidatePackAssetInput = z.infer<
 	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.validate_pack_asset>
+>;
+export type ScaleGuiAssetInput = z.infer<
+	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.scale_gui_asset>
 >;
 
 function stripCodePrefix(message: string): string {
@@ -711,6 +717,23 @@ async function readMcmetaSection(
 		// Playback-sequence length is independent of the physical frame count:
 		// repeated or partial indices are legal; only out-of-range indices
 		// fail via checkAnimationFrameIndices above.
+	}
+	const scaling = extractGuiScaling(document);
+	if (scaling.kind === "nine_slice") {
+		// The border is judged against the declared design dimensions, and
+		// structural scaling problems throw INVALID_MCMETA above.
+		const geometry = nineSliceGeometryError(
+			scaling.width,
+			scaling.height,
+			scaling.border,
+		);
+		if (geometry !== undefined) {
+			findings.push({
+				code: "PACK_GUI_SCALING_BORDER",
+				level: "error",
+				message: geometry,
+			});
+		}
 	}
 	return { mcmeta: section, findings };
 }
@@ -2229,6 +2252,93 @@ export async function handleValidatePackAsset(
 			target: targetSummary,
 		});
 		return textResult({ ...report, version: versionReportShape(target) });
+	} catch (error) {
+		return errorResult(error);
+	}
+}
+
+/**
+ * GUI sprite scaling over a raster or `.mcpx` input: the same
+ * stretch/tile/nine_slice mapping as the gui-scale command. A missing
+ * mcmetaPath means stretch; an illegal nine_slice border is
+ * INVALID_MCMETA, and a pre-stretch_inner target tiles the inner bands
+ * with a STRETCH_INNER_IGNORED warning. PNG bytes embed unless an
+ * explicit output path is given.
+ */
+export async function handleScaleGuiAsset(
+	args: ScaleGuiAssetInput,
+): Promise<McpTextResult> {
+	try {
+		const size = parseGuiSize(args.size);
+		const target = resolveVersionTarget({
+			...(args.minecraftVersion === undefined
+				? {}
+				: { minecraftVersion: args.minecraftVersion }),
+			...(args.resourcePackVersion === undefined
+				? {}
+				: { resourcePackVersion: args.resourcePackVersion }),
+		});
+		const loaded = await loadEditableCanvas(args.inputPath);
+		const warnings: WarningNote[] = [...loaded.warnings];
+		const canvas = loaded.canvas;
+		let scaling: GuiScaling = { kind: "stretch" };
+		if (args.mcmetaPath !== undefined && args.mcmetaPath !== "") {
+			scaling = extractGuiScaling(
+				parseMcmetaText(
+					await readInputText(args.mcmetaPath, "mcmeta"),
+					args.mcmetaPath,
+				),
+			);
+		}
+		if (scaling.kind === "nine_slice") {
+			const overflow = nineSliceGeometryError(
+				scaling.width,
+				scaling.height,
+				scaling.border,
+			);
+			if (overflow !== undefined) {
+				throw new McAssetError("INVALID_MCMETA", overflow, {
+					mcmeta: args.mcmetaPath,
+					width: scaling.width,
+					height: scaling.height,
+					border: scaling.border,
+				});
+			}
+			if (
+				scaling.stretchInner &&
+				target.packFormat !== undefined &&
+				!isFactActive(GUI_STRETCH_INNER_FACT, target.packFormat)
+			) {
+				scaling = { ...scaling, stretchInner: false };
+				warnings.push({
+					code: "STRETCH_INNER_IGNORED",
+					message: `stretch_inner needs resource-pack format 42.0 or newer; target ${target.packFormat} predates it, so the inner bands tile.`,
+				});
+			}
+		}
+		const out = scaleGuiCanvas(canvas, scaling, size.width, size.height);
+		const pngBytes = encodePng(out);
+		if (args.outputPngPath !== undefined) {
+			await writeMcpArtifact(args.outputPngPath, pngBytes);
+		}
+		return textResult({
+			size: `${size.width}x${size.height}`,
+			width: size.width,
+			height: size.height,
+			scaling: { type: scaling.kind },
+			...(scaling.kind === "nine_slice"
+				? { stretchInner: scaling.stretchInner }
+				: {}),
+			version: versionReportShape(target),
+			target: formatVersionTarget(target),
+			warnings,
+			...(args.mcmetaPath !== undefined && args.mcmetaPath !== ""
+				? { mcmeta: basename(args.mcmetaPath) }
+				: {}),
+			...(args.outputPngPath !== undefined
+				? { output: args.outputPngPath }
+				: { pngBase64: pngBase64(pngBytes) }),
+		});
 	} catch (error) {
 		return errorResult(error);
 	}

@@ -18,6 +18,7 @@ import {
 	handleQuantizeAsset,
 	handleRecolorAsset,
 	handleRenderPixelAsset,
+	handleScaleGuiAsset,
 	handleTileAsset,
 	handleTransformAsset,
 	handleValidateAsset,
@@ -195,6 +196,14 @@ export function createMcpServer(): McpServer {
 			inputSchema: TOOL_INPUT_SCHEMAS.validate_pack_asset,
 		},
 		handleValidatePackAsset,
+	);
+	server.registerTool(
+		"scale_gui_asset",
+		{
+			description: toolDescription("scale_gui_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.scale_gui_asset,
+		},
+		handleScaleGuiAsset,
 	);
 	return server;
 }

@@ -1342,4 +1342,146 @@ export const PACK_CASES: PackCase[] = [
 			});
 		},
 	},
+	{
+		name: "pass: nine_slice border inside the design size stays quiet",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ textures: { layer0: "minecraft:item/sword" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/sword.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/sword.png.mcmeta",
+					modelJson({
+						gui: {
+							scaling: {
+								type: "nine_slice",
+								width: 4,
+								height: 4,
+								border: { left: 1, top: 1, right: 1, bottom: 1 },
+							},
+						},
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "pass", "fitting border passes");
+				check.ok(
+					!codesOf(report).includes("PACK_GUI_SCALING_BORDER"),
+					"no gui border finding",
+				);
+			});
+		},
+	},
+	{
+		name: "fail: nine_slice border sums equal to the design size",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ textures: { layer0: "minecraft:item/sword" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/sword.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/sword.png.mcmeta",
+					modelJson({
+						gui: {
+							scaling: {
+								type: "nine_slice",
+								width: 4,
+								height: 4,
+								border: { left: 2, top: 2, right: 2, bottom: 2 },
+							},
+						},
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "equal sums fail");
+				check.deepEqual(
+					uniqueCodes(report),
+					["PACK_GUI_SCALING_BORDER"],
+					"only that code",
+				);
+			});
+		},
+	},
+	{
+		name: "fail: nine_slice border sums beyond the design size",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ textures: { layer0: "minecraft:item/sword" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/sword.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/sword.png.mcmeta",
+					modelJson({
+						gui: {
+							scaling: {
+								type: "nine_slice",
+								width: 4,
+								height: 4,
+								border: { left: 3, top: 1, right: 3, bottom: 1 },
+							},
+						},
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "overflow fails");
+				check.deepEqual(
+					uniqueCodes(report),
+					["PACK_GUI_SCALING_BORDER"],
+					"only that code",
+				);
+			});
+		},
+	},
+	{
+		name: "fail: tile scaling without design dimensions",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ textures: { layer0: "minecraft:item/sword" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/sword.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/sword.png.mcmeta",
+					modelJson({ gui: { scaling: { type: "tile" } } }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "missing dimensions fail");
+				check.deepEqual(
+					uniqueCodes(report),
+					["PACK_GUI_SCALING_BORDER"],
+					"only that code",
+				);
+			});
+		},
+	},
 ];

@@ -113,10 +113,18 @@ async function writeMcmeta(
 function nineSliceDoc(
 	border: { left: number; top: number; right: number; bottom: number },
 	stretchInner = false,
+	width = 16,
+	height = 16,
 ): unknown {
 	return {
 		gui: {
-			scaling: { type: "nine_slice", border, stretch_inner: stretchInner },
+			scaling: {
+				type: "nine_slice",
+				width,
+				height,
+				border,
+				stretch_inner: stretchInner,
+			},
 		},
 	};
 }
@@ -264,6 +272,36 @@ describe("preview --nine-slice via spawn", () => {
 				dir,
 				"wide.mcmeta",
 				nineSliceDoc({ left: 9, top: 4, right: 8, bottom: 4 }),
+			);
+			const result = await runCli([
+				"--json",
+				"preview",
+				input,
+				"--nine-slice",
+				"--mcmeta",
+				mcmeta,
+			]);
+			expect(result.code).toBe(0);
+			const body = parseJsonStdout(result);
+			expect(body.success).toBe(true);
+			const findings = (body.result as { findings: Array<{ level: string }> })
+				.findings;
+			expect(findings.length).toBeGreaterThan(0);
+			expect(findings.every((finding) => finding.level === "error")).toBe(true);
+			expect(body.result?.regions).toBeUndefined();
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("equal border sums are an error finding but stay exit 0", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-nine-"));
+		try {
+			const input = await writeSprite(dir);
+			const mcmeta = await writeMcmeta(
+				dir,
+				"equal.mcmeta",
+				nineSliceDoc({ left: 8, top: 8, right: 8, bottom: 8 }),
 			);
 			const result = await runCli([
 				"--json",

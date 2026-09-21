@@ -14,6 +14,7 @@ import { type AnimateOptions, runAnimate } from "./cmd-animate.ts";
 import { type BuildOptions, runBuild } from "./cmd-build.ts";
 import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
 import { type GenerateOptions, runGenerate } from "./cmd-generate.ts";
+import { type GuiScaleOptions, runGuiScale } from "./cmd-gui-scale.ts";
 import { type ImportOptions, runImport } from "./cmd-import.ts";
 import { type MaterialOptions, runMaterial } from "./cmd-material.ts";
 import { runMcp } from "./cmd-mcp.ts";
@@ -415,6 +416,48 @@ export function buildProgram(): Command {
 			async (input: string, options: TransformOptions, command: Command) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
 				const code = await runTransform(
+					input,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("gui-scale <input>")
+		.description(
+			"Scale a GUI sprite to N or WxH with the mcmeta stretch/tile/nine_slice mapping (PNG only).",
+		)
+		.option("--size <size>", "Target size: N or WxH positive integers.")
+		.option(
+			"--mcmeta <path>",
+			"Explicit mcmeta path for the scaling section; a sibling file is never derived.",
+		)
+		.option(
+			"--minecraft-version <version>",
+			"Target Minecraft version (release 1.19.3 through 26.3).",
+			singleUseOption("--minecraft-version"),
+		)
+		.option(
+			"--resource-pack-version <version>",
+			"Target resource-pack version as N or N.M (e.g. 84, 97.1).",
+			singleUseOption("--resource-pack-version"),
+		)
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option("--input <path>", "Input path used with --in-place.")
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
+		.action(
+			async (input: string, options: GuiScaleOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runGuiScale(
 					input,
 					options,
 					globals.json === true,

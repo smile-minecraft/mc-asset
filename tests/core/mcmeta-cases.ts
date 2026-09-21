@@ -45,6 +45,8 @@ const NINE_SLICE_DOC = JSON.stringify({
 	gui: {
 		scaling: {
 			type: "nine_slice",
+			width: 16,
+			height: 16,
 			border: { left: 4, top: 4, right: 4, bottom: 4 },
 			stretch_inner: false,
 		},
@@ -58,6 +60,8 @@ export const MCMETA_CASES: McmetaCase[] = [
 			const scaling = extractGuiScaling(parseMcmetaText(NINE_SLICE_DOC));
 			check.equal(scaling.kind, "nine_slice", "kind");
 			if (scaling.kind === "nine_slice") {
+				check.equal(scaling.width, 16, "design width");
+				check.equal(scaling.height, 16, "design height");
 				check.deepEqual(
 					scaling.border,
 					{ left: 4, top: 4, right: 4, bottom: 4 },
@@ -76,6 +80,8 @@ export const MCMETA_CASES: McmetaCase[] = [
 				JSON.stringify({
 					scaling: {
 						type: "nine_slice",
+						width: 16,
+						height: 16,
 						border: { left: 1, top: 2, right: 3, bottom: 4 },
 					},
 				}),
@@ -83,6 +89,8 @@ export const MCMETA_CASES: McmetaCase[] = [
 			const scaling = extractGuiScaling(doc);
 			check.equal(scaling.kind, "nine_slice", "kind");
 			if (scaling.kind === "nine_slice") {
+				check.equal(scaling.width, 16, "design width");
+				check.equal(scaling.height, 16, "design height");
 				check.deepEqual(
 					scaling.border,
 					{ left: 1, top: 2, right: 3, bottom: 4 },
@@ -110,13 +118,32 @@ export const MCMETA_CASES: McmetaCase[] = [
 		},
 	},
 	{
-		name: "stretch and tile scaling report their kind",
+		name: "stretch reports its kind without design dimensions",
 		run: (check) => {
-			for (const type of ["stretch", "tile"]) {
-				const scaling = extractGuiScaling(
-					parseMcmetaText(JSON.stringify({ gui: { scaling: { type } } })),
-				);
-				check.equal(scaling.kind, type, `${type} kind`);
+			const scaling = extractGuiScaling(
+				parseMcmetaText(
+					JSON.stringify({ gui: { scaling: { type: "stretch" } } }),
+				),
+			);
+			check.equal(scaling.kind, "stretch", "stretch kind");
+		},
+	},
+	{
+		name: "tile reports its kind with design dimensions",
+		run: (check) => {
+			const scaling = extractGuiScaling(
+				parseMcmetaText(
+					JSON.stringify({
+						gui: { scaling: { type: "tile", width: 16, height: 16 } },
+					}),
+				),
+			);
+			check.equal(scaling.kind, "tile", "tile kind");
+			if (scaling.kind === "tile") {
+				check.equal(scaling.width, 16, "design width");
+				check.equal(scaling.height, 16, "design height");
+			} else {
+				check.fail("expected tile scaling");
 			}
 		},
 	},
@@ -129,6 +156,8 @@ export const MCMETA_CASES: McmetaCase[] = [
 						gui: {
 							scaling: {
 								type: "nine_slice",
+								width: 16,
+								height: 16,
 								border: { left: 4, top: 4, right: 4, bottom: 4 },
 								stretch_inner: true,
 							},
@@ -141,6 +170,71 @@ export const MCMETA_CASES: McmetaCase[] = [
 				check.equal(scaling.stretchInner, true, "stretchInner reported true");
 			} else {
 				check.fail("expected nine_slice scaling");
+			}
+		},
+	},
+	{
+		name: "integer border expands to four equal sides",
+		run: (check) => {
+			const scaling = extractGuiScaling(
+				parseMcmetaText(
+					JSON.stringify({
+						gui: {
+							scaling: {
+								type: "nine_slice",
+								width: 16,
+								height: 16,
+								border: 3,
+							},
+						},
+					}),
+				),
+			);
+			check.equal(scaling.kind, "nine_slice", "kind");
+			if (scaling.kind === "nine_slice") {
+				check.deepEqual(
+					scaling.border,
+					{ left: 3, top: 3, right: 3, bottom: 3 },
+					"integer border expands",
+				);
+			} else {
+				check.fail("expected nine_slice scaling");
+			}
+		},
+	},
+	{
+		name: "tile and nine_slice need positive integer design dimensions",
+		run: (check) => {
+			const badDimensions: unknown[] = [
+				{},
+				{ width: 16 },
+				{ height: 16 },
+				{ width: 0, height: 16 },
+				{ width: 16, height: -1 },
+				{ width: 1.5, height: 16 },
+				{ width: "16", height: 16 },
+			];
+			for (const type of ["tile", "nine_slice"]) {
+				for (const dims of badDimensions) {
+					throwsCode(
+						check,
+						() =>
+							extractGuiScaling(
+								parseMcmetaText(
+									JSON.stringify({
+										gui: {
+											scaling: {
+												type,
+												...(dims as Record<string, unknown>),
+												border: { left: 1, top: 1, right: 1, bottom: 1 },
+											},
+										},
+									}),
+								),
+							),
+						"INVALID_MCMETA",
+					);
+				}
 			}
 		},
 	},
@@ -187,6 +281,9 @@ export const MCMETA_CASES: McmetaCase[] = [
 				{ left: 4, top: 4, right: 4 },
 				{ left: "4", top: 4, right: 4, bottom: 4 },
 				undefined,
+				"4",
+				-1,
+				1.5,
 			];
 			for (const border of badBorders) {
 				throwsCode(
@@ -195,7 +292,14 @@ export const MCMETA_CASES: McmetaCase[] = [
 						extractGuiScaling(
 							parseMcmetaText(
 								JSON.stringify({
-									gui: { scaling: { type: "nine_slice", border } },
+									gui: {
+										scaling: {
+											type: "nine_slice",
+											width: 16,
+											height: 16,
+											border,
+										},
+									},
 								}),
 							),
 						),
@@ -211,6 +315,8 @@ export const MCMETA_CASES: McmetaCase[] = [
 								gui: {
 									scaling: {
 										type: "nine_slice",
+										width: 16,
+										height: 16,
 										border: { left: 4, top: 4, right: 4, bottom: 4 },
 										stretch_inner: "yes",
 									},
@@ -249,7 +355,7 @@ export const MCMETA_CASES: McmetaCase[] = [
 		},
 	},
 	{
-		name: "border geometry allows equality but rejects overflow",
+		name: "border geometry rejects equality and overflow",
 		run: (check) => {
 			check.equal(
 				nineSliceGeometryError(16, 16, {
@@ -261,15 +367,23 @@ export const MCMETA_CASES: McmetaCase[] = [
 				undefined,
 				"fitting border is quiet",
 			);
-			check.equal(
-				nineSliceGeometryError(16, 16, {
+			check.ok(
+				typeof nineSliceGeometryError(16, 16, {
 					left: 8,
-					top: 8,
+					top: 4,
 					right: 8,
+					bottom: 4,
+				}) === "string",
+				"exact horizontal fit is an error",
+			);
+			check.ok(
+				typeof nineSliceGeometryError(16, 16, {
+					left: 4,
+					top: 8,
+					right: 4,
 					bottom: 8,
-				}),
-				undefined,
-				"exact fit is quiet",
+				}) === "string",
+				"exact vertical fit is an error",
 			);
 			check.ok(
 				typeof nineSliceGeometryError(16, 16, {

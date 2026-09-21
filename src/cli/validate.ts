@@ -5,8 +5,10 @@ import {
 	checkAnimationFrameIndices,
 	deriveAnimationGeometry,
 	extractAnimationSection,
+	extractGuiScaling,
 	extractTextureSection,
 	mipmapCutoutMeanWarning,
+	nineSliceGeometryError,
 	parseMcmetaText,
 } from "../core/mcmeta.ts";
 import { decodePng } from "../io/png.ts";
@@ -195,6 +197,23 @@ async function applyMcmetaOption(
 		// Playback-sequence length is independent of the physical frame count:
 		// repeated or partial indices are legal; only out-of-range indices
 		// fail via checkAnimationFrameIndices above.
+	}
+	const scaling = extractGuiScaling(document);
+	if (scaling.kind === "nine_slice") {
+		// The border is judged against the declared design dimensions, and
+		// structural scaling problems throw INVALID_MCMETA above (exit 2).
+		const geometry = nineSliceGeometryError(
+			scaling.width,
+			scaling.height,
+			scaling.border,
+		);
+		if (geometry !== undefined) {
+			findings.push({
+				code: "PACK_GUI_SCALING_BORDER",
+				level: "error",
+				message: geometry,
+			});
+		}
 	}
 	return { mcmeta: section, findings };
 }

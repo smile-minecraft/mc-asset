@@ -22,6 +22,7 @@ const EXPECTED_TOOLS = [
 	"preview_asset",
 	"animate_asset",
 	"validate_pack_asset",
+	"scale_gui_asset",
 ] as const;
 
 let client: Client | undefined;
@@ -35,7 +36,7 @@ afterEach(async () => {
 });
 
 describe("mcp handshake", () => {
-	test("initialize succeeds and tools/list exposes the frozen nineteen tools", async () => {
+	test("initialize succeeds and tools/list exposes the frozen twenty tools", async () => {
 		const transport = new StdioClientTransport({
 			command: "bun",
 			args: ["src/cli/index.ts", "mcp"],
@@ -45,7 +46,7 @@ describe("mcp handshake", () => {
 		const listed = await client.listTools();
 		const names = listed.tools.map((tool) => tool.name).sort();
 		expect(names).toEqual([...EXPECTED_TOOLS].sort());
-		expect(listed.tools).toHaveLength(19);
+		expect(listed.tools).toHaveLength(20);
 		for (const tool of listed.tools) {
 			expect(typeof tool.description).toBe("string");
 			expect(tool.description ?? "").not.toBe("");

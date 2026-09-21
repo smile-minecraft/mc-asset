@@ -4,6 +4,8 @@ import {
 	checkAnimationFrameIndices,
 	deriveAnimationGeometry,
 	extractAnimationSection,
+	extractGuiScaling,
+	nineSliceGeometryError,
 } from "../core/mcmeta.ts";
 import { decodePng } from "../io/png.ts";
 import {
@@ -80,12 +82,13 @@ const FINDING_ORDER: Readonly<Record<string, number>> = {
 	PACK_INVALID_IMAGE_DATA: 6,
 	PACK_INVALID_IMAGE_DIMENSION: 7,
 	PACK_INVALID_ANIMATION_SHEET: 8,
-	PACK_BROKEN_REFERENCE: 9,
-	PACK_MISSING_TEXTURE: 10,
-	PACK_MISSING_ASSET: 11,
-	PACK_ORPHAN_TEXTURE: 12,
-	PACK_VERSION_UNDETERMINED: 13,
-	PACK_TEXTURE_NOT_IN_ATLAS: 14,
+	PACK_GUI_SCALING_BORDER: 9,
+	PACK_BROKEN_REFERENCE: 10,
+	PACK_MISSING_TEXTURE: 11,
+	PACK_MISSING_ASSET: 12,
+	PACK_ORPHAN_TEXTURE: 13,
+	PACK_VERSION_UNDETERMINED: 14,
+	PACK_TEXTURE_NOT_IN_ATLAS: 15,
 };
 
 const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -517,6 +520,49 @@ function checkAnimationSheet(rel: string, state: ScanState): void {
 				"PACK_INVALID_ANIMATION_SHEET",
 				"error",
 				`"${rel}" with "${rel}.mcmeta" cannot form a legal animation: ${error.message.replace(/^\[[A-Z_]+\] /, "")}`,
+				rel,
+			);
+			state.errorFiles.add(rel);
+			return;
+		}
+		throw error;
+	}
+}
+
+/** Sibling .png.mcmeta GUI scaling border over the declared design size. */
+function checkGuiScalingBorder(rel: string, state: ScanState): void {
+	const dims = state.dims.get(rel);
+	const doc = state.docs.get(`${rel}.mcmeta`);
+	if (dims === undefined || doc === undefined || !isRecord(doc)) {
+		return;
+	}
+	try {
+		const scaling = extractGuiScaling(doc);
+		if (scaling.kind !== "nine_slice") {
+			return;
+		}
+		const geometry = nineSliceGeometryError(
+			scaling.width,
+			scaling.height,
+			scaling.border,
+		);
+		if (geometry !== undefined) {
+			push(
+				state.findings,
+				"PACK_GUI_SCALING_BORDER",
+				"error",
+				`"${rel}" with "${rel}.mcmeta" has an illegal nine_slice border: ${geometry.replace(/^\[[A-Z_]+\] /, "")}`,
+				rel,
+			);
+			state.errorFiles.add(rel);
+		}
+	} catch (error) {
+		if (error instanceof McAssetError) {
+			push(
+				state.findings,
+				"PACK_GUI_SCALING_BORDER",
+				"error",
+				`"${rel}" with "${rel}.mcmeta" cannot form legal gui scaling: ${error.message.replace(/^\[[A-Z_]+\] /, "")}`,
 				rel,
 			);
 			state.errorFiles.add(rel);
@@ -994,6 +1040,7 @@ export async function scanPack(
 	}
 	for (const rel of rels) {
 		checkAnimationSheet(rel, state);
+		checkGuiScalingBorder(rel, state);
 	}
 	for (const rel of state.modelRels) {
 		checkModelReferences(rel, knownFiles, lowerIndex, state);

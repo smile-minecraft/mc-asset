@@ -16,7 +16,7 @@ import { writeCleanBaseline } from "../validate/pack-fixtures.ts";
  *
  * Fixtures: tests/cli/fixtures/px-8x8.png (self-made 8x8 raster),
  * sword.mcpx (self-made 4x4 pattern), v04-anim-frames/ (two 4x4 frames),
- * v04-nine-slice.mcmeta (nine_slice border 2).
+ * v04-nine-slice.mcmeta (nine_slice border 1 over a 4x4 design).
  */
 
 const FIXTURES = "tests/cli/fixtures";
@@ -391,6 +391,46 @@ describe("mcp v0.7 twelve tools over stdio", () => {
 		expect(typeof result.json?.regions).toBe("object");
 		expect(Array.isArray(result.json?.findings)).toBe(true);
 		expect(typeof result.json?.pngBase64).toBe("string");
+	}, 30_000);
+
+	test("scale_gui_asset stretches a raster to the target size", async () => {
+		const connected = await connect();
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcp-gui-"));
+		const outPng = join(dir, "scaled.png");
+		const result = await callTool(connected, "scale_gui_asset", {
+			inputPath: PNG_8X8,
+			size: "12x12",
+			outputPngPath: outPng,
+		});
+		expect(result.isError).toBe(false);
+		expect(result.json?.width).toBe(12);
+		expect(result.json?.height).toBe(12);
+		expect(result.json?.scaling).toEqual({ type: "stretch" });
+		expect(result.json?.output).toBe(outPng);
+		expect(pngMagic(new Uint8Array(await readFile(outPng)))).toBe(true);
+	}, 30_000);
+
+	test("scale_gui_asset applies nine_slice with an explicit mcmeta", async () => {
+		const connected = await connect();
+		const result = await callTool(connected, "scale_gui_asset", {
+			inputPath: PNG_8X8,
+			size: "12",
+			mcmetaPath: NINE_SLICE_MCMETA,
+		});
+		expect(result.isError).toBe(false);
+		expect(result.json?.width).toBe(12);
+		expect(result.json?.height).toBe(12);
+		expect(typeof result.json?.pngBase64).toBe("string");
+	}, 30_000);
+
+	test("scale_gui_asset rejects a bad size", async () => {
+		const connected = await connect();
+		const result = await callTool(connected, "scale_gui_asset", {
+			inputPath: PNG_8X8,
+			size: "0",
+		});
+		expect(result.isError).toBe(true);
+		expect(result.json?.code).toBe("INVALID_ARGUMENT");
 	}, 30_000);
 
 	test("preview_asset scale rejects a non-positive factor", async () => {

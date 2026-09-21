@@ -7,8 +7,9 @@ export interface McpToolDefinition {
 }
 
 /**
- * Frozen tool surface: nineteen tools for v0.7 CLI parity — the seven
- * original §90 tools plus twelve v0.7 additions — each with its final
+ * Frozen tool surface: twenty tools for v0.7 CLI parity — the seven
+ * original §90 tools plus twelve v0.7 additions — plus the
+ * capability-completion scale_gui_asset, each with its final
  * name, description, and input schema. Descriptions state the read/write
  * contract so agents pick batch or grid paths instead of per-pixel calls.
  */
@@ -126,5 +127,11 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 		description:
 			"Scan a resource pack root for namespace, model, texture, and atlas integrity and return a read-only verdict with findings. Reads only, never writes.",
 		inputSchema: TOOL_INPUT_SCHEMAS.validate_pack_asset,
+	},
+	{
+		name: "scale_gui_asset",
+		description:
+			"Scale a GUI sprite to N or WxH with the mcmeta stretch/tile/nine_slice mapping. Returns PNG bytes and/or the scaled PNG via an explicit output path; never invents filenames.",
+		inputSchema: TOOL_INPUT_SCHEMAS.scale_gui_asset,
 	},
 ];

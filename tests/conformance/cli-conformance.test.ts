@@ -226,6 +226,8 @@ async function writeV04NineSliceMcmeta(dir: string): Promise<string> {
 			gui: {
 				scaling: {
 					type: "nine_slice",
+					width: 8,
+					height: 8,
 					border: { left: 2, top: 2, right: 2, bottom: 2 },
 					stretch_inner: false,
 				},

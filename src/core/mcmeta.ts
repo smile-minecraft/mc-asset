@@ -36,8 +36,14 @@ export interface NineSliceBorder {
 export type GuiScaling =
 	| { kind: "none" }
 	| { kind: "stretch" }
-	| { kind: "tile" }
-	| { kind: "nine_slice"; border: NineSliceBorder; stretchInner: boolean };
+	| { kind: "tile"; width: number; height: number }
+	| {
+			kind: "nine_slice";
+			width: number;
+			height: number;
+			border: NineSliceBorder;
+			stretchInner: boolean;
+	  };
 
 export interface NineSliceRegion {
 	x: number;
@@ -109,10 +115,14 @@ function isBorderSide(value: unknown): value is number {
 }
 
 function parseBorder(value: unknown): NineSliceBorder {
+	if (isBorderSide(value)) {
+		return { left: value, top: value, right: value, bottom: value };
+	}
 	if (!isRecord(value)) {
-		throw invalidMcmeta("nine_slice border must be an object.", {
-			border: value,
-		});
+		throw invalidMcmeta(
+			"nine_slice border must be a non-negative integer or an object.",
+			{ border: value },
+		);
 	}
 	for (const side of ["left", "top", "right", "bottom"] as const) {
 		if (!isBorderSide(value[side])) {
@@ -132,10 +142,13 @@ function parseBorder(value: unknown): NineSliceBorder {
 
 /**
  * Read the GUI texture-scaling section of a parsed `.mcmeta` document.
- * Absent scaling reports `none`; `stretch` / `tile` report their kind;
- * `nine_slice` carries its border and the verbatim `stretch_inner` flag.
- * Structural problems (unknown type, missing type, bad border, non-boolean
- * `stretch_inner`) are INVALID_MCMETA.
+ * Absent scaling reports `none`; `stretch` reports its kind; `tile` and
+ * `nine_slice` carry their declared design dimensions (`width` / `height`,
+ * both required positive integers) and `nine_slice` additionally carries
+ * its border (an integer for four equal sides, or a per-side object) and
+ * the verbatim `stretch_inner` flag. Structural problems (unknown type,
+ * missing type, missing or non-positive design dimensions, bad border,
+ * non-boolean `stretch_inner`) are INVALID_MCMETA.
  */
 export function extractGuiScaling(document: unknown): GuiScaling {
 	if (!isRecord(document)) {
@@ -153,17 +166,28 @@ export function extractGuiScaling(document: unknown): GuiScaling {
 		throw invalidMcmeta("scaling section must be an object.", { scaling });
 	}
 	const type = scaling.type;
-	if (type === "stretch" || type === "tile") {
+	if (type === "stretch") {
 		return { kind: type };
 	}
-	if (type !== "nine_slice") {
+	if (type !== "tile" && type !== "nine_slice") {
 		throw invalidMcmeta(
 			`Unknown scaling type ${JSON.stringify(type) ?? "missing"}; expected stretch, tile, or nine_slice.`,
 			{ type: type ?? null },
 		);
 	}
+	const width = scaling.width;
+	const height = scaling.height;
+	if (!isPositiveInt(width) || !isPositiveInt(height)) {
+		throw invalidMcmeta(
+			`${type} scaling needs positive integer width and height design dimensions.`,
+			{ width, height },
+		);
+	}
+	if (type === "tile") {
+		return { kind: type, width, height };
+	}
 	if (scaling.border === undefined) {
-		throw invalidMcmeta("nine_slice scaling needs a border object.", {
+		throw invalidMcmeta("nine_slice scaling needs a border.", {
 			scaling,
 		});
 	}
@@ -174,14 +198,15 @@ export function extractGuiScaling(document: unknown): GuiScaling {
 			stretchInner,
 		});
 	}
-	return { kind: "nine_slice", border, stretchInner };
+	return { kind: "nine_slice", width, height, border, stretchInner };
 }
 
 /**
  * Derive the nine regions by insetting the sprite bounds with the border:
  * the four sides keep the border width, the middle column and row take the
- * remainder. Callers MUST check `nineSliceGeometryError` first; a negative
- * remainder here means the border overflows the sprite.
+ * remainder. Callers MUST check `nineSliceGeometryError` first, which
+ * rejects both overflow and equality, so a zero or negative remainder
+ * here always means an unchecked border.
  */
 export function deriveNineSliceRegions(
 	width: number,
@@ -226,26 +251,27 @@ export function deriveNineSliceRegions(
 }
 
 /**
- * Border geometry check: `left + right <= width` and
- * `top + bottom <= height`. Returns the finding message, or undefined when
- * the border fits. Equality is allowed: the middle column or row may be
- * empty, it just must not go negative.
+ * Border geometry check against the declared design dimensions:
+ * `left + right < width` and `top + bottom < height`. Returns the finding
+ * message, or undefined when the border fits. Equality is an error: a
+ * zero-width middle column or row has no defined mapping, so the check
+ * is strict on both axes.
  */
 export function nineSliceGeometryError(
 	width: number,
 	height: number,
 	border: NineSliceBorder,
 ): string | undefined {
-	if (border.left + border.right > width) {
+	if (border.left + border.right >= width) {
 		return (
 			`nine_slice border overflows the sprite: left (${border.left}) + right ` +
-			`(${border.right}) exceeds width ${width}.`
+			`(${border.right}) meets or exceeds width ${width}.`
 		);
 	}
-	if (border.top + border.bottom > height) {
+	if (border.top + border.bottom >= height) {
 		return (
 			`nine_slice border overflows the sprite: top (${border.top}) + bottom ` +
-			`(${border.bottom}) exceeds height ${height}.`
+			`(${border.bottom}) meets or exceeds height ${height}.`
 		);
 	}
 	return undefined;
