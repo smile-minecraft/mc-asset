@@ -1,8 +1,29 @@
 {
 	"name": "mc-asset",
 	"version": "0.3.1",
-	"description": "Pixel-native Minecraft asset toolchain (scaffold)",
+	"description": "Pixel-native Minecraft asset toolchain — CLI and MCP server for deterministic pixel-art, animation, and resource-pack workflows",
+	"keywords": [
+		"minecraft",
+		"mcp",
+		"mcp-server",
+		"model-context-protocol",
+		"pixel-art",
+		"resource-pack",
+		"texture-generation",
+		"image-processing",
+		"cli",
+		"ai-agents"
+	],
 	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/smile-minecraft/mc-asset.git"
+	},
+	"homepage": "https://github.com/smile-minecraft/mc-asset#readme",
+	"bugs": {
+		"url": "https://github.com/smile-minecraft/mc-asset/issues"
+	},
+	"mcpName": "io.github.smile-minecraft/mc-asset",
 	"type": "module",
 	"engines": {
 		"node": ">=22"

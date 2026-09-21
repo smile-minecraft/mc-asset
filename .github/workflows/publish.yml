@@ -1,0 +1,115 @@
+name: publish
+
+# One-button npm + MCP Registry release. Tag-triggered (v*) or manual.
+# This workflow never runs on branches: a release starts exactly from a
+# pushed v* tag or an explicit workflow_dispatch run. Nothing is published
+# by CI on push or pull_request (see ci.yml).
+# npm 發布走 trusted publishing（於 npm 套件設定綁定本 workflow；v0.3.1
+# 首發由維護者本機完成）。
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# contents: read only fetches the source; id-token: write enables npm
+# Trusted Publishing (OIDC) and the MCP Registry GitHub OIDC login.
+# No credentials are stored anywhere: npm auth comes from the ephemeral
+# OIDC exchange, and provenance is generated automatically.
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  npm:
+    # Only version tags and main run the publish path. A dispatch from any
+    # other ref skips this whole job (and mcp-registry with it, via needs).
+    if: startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      # Pin the source to the tag ref itself, never a moving branch.
+      # On workflow_dispatch the default checkout (triggering commit) applies.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          # Node 24 ships npm >= 11.5.1, required for the OIDC exchange
+          # behind npm Trusted Publishing (Node 22 ships npm 10).
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Locked dependencies only; no unresolved ranges at publish time.
+      - run: bun install --frozen-lockfile
+      - run: bun test
+      - run: bun run build
+      # On a tag push, the tag name must equal v<package.json version>;
+      # anything else exits non-zero and fails the job before publishing.
+      # Skipped on workflow_dispatch (manual dry-run / re-publish path).
+      - name: version guard (tag must equal v<package.json version>)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          test "${GITHUB_REF_NAME}" = "v$(node -p "require('./package.json').version")" \
+            || { echo "::error::tag ${GITHUB_REF_NAME} != v$(node -p "require('./package.json').version")"; exit 1; }
+      # Idempotency: if this version is already on the registry, skip
+      # the publish but exit 0 so workflow_dispatch can still drive the
+      # later mcp-registry job and future re-runs stay safe.
+      - name: publish to npm (skip if version already exists)
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if npm view "mc-asset@${version}" version >/dev/null 2>&1; then
+            echo "mc-asset@${version} is already on the registry; skipping npm publish."
+            exit 0
+          fi
+          npm publish
+
+  mcp-registry:
+    needs: npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # Keep server.json versions in lockstep with the just-published npm
+      # version. Runner-local edit only; nothing is committed back.
+      - name: sync server.json versions from package.json
+        run: |
+          node -e "const f = require('node:fs'); const pkg = JSON.parse(f.readFileSync('package.json', 'utf8')); const s = JSON.parse(f.readFileSync('server.json', 'utf8')); s.version = pkg.version; s.packages[0].version = pkg.version; f.writeFileSync('server.json', JSON.stringify(s, null, 2) + '\n'); console.log('server.json synced to ' + pkg.version);"
+      # Publisher binary fetch, pinned by version and verified by hash;
+      # see https://modelcontextprotocol.io/registry/github-actions
+      - name: install mcp-publisher
+        run: |
+          set -euo pipefail
+          publisher_version="v1.8.1"
+          tarball="mcp-publisher_linux_amd64.tar.gz"
+          sha256="a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc"
+          curl -fsSL -o "${tarball}" "https://github.com/modelcontextprotocol/registry/releases/download/${publisher_version}/${tarball}"
+          echo "${sha256}  ${tarball}" | sha256sum -c -
+          tar -xzf "${tarball}" mcp-publisher
+          chmod +x mcp-publisher
+      # npm metadata can lag behind the publish, and the registry verifies
+      # our mcpName against the live npm metadata — wait until it resolves.
+      - name: wait for npm metadata propagation
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          for attempt in $(seq 1 18); do
+            if npm view "mc-asset@${version}" version >/dev/null 2>&1; then
+              echo "mc-asset@${version} metadata is live (attempt ${attempt})."
+              exit 0
+            fi
+            echo "attempt ${attempt}/18: metadata not live yet; retrying in 10s…"
+            sleep 10
+          done
+          echo "::error::mc-asset@${version} metadata did not propagate within 180s"
+          exit 1
+      - name: authenticate to MCP Registry (GitHub OIDC)
+        run: ./mcp-publisher login github-oidc
+      - name: publish server to MCP Registry
+        run: ./mcp-publisher publish
