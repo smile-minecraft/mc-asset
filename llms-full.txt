@@ -1,0 +1,221 @@
+# mc-asset — full agent context
+
+> mc-asset is a pixel-native 2D asset engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs. It turns raster references, hand-authored ASCII grids, and editable `.mcpx` sources into byte-reproducible PNG textures, animation sheets, palette reports, and validated resource packs — for human creators and AI coding agents.
+
+This file collects, in one place, what an agent needs to use the tool: install, registration, the nineteen MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest.
+
+## When to use it
+
+- Turn a high-resolution reference image into pixel art (`pixelize_asset`).
+- Author or edit a texture pixel-by-pixel through an ASCII Grid or a batch of operations, without per-pixel tool calls.
+- Generate deterministic procedural textures from a pattern, size, palette, and seed.
+- Recolor one source into per-material variants; check seams and tiling; pack animated sprite sheets.
+- Validate a single texture or an entire resource pack against Minecraft requirements.
+
+Everything runs on the same Core engine from both the CLI and the MCP server, and the same inputs plus seed produce identical bytes under Bun and Node.
+
+## Install
+
+```sh
+# npm (recommended): run the server straight from the registry
+npx -y mc-asset mcp
+# or install the CLI globally
+npm install -g mc-asset
+
+# Homebrew (macOS / Linux)
+brew tap smile-minecraft/tap
+brew install smile-minecraft/tap/mc-asset
+
+# From source
+git clone https://github.com/smile-minecraft/mc-asset.git
+cd mc-asset
+bun install --frozen-lockfile
+bun run build
+./bin/mc-asset.js mcp
+```
+
+Node.js 22 or newer is required (`engines.node` is `>=22`). The published package ships the Node bundle, so only Node is needed at runtime; Bun is a build tool.
+
+### Minimal registration (stdio)
+
+The server command is always `npx -y mc-asset mcp`. For an MCP client that
+reads the `mcpServers` object:
+
+```json
+{
+  "mcpServers": {
+    "mc-asset": {
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
+    }
+  }
+}
+```
+
+OpenCode uses its own shape (`~/.config/opencode/opencode.jsonc`):
+
+```jsonc
+"mc-asset": {
+  "type": "local",
+  "command": ["npx", "-y", "mc-asset", "mcp"],
+  "enabled": true
+}
+```
+
+Fully restart the client after a config change — MCP servers load at startup.
+Config file names can differ between clients and change between their versions;
+check the client's own documentation when unsure. The guide at
+`docs/mcp-guide.md` carries per-client examples (Claude Code, Claude Desktop,
+Cursor, VS Code, Cline, OpenCode).
+
+## The nineteen MCP tools
+
+| Tool | What it does | Required inputs |
+|---|---|---|
+| `analyze_asset` | Read-only raster report: dimensions, palette, predicted alpha classification, pixel-art heuristics, recommendations. | `path` |
+| `pixelize_asset` | Runs a reference raster through the deterministic pixelize pipeline; returns PNG bytes and/or `.mcpx`. | `inputPath`, `size` |
+| `render_pixel_asset` | Renders an ASCII Grid into PNG and/or `.mcpx`, with an optional post-parse batch. | exactly one of `gridPath` / `gridText` |
+| `apply_asset_operations` | Applies a batch of pixel/layer/region operations to an `.mcpx` source in one call. | `sourcePath`, `operations` |
+| `recolor_asset` | Recolors an `.mcpx` source with one builtin material ramp (optionally scoped to a `region`). | `sourcePath`, `material` |
+| `create_variants` | Fans one `.mcpx` source out into one PNG plus one `.mcpx` per material under `outputDir`. | `sourcePath`, `materials`, `outputDir` |
+| `validate_asset` | Read-only verdict over a PNG and an optional `.mcmeta`; `fail` is a normal result. | `path` |
+| `import_asset` | Decodes a raster (PNG/JPEG/WebP) into the canvas, with an optional batch. | `inputPath` |
+| `build_asset` | Builds an `.mcpx` source into PNG bytes and/or re-serialized source. | `sourcePath` |
+| `transform_asset` | Applies one geometry operation: `flip`, `rotate`, `crop`, `pad`, `translate`, or `resize`. | `inputPath` + exactly one geometry flag |
+| `quantize_asset` | Reduces distinct colors to a target count, with an optional selection. | `inputPath`, `colors` |
+| `cleanup_asset` | Detects, and optionally fixes, pixel defects (`isolated`, `noise`, `cluster`, `fringe`, `outlier`, `hole`, `aa`). | `inputPath` |
+| `palette_asset` | Read-only palette `extract` / `inspect` report (unique colors, distribution, roles, contrast). | `mode`, `inputPath` |
+| `material_asset` | Read-only `list` / `show` over the builtin materials. | `mode` (`name` for `show`) |
+| `tile_asset` | Seam, edge-repetition, and brightness analysis, with an optional tiled preview PNG. | `inputPath` |
+| `generate_asset` | Deterministic procedural texture from pattern, size, palette, and seed. | `pattern`, `size`, `palette`, `seed` |
+| `preview_asset` | `ascii` / `palette-map` reports, or `scale` / `nine-slice` guide PNGs. | `inputPath`, `mode` |
+| `animate_asset` | Animation sheets: `pack`, `unpack`, `reorder`, `resize`, `validate`, `preview`. | `mode` + that mode's input path (`layout` for `pack` / `unpack` / `preview`) |
+| `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, version targeting. | `packPath` |
+
+Required-input notes that the schema alone does not show: `pixelize_asset`
+raises `INVALID_ARGUMENT` when `size` is omitted, and `animate_asset` requires
+`layout` for `pack`, `unpack`, and `preview`. `transform_asset` cannot combine
+a `selection` with a geometry operation (`ARGUMENT_CONFLICT`), and
+`material_asset` requires `name` only for `show`.
+
+## Batch operations
+
+`apply_asset_operations` (and `--operations` on the CLI `import`, `render`, and
+`build` commands) take a JSON array of operation objects. MCP also accepts a
+bare array or an `{"operations": [...]}` envelope.
+
+```json
+[
+  { "type": "setPixel", "x": 0, "y": 0, "color": "#FF0000FF" },
+  { "type": "drawLine", "from": [0, 0], "to": [15, 15], "color": "#00FF00FF" },
+  { "type": "fillRect", "rect": { "x": 8, "y": 8, "width": 4, "height": 4 }, "color": "#FFFF00FF" },
+  { "type": "floodFill", "x": 3, "y": 3, "color": "#FF00FFFF" },
+  { "type": "clearPixel", "x": 0, "y": 0 }
+]
+```
+
+There are twenty operation `type` values: `setPixel`, `clearPixel`, `drawLine`,
+`drawRect`, `fillRect`, `floodFill`, `createLayer`, `removeLayer`,
+`renameLayer`, `reorderLayer`, `duplicateLayer`, `mergeLayer`, `clearLayer`,
+`fillLayer`, `moveLayer`, `createRegion`, `removeRegion`, `renameRegion`,
+`reorderRegion`, and `setRegionPixel`. Each object carries its per-type
+arguments; colors are `transparent`, `#RRGGBB`, or `#RRGGBBAA`. Every operation
+accepts an optional string `id`, unique within one batch.
+
+Execution is atomic: with `atomic` left at its default `true`, the first failing
+operation rolls the whole batch back. The full per-type parameter table lives in
+the “Batch Operations Specification” section of `docs/cli-surface.md`.
+
+## How failures come back
+
+The CLI signals failure with an exit code:
+
+| Exit code | Category | Meaning |
+|---|---|---|
+| 0 | Success | The command completed. |
+| 1 | Internal error | Unhandled engine failure (`INTERNAL_ERROR`). |
+| 2 | Invalid invocation | Syntax error, conflicting flags, missing parameters (`INVALID_ARGUMENT`). |
+| 3 | Validation failure | The engine ran, but the asset or pack failed validation (`VALIDATION_FAILED`). |
+| 4 | Filesystem refusal | Existing file without `--force`, or a missing directory without `--mkdir`. |
+| 5 | Unsupported / resource limit | Unsupported format or a size limit exceeded. |
+
+With `--json`, the CLI writes a `{ success, result, error }` envelope to stdout
+and sends logs to stderr.
+
+The MCP surface reports a tool failure with `isError: true` and a JSON string in
+`content[0].text`:
+
+```text
+isError: true
+{"code":"INVALID_ARGUMENT","message":"Rect must be an object with x, y, width, and height.","details":{"path":"operations[1].rect"}}
+```
+
+`code` is a registry code shared with the CLI (`INVALID_ARGUMENT`,
+`ARGUMENT_CONFLICT`, `FILESYSTEM_ERROR`, `OUTPUT_EXISTS`, …); anything that is
+not a `McAssetError` becomes `INTERNAL_ERROR`. `message` is the CLI message with
+its `[CODE] ` prefix stripped, and `details` appears only when the error carries
+context. Validation tools report `fail` with findings rather than raising, so a
+bad asset is still a normal result.
+
+## Limits
+
+- **Explicit output paths only.** Producing tools never invent filenames;
+  read-only tools never write.
+- **No overwrite.** An existing explicit target is `OUTPUT_EXISTS`.
+- **No directory creation.** A missing parent directory is `FILESYSTEM_ERROR`.
+  The MCP surface exposes no `--force` / `--mkdir`; pick a new path or create
+  the directory yourself.
+- **Omitted outputs are embedded.** Without an output path, the result carries
+  `pngBase64` (PNG) or `mcpxText` (`.mcpx`) instead of writing a file. This is
+  decided per artifact.
+- **No per-pixel tool.** There is no `set_pixel`; pixel work goes through the
+  ASCII Grid, the batch operations array, or the inline `.mcpx` text.
+- **Determinism.** No unseeded randomness and no floating-point drift; color
+  math is integer-only, and the same inputs plus seed produce byte-identical
+  PNG and `.mcpx` output across Bun and Node for the commands covered by
+  `scripts/compare-runtime.mjs`.
+- **Dual runtime.** `src/` uses only `node:`-compatible imports, so the bundled
+  `dist` runs under plain Node; Node.js 22 or newer is required.
+- **`validate_asset` checks one PNG.** Pack-level and atlas-aware validation is
+  `validate_pack_asset`.
+
+## Examples
+
+CLI — author, render, and validate a texture:
+
+```sh
+mc-asset render gems/gem.grid --output build/gem.png --source build/gem.mcpx
+mc-asset analyze build/gem.png
+mc-asset validate build/gem.png --profile minecraft:item
+```
+
+CLI — deterministic procedural texture and a material variant:
+
+```sh
+mc-asset generate noise --size 16 --palette stone --seed 42 --output stone.png
+mc-asset variant sword.mcpx --materials iron,gold --output-dir dist --mkdir
+```
+
+MCP — render an inline ASCII Grid:
+
+```json
+{"gridText":"[palette]\n. = transparent\nS = #ADB7C0FF\n\n[grid]\n.SS.\nSSSS\nSSSS\n.SS.\n","outputPngPath":"out/render.png"}
+```
+
+MCP — apply a batch to an editable source:
+
+```json
+{"sourcePath":"sword.mcpx","operations":[{"type":"setPixel","x":0,"y":0,"color":"#FF0000FF"}],"outputPngPath":"out/applied.png"}
+```
+
+MCP — deterministic generation and whole-pack validation:
+
+```json
+{"pattern":"checker","size":"16","palette":"iron","seed":7}
+{"packPath":"MyResourcePack","resourcePackVersion":"75"}
+```
+
+---
+
+Authoritative sources: `docs/mcp-surface.md`, `docs/cli-surface.md`, and
+`docs/mcp-guide.md`. Last updated 2026-09-21.

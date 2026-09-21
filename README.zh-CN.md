@@ -1,8 +1,13 @@
 # mc-asset
 
-[English](README.md) | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/smile-minecraft/mc-asset/ci.yml?branch=main)](https://github.com/smile-minecraft/mc-asset/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/smile-minecraft/mc-asset)](https://github.com/smile-minecraft/mc-asset/releases)
+[![License](https://img.shields.io/github/license/smile-minecraft/mc-asset)](https://github.com/smile-minecraft/mc-asset/blob/main/LICENSE)
+[![npm](https://img.shields.io/npm/v/mc-asset)](https://www.npmjs.com/package/mc-asset)
 
-![mc-asset banner](docs/assets/banner.png)
+[English](https://github.com/smile-minecraft/mc-asset/blob/main/README.md) | [繁體中文](https://github.com/smile-minecraft/mc-asset/blob/main/README.zh-TW.md) | [简体中文](https://github.com/smile-minecraft/mc-asset/blob/main/README.zh-CN.md)
+
+![mc-asset banner](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/banner.png)
 
 专为 Minecraft Java 版资源包打造的像素原生（Pixel-native）2D 资产创作引擎、CLI 工具链与原生 MCP 服务器，面向人类创作者与 AI Coding Agent。
 
@@ -20,7 +25,45 @@
 
 ---
 
+## 成果展示
+
+| 像素化（Pixelize） | 色彩量化（Quantize） |
+|---|---|
+| ![pixelize 前](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-before.png) → ![pixelize 后](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-after.png) | ![quantize 前](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-before.png) → ![quantize 后](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-after.png) |
+
+**材质变体**：将同一份来源展开为四种材质级别（`iron`、`gold`、`wood`、`crystal`）：
+
+![variant iron](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-iron.png) ![variant gold](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-gold.png) ![variant wood](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-wood.png) ![variant crystal](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-crystal.png)
+
+**无缝平铺**与 2×2 重复检查：
+
+![tile pattern](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-pattern.png) ![2x2 平铺预览](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-preview-2x2.png)
+
+**动画图集**，由单帧打包而成：
+
+![动画图集](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/anim-sheet.png)
+
+以上图片全部由 CLI 产出，对应命令见 [`docs/assets/showcase/README.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/README.md)。
+
+---
+
 ## 安装指南
+
+### 通过 npm 安装（推荐）
+
+直接从 registry 运行服务器，无需先在本机安装：
+
+```sh
+npx -y mc-asset mcp
+```
+
+若要在 PATH 上获得 `mc-asset` 命令，可全局安装 CLI：
+
+```sh
+npm install -g mc-asset
+mc-asset --version
+# 0.3.1
+```
 
 ### 通过 Homebrew 安装（macOS / Linux）
 
@@ -43,6 +86,16 @@ bun run build
 ```
 
 *系统环境需求*：已在 [Node.js](https://nodejs.org) 22 与 [Bun](https://bun.sh) 1.3 上测试。`bun run build` 需要 Bun，`./bin/mc-asset.js` 需要 Node.js；只有 Bun 时，改为运行 `bun ./bin/mc-asset.js`。
+
+---
+
+## 面向 AI Agent
+
+- [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt)：给 Agent 的项目精简索引。
+- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份信息的单文件版本，涵盖安装、十九个 MCP 工具、批处理操作、错误模型与限制。
+- [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md)：注册方式、每个 MCP 工具一份原样捕获，以及错误模型。
+- [`docs/mcp-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-surface.md)：已冻结的 MCP 接口——工具名称、输入与读写契约。
+- [`AGENTS.md`](https://github.com/smile-minecraft/mc-asset/blob/main/AGENTS.md)：修改本仓库时必须遵守的规则。
 
 ---
 
@@ -249,8 +302,8 @@ mc-asset validate-pack ./MyResourcePack \
 {
   "mcpServers": {
     "mc-asset": {
-      "command": "mc-asset",
-      "args": ["mcp"]
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
     }
   }
 }
@@ -265,7 +318,7 @@ mc-asset validate-pack ./MyResourcePack \
   "mcp": {
     "mc-asset": {
       "type": "local",
-      "command": ["mc-asset", "mcp"],
+      "command": ["npx", "-y", "mc-asset", "mcp"],
       "enabled": true
     }
   }
@@ -280,8 +333,8 @@ mc-asset validate-pack ./MyResourcePack \
 {
   "mcpServers": {
     "mc-asset": {
-      "command": "mc-asset",
-      "args": ["mcp"]
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
     }
   }
 }
@@ -406,4 +459,4 @@ node scripts/compare-runtime.mjs
 
 ## 开源许可
 
-[MIT](LICENSE) © 2026 Smile Minecraft Project
+[MIT](https://github.com/smile-minecraft/mc-asset/blob/main/LICENSE) © 2026 Smile Minecraft Project

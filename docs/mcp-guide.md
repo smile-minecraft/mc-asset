@@ -16,24 +16,88 @@ inline; there is no `set_pixel` tool by design.
 
 ## Installing and registering the server
 
-The server ships inside the Homebrew-installed `mc-asset` binary, so install
-that first (see the Installation section of the README for the Homebrew tap).
+Install the package once, then point your MCP client at `npx -y mc-asset mcp`.
+Any of the three install paths works:
 
-Then add the `mc-asset` entry to the global OpenCode config
-(`~/.config/opencode/opencode.jsonc`) as an MCP server:
+- **npm (recommended)** — run it straight from the registry with `npx -y mc-asset mcp`, or install the CLI globally with `npm install -g mc-asset`.
+- **Homebrew (macOS / Linux)** — `brew tap smile-minecraft/tap && brew install smile-minecraft/tap/mc-asset`, then use the `mc-asset` command.
+- **From source** — `bun install --frozen-lockfile && bun run build`, then run `./bin/mc-asset.js mcp`.
+
+However you install it, the server command stays `npx -y mc-asset mcp`. Config
+file names differ between clients and can change between their versions; when
+in doubt, check that client's own documentation. The registrations below are
+all stdio.
+
+**Claude Code**
+
+```sh
+claude mcp add mc-asset -- npx -y mc-asset mcp
+```
+
+**Claude Desktop** — `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "mc-asset": {
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
+    }
+  }
+}
+```
+
+**Cursor** — `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "mc-asset": {
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
+    }
+  }
+}
+```
+
+**VS Code** — `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "mc-asset": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
+    }
+  }
+}
+```
+
+**Cline** — `cline_mcp_settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "mc-asset": {
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
+    }
+  }
+}
+```
+
+**OpenCode** — `~/.config/opencode/opencode.jsonc`:
 
 ```jsonc
 "mc-asset": {
   "type": "local",
-  "command": ["/opt/homebrew/bin/mc-asset", "mcp"],
+  "command": ["npx", "-y", "mc-asset", "mcp"],
   "enabled": true
 }
 ```
 
-The `command` points at the installed binary (`/opt/homebrew/bin/mc-asset` is
-the Homebrew install on this machine).
-
-Then fully restart OpenCode. MCP servers load at startup, so a config change
+Then fully restart the client. MCP servers load at startup, so a config change
 without a restart proves nothing. To roll back, remove the entry (or restore
 the config backup) and restart again.
 

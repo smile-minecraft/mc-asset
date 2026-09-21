@@ -8,21 +8,84 @@
 
 ## 安裝與註冊伺服器
 
-伺服器內建在透過 Homebrew 安裝的 `mc-asset` 執行檔中，請先安裝（Homebrew tap 的做法見 README 的「安裝指南」段落）。
+先安裝套件，再讓 MCP 用戶端指向 `npx -y mc-asset mcp`。三種安裝路徑都可以：
 
-接著在全域 OpenCode 設定（`~/.config/opencode/opencode.jsonc`）中，把 `mc-asset` 加為 MCP 伺服器：
+- **npm（建議）**：直接從 registry 執行 `npx -y mc-asset mcp`，或全域安裝 CLI：`npm install -g mc-asset`。
+- **Homebrew（macOS / Linux）**：`brew tap smile-minecraft/tap && brew install smile-minecraft/tap/mc-asset`，之後使用 `mc-asset` 指令。
+- **原始碼**：`bun install --frozen-lockfile && bun run build`，然後執行 `./bin/mc-asset.js mcp`。
+
+不論用哪一種方式安裝，伺服器指令固定是 `npx -y mc-asset mcp`。各用戶端的設定檔名不同，也可能隨版本調整；不確定時，請查該用戶端自己的文件。以下註冊範例皆為 stdio。
+
+**Claude Code**
+
+```sh
+claude mcp add mc-asset -- npx -y mc-asset mcp
+```
+
+**Claude Desktop** — `claude_desktop_config.json`：
+
+```json
+{
+  "mcpServers": {
+    "mc-asset": {
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
+    }
+  }
+}
+```
+
+**Cursor** — `.cursor/mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "mc-asset": {
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
+    }
+  }
+}
+```
+
+**VS Code** — `.vscode/mcp.json`：
+
+```json
+{
+  "servers": {
+    "mc-asset": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
+    }
+  }
+}
+```
+
+**Cline** — `cline_mcp_settings.json`：
+
+```json
+{
+  "mcpServers": {
+    "mc-asset": {
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
+    }
+  }
+}
+```
+
+**OpenCode** — `~/.config/opencode/opencode.jsonc`：
 
 ```jsonc
 "mc-asset": {
   "type": "local",
-  "command": ["/opt/homebrew/bin/mc-asset", "mcp"],
+  "command": ["npx", "-y", "mc-asset", "mcp"],
   "enabled": true
 }
 ```
 
-`command` 指向已安裝的執行檔（`/opt/homebrew/bin/mc-asset` 是這台機器上 Homebrew 的安裝位置）。
-
-然後完整重新啟動 OpenCode。MCP 伺服器在啟動時載入，設定改了卻沒重啟，什麼都證明不了。要回復時，移除該項目（或還原設定備份）並再重啟一次。
+然後完整重新啟動用戶端。MCP 伺服器在啟動時載入，設定改了卻沒重啟，什麼都證明不了。要回復時，移除該項目（或還原設定備份）並再重啟一次。
 
 以下擷取透過 MCP 用戶端 SDK 在一個示範工作目錄中執行，其中所有路徑都相對於該目錄。原有七個工具的擷取取自已安裝的版本，本次新增的十二個工具則取自本地源碼伺服器——兩者執行的是同一份伺服器程式碼。
 

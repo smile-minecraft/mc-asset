@@ -1,8 +1,13 @@
 # mc-asset
 
-[English](README.md) | [繁體中文](README.zh-TW.md) | [简体中文](README.zh-CN.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/smile-minecraft/mc-asset/ci.yml?branch=main)](https://github.com/smile-minecraft/mc-asset/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/smile-minecraft/mc-asset)](https://github.com/smile-minecraft/mc-asset/releases)
+[![License](https://img.shields.io/github/license/smile-minecraft/mc-asset)](https://github.com/smile-minecraft/mc-asset/blob/main/LICENSE)
+[![npm](https://img.shields.io/npm/v/mc-asset)](https://www.npmjs.com/package/mc-asset)
 
-![mc-asset banner](docs/assets/banner.png)
+[English](https://github.com/smile-minecraft/mc-asset/blob/main/README.md) | [繁體中文](https://github.com/smile-minecraft/mc-asset/blob/main/README.zh-TW.md) | [简体中文](https://github.com/smile-minecraft/mc-asset/blob/main/README.zh-CN.md)
+
+![mc-asset banner](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/banner.png)
 
 A pixel-native 2D asset creation engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs, designed for human creators and AI coding agents.
 
@@ -20,7 +25,45 @@ A pixel-native 2D asset creation engine and deterministic CLI/MCP toolchain for 
 
 ---
 
+## Showcase
+
+| Pixelize | Quantize |
+|---|---|
+| ![pixelize before](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-before.png) → ![pixelize after](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-after.png) | ![quantize before](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-before.png) → ![quantize after](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-after.png) |
+
+**Material variants** — one source fanned out into four ramps (`iron`, `gold`, `wood`, `crystal`):
+
+![variant iron](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-iron.png) ![variant gold](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-gold.png) ![variant wood](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-wood.png) ![variant crystal](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-crystal.png)
+
+**Seamless tiling** and a 2×2 repeat check:
+
+![tile pattern](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-pattern.png) ![2x2 tiled preview](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-preview-2x2.png)
+
+**Animation sheet** packed from individual frames:
+
+![animation sprite sheet](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/anim-sheet.png)
+
+Every image above is produced by the CLI; the commands live in [`docs/assets/showcase/README.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/README.md).
+
+---
+
 ## Installation
+
+### Via npm (recommended)
+
+Run the server straight from the registry — no local install needed:
+
+```sh
+npx -y mc-asset mcp
+```
+
+Install the CLI globally to get the `mc-asset` command on your PATH:
+
+```sh
+npm install -g mc-asset
+mc-asset --version
+# 0.3.1
+```
 
 ### Via Homebrew (macOS / Linux)
 
@@ -43,6 +86,16 @@ bun run build
 ```
 
 *Prerequisites*: tested with [Node.js](https://nodejs.org) 22 and [Bun](https://bun.sh) 1.3. `bun run build` needs Bun and `./bin/mc-asset.js` needs Node.js; with Bun alone, run `bun ./bin/mc-asset.js`.
+
+---
+
+## For AI agents
+
+- [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt) — a compact index of the repository for agents.
+- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt) — the same material as a single file: install, the nineteen MCP tools, batch operations, the error model, and the limits.
+- [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md) — registration, one verbatim capture per MCP tool, and the error model.
+- [`docs/mcp-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-surface.md) — the frozen MCP surface: tool names, inputs, and the read/write contract.
+- [`AGENTS.md`](https://github.com/smile-minecraft/mc-asset/blob/main/AGENTS.md) — the rules for changing this repository.
 
 ---
 
@@ -249,8 +302,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "mc-asset": {
-      "command": "mc-asset",
-      "args": ["mcp"]
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
     }
   }
 }
@@ -265,7 +318,7 @@ Add to `opencode.json` or `opencode.jsonc`:
   "mcp": {
     "mc-asset": {
       "type": "local",
-      "command": ["mc-asset", "mcp"],
+      "command": ["npx", "-y", "mc-asset", "mcp"],
       "enabled": true
     }
   }
@@ -280,8 +333,8 @@ Add to your MCP configuration:
 {
   "mcpServers": {
     "mc-asset": {
-      "command": "mc-asset",
-      "args": ["mcp"]
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
     }
   }
 }
@@ -406,4 +459,4 @@ node scripts/compare-runtime.mjs
 
 ## License
 
-[MIT](LICENSE) © 2026 Smile Minecraft Project
+[MIT](https://github.com/smile-minecraft/mc-asset/blob/main/LICENSE) © 2026 Smile Minecraft Project
