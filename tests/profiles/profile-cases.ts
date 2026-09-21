@@ -26,6 +26,7 @@ import {
 	comparePackFormats,
 	getItemAtlasPolicy,
 	ITEM_ATLAS_PLACEMENT_FACT,
+	ITEM_MODEL_DEFINITIONS_FACT,
 	ITEMS_ATLAS_FACT,
 	isFactActive,
 	normalizePackFormat,
@@ -300,10 +301,10 @@ export const MODEL_CASES: ModelCase[] = [
 		},
 	},
 	{
-		name: "seven §95 facts carry source, check date, and sourced since",
+		name: "eight §95 facts carry source, check date, and sourced since",
 		run: (check) => {
 			const byName = new Map(COMPAT_FACTS.map((fact) => [fact.fact, fact]));
-			check.equal(COMPAT_FACTS.length, 7, "seven facts");
+			check.equal(COMPAT_FACTS.length, 8, "eight facts");
 			check.ok(
 				!byName.has("resource-pack-format"),
 				"resource-pack-format fact is retired",
@@ -313,48 +314,63 @@ export const MODEL_CASES: ModelCase[] = [
 				status: "verified" | "pending-source";
 				since: string | undefined;
 				sourcePart: string;
+				checkedAt: string;
 			}> = [
 				{
 					fact: "trim-palette-location",
 					status: "verified",
 					since: "97.1",
 					sourcePart: "26.3-snap1 / RP 97.1",
+					checkedAt: "2026-09-20",
 				},
 				{
 					fact: "items-atlas-separated",
 					status: "verified",
 					since: "75.0",
 					sourcePart: "1.21.11 / RP 75.0",
+					checkedAt: "2026-09-20",
 				},
 				{
 					fact: "item-same-atlas-block-blocks-atlas",
 					status: "verified",
 					since: "75.0",
 					sourcePart: "1.21.11 / RP 75.0",
+					checkedAt: "2026-09-20",
 				},
 				{
 					fact: "texture-mipmap-fields",
 					status: "verified",
 					since: "75.0",
 					sourcePart: "1.21.11 / RP 75.0",
+					checkedAt: "2026-09-20",
 				},
 				{
 					fact: "block-render-pass-auto",
 					status: "verified",
 					since: "84.0",
 					sourcePart: "Java Edition 26.1 (Block model)",
+					checkedAt: "2026-09-20",
 				},
 				{
 					fact: "block-force-translucent",
 					status: "verified",
 					since: "84.0",
 					sourcePart: "Java Edition 26.1 (Block model)",
+					checkedAt: "2026-09-20",
 				},
 				{
 					fact: "texture-png-only",
 					status: "verified",
 					since: "22.0",
 					sourcePart: "1.20.3 / RP 22.0",
+					checkedAt: "2026-09-20",
+				},
+				{
+					fact: "item-model-definitions",
+					status: "verified",
+					since: "46.0",
+					sourcePart: "1.21.4 / RP 46.0",
+					checkedAt: "2026-09-21",
 				},
 			];
 			for (const want of expected) {
@@ -372,7 +388,11 @@ export const MODEL_CASES: ModelCase[] = [
 						found.source.includes("§95"),
 					`${want.fact} source cites origin and §95`,
 				);
-				check.equal(found?.checkedAt, "2026-09-20", `${want.fact} check date`);
+				check.equal(
+					found?.checkedAt,
+					want.checkedAt,
+					`${want.fact} check date`,
+				);
 				check.ok(found?.value !== undefined, `${want.fact} value present`);
 			}
 			for (const fact of COMPAT_FACTS) {
@@ -430,6 +450,33 @@ export const MODEL_CASES: ModelCase[] = [
 				resolveVersionedFact(ITEMS_ATLAS_FACT, "999.0") !== undefined,
 				"later formats keep the fact",
 			);
+		},
+	},
+	{
+		name: "item-model-definitions gates at packFormat 46.0",
+		run: (check) => {
+			check.equal(
+				isFactActive(ITEM_MODEL_DEFINITIONS_FACT, "45.0"),
+				false,
+				"45.0 predates item model definitions",
+			);
+			check.equal(
+				resolveVersionedFact(ITEM_MODEL_DEFINITIONS_FACT, "45.0"),
+				undefined,
+				"45.0 does not resolve item model definitions",
+			);
+			for (const format of ["46.0", "75.0", "97.1"]) {
+				check.equal(
+					isFactActive(ITEM_MODEL_DEFINITIONS_FACT, format),
+					true,
+					`${format} activates item model definitions`,
+				);
+				check.ok(
+					resolveVersionedFact(ITEM_MODEL_DEFINITIONS_FACT, format) !==
+						undefined,
+					`${format} resolves item model definitions`,
+				);
+			}
 		},
 	},
 	{

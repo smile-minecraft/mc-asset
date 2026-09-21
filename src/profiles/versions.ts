@@ -33,13 +33,17 @@ export interface PngOnlyValue {
 	format: "png";
 }
 
+export interface ItemModelDefinitionsValue {
+	directory: "items/";
+}
+
 /**
  * §95 compatibility facts as version-interval data. Every fact carries its
  * sourced starting packFormat in `since` as a dotted string; the
  * version-to-format mapping itself lives in the version table
  * (`src/cli/version-options.ts`), which supersedes the retired
- * resource-pack-format fact. All seven facts are determined as of
- * 2026-09-20; `pendingSourceWarnings` stays as the guard for any future
+ * resource-pack-format fact. All eight facts are determined as of
+ * 2026-09-21; `pendingSourceWarnings` stays as the guard for any future
  * undetermined fact.
  */
 export const TRIM_PALETTE_FACT: VersionedFact<TrimPaletteValue> = {
@@ -118,6 +122,16 @@ export const PNG_ONLY_FACT: VersionedFact<PngOnlyValue> = {
 	checkedAt: "2026-09-20",
 };
 
+export const ITEM_MODEL_DEFINITIONS_FACT: VersionedFact<ItemModelDefinitionsValue> =
+	{
+		fact: "item-model-definitions",
+		since: { packFormat: "46.0" },
+		value: { directory: "items/" },
+		status: "verified",
+		source: "§95; Minecraft Wiki Items model definition (1.21.4 / RP 46.0)",
+		checkedAt: "2026-09-21",
+	};
+
 export const COMPAT_FACTS: VersionedFact<unknown>[] = [
 	TRIM_PALETTE_FACT,
 	ITEMS_ATLAS_FACT,
@@ -126,6 +140,7 @@ export const COMPAT_FACTS: VersionedFact<unknown>[] = [
 	BLOCK_RENDER_PASS_FACT,
 	BLOCK_FORCE_TRANSLUCENT_FACT,
 	PNG_ONLY_FACT,
+	ITEM_MODEL_DEFINITIONS_FACT,
 ];
 
 /**
