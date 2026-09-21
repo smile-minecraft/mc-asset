@@ -1,0 +1,26 @@
+; Central glow pulse - frame 1 of 4 (16x16, hand-authored)
+[palette]
+. = transparent
+k = #14141C
+d = #2F9E9E
+m = #4FD3D3
+b = #A9F1EC
+w = #FFFFFFFF
+
+[grid]
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkwwkkkkkkk
+kkkkkkkwwkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
+kkkkkkkkkkkkkkkk
