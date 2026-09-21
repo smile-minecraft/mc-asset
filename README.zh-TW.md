@@ -27,23 +27,24 @@
 
 ## 成果展示
 
+以下圖片全部由 mc-asset 本身產出，程序化來源都使用固定 seed，整組可重現。對應指令見 [`docs/assets/showcase/README.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/README.md)。
+
 | 像素化（Pixelize） | 色彩量化（Quantize） |
 |---|---|
 | ![pixelize 前](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-before.png) → ![pixelize 後](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-after.png) | ![quantize 前](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-before.png) → ![quantize 後](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-after.png) |
+| 高細節參考圖（128px，×2 顯示）縮到 16px（×16 顯示）：顆粒變粗，形狀收斂成整齊的像素格。 | 64 色漸層壓到 8 色（皆為 ×4 顯示）：顏色數變少，出現明顯的色階。 |
 
-**材質變體**：同一份來源展開為四種材質階級（`iron`、`gold`、`wood`、`crystal`）：
+**材質變體**：同一份來源展開為四種材質階級（`iron`、`gold`、`wood`、`crystal`）；形狀不變，只換調色盤：
 
 ![variant iron](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-iron.png) ![variant gold](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-gold.png) ![variant wood](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-wood.png) ![variant crystal](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-crystal.png)
 
-**無縫平鋪**與 2×2 重複檢查：
+**無縫平鋪**：單一 32px 無縫磚（左，×4 顯示）與它的 2×2 重複（右，×4 顯示）；邊緣接得起來，看不到接縫：
 
 ![tile pattern](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-pattern.png) ![2x2 平鋪預覽](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-preview-2x2.png)
 
 **動畫圖集**，由單張影格打包而成：
 
 ![動畫圖集](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/anim-sheet.png)
-
-以上圖片全部由 CLI 產出，對應指令見 [`docs/assets/showcase/README.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/README.md)。
 
 ---
 

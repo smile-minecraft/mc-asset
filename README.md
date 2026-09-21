@@ -27,23 +27,24 @@ A pixel-native 2D asset creation engine and deterministic CLI/MCP toolchain for 
 
 ## Showcase
 
+Every image below is produced by mc-asset itself, with fixed seeds for the procedural sources, so the whole set is reproducible. The commands live in [`docs/assets/showcase/README.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/README.md).
+
 | Pixelize | Quantize |
 |---|---|
 | ![pixelize before](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-before.png) → ![pixelize after](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-after.png) | ![quantize before](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-before.png) → ![quantize after](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-after.png) |
+| A detailed reference image (128px, shown ×2) reduced to 16px (shown ×16): the grain coarsens and shapes snap to a tidy pixel grid. | A 64-color gradient reduced to 8 colors (both ×4): the color count drops and the result settles into clear steps. |
 
-**Material variants** — one source fanned out into four ramps (`iron`, `gold`, `wood`, `crystal`):
+**Material variants** — one source fanned out into four ramps (`iron`, `gold`, `wood`, `crystal`); the shape stays the same and only the palette changes:
 
 ![variant iron](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-iron.png) ![variant gold](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-gold.png) ![variant wood](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-wood.png) ![variant crystal](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-crystal.png)
 
-**Seamless tiling** and a 2×2 repeat check:
+**Seamless tiling** — a single 32px seamless tile (left, ×4) and a 2×2 repeat of it (right, ×4); the edges meet with no visible seam:
 
 ![tile pattern](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-pattern.png) ![2x2 tiled preview](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-preview-2x2.png)
 
 **Animation sheet** packed from individual frames:
 
 ![animation sprite sheet](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/anim-sheet.png)
-
-Every image above is produced by the CLI; the commands live in [`docs/assets/showcase/README.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/README.md).
 
 ---
 
