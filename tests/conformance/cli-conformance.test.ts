@@ -198,7 +198,7 @@ async function writeV05DefectPack(parent: string): Promise<string> {
 	await writePackFile(
 		root,
 		"assets/minecraft/models/item/sword.json",
-		modelJson({ textures: { layer0: "minecraft:item/missing" } }),
+		modelJson({ textures: { layer0: "testpack:item/missing" } }),
 	);
 	return root;
 }
@@ -2423,6 +2423,92 @@ describe("conformance: V0.5 validate-pack verdict and determinism", () => {
 			const codes = envelope.result.findings.map((f) => f.code);
 			expect(codes).toContain("PACK_CASE_MISMATCH");
 			expect(codes).toContain("PACK_INVALID_FILENAME");
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+});
+
+describe("conformance: validate-pack external resolution layers", () => {
+	test("missing --vanilla root is FILESYSTEM_ERROR with exit 4", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05CleanPack(dir);
+			const before = await snapshotTree(dir);
+			const result = await runCli([
+				"validate-pack",
+				pack,
+				"--resource-pack-version",
+				"75",
+				"--vanilla",
+				"/no/such/dir/missing-vanilla",
+				"--json",
+			]);
+			expect(result.code).toBe(4);
+			expect(result.code).not.toBe(3);
+			const envelope = JSON.parse(stdoutText(result)) as {
+				success: boolean;
+				error: { code: string };
+			};
+			expect(envelope.success).toBe(false);
+			expect(envelope.error.code).toBe("FILESYSTEM_ERROR");
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("duplicate --vanilla is INVALID_ARGUMENT with exit 2", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05CleanPack(dir);
+			const before = await snapshotTree(dir);
+			const result = await runCli([
+				"validate-pack",
+				pack,
+				"--resource-pack-version",
+				"75",
+				"--vanilla",
+				pack,
+				"--vanilla",
+				pack,
+			]);
+			expect(result.code).toBe(2);
+			expect(stdoutText(result) + result.stderr).toContain("INVALID_ARGUMENT");
+			expect(await snapshotTree(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("--dependency repeats and partial coverage stays exit 0", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
+		try {
+			const pack = await writeV05CleanPack(dir);
+			const before = await snapshotTree(dir);
+			const result = await runCli([
+				"validate-pack",
+				pack,
+				"--resource-pack-version",
+				"75",
+				"--dependency",
+				pack,
+				"--dependency",
+				pack,
+				"--json",
+			]);
+			expect(result.code).toBe(0);
+			const envelope = JSON.parse(stdoutText(result)) as {
+				success: boolean;
+				result: {
+					verdict: string;
+					coverage: { status: string; skipped: unknown[] };
+				};
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.verdict).toBe("pass");
+			expect(envelope.result.coverage.status).toBe("complete");
 			expect(await snapshotTree(dir)).toBe(before);
 		} finally {
 			await rm(dir, { recursive: true, force: true });

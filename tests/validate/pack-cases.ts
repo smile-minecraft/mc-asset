@@ -418,8 +418,8 @@ export const PACK_CASES: PackCase[] = [
 			await withPackDir(async (dir) => {
 				await writePackFile(
 					dir,
-					"assets/minecraft/models/item/sword.json",
-					modelJson({ textures: { layer0: "minecraft:item/missing" } }),
+					"assets/testpack/models/item/sword.json",
+					modelJson({ textures: { layer0: "testpack:item/missing" } }),
 				);
 				const report = await scanPack(dir, VERSIONED);
 				check.equal(report.verdict, "fail", "missing texture fails");
@@ -437,8 +437,8 @@ export const PACK_CASES: PackCase[] = [
 			await withPackDir(async (dir) => {
 				await writePackFile(
 					dir,
-					"assets/minecraft/models/item/sword.json",
-					modelJson({ parent: "minecraft:item/missing_parent" }),
+					"assets/testpack/models/item/sword.json",
+					modelJson({ parent: "testpack:item/missing_parent" }),
 				);
 				const report = await scanPack(dir, VERSIONED);
 				check.equal(report.verdict, "fail", "missing parent fails");
@@ -672,7 +672,7 @@ export const PACK_CASES: PackCase[] = [
 				await writePackFile(
 					dir,
 					"assets/minecraft/models/item/sword.json",
-					modelJson({ textures: { layer0: "minecraft:item/missing" } }),
+					modelJson({ textures: { layer0: "testpack:item/missing" } }),
 				);
 				const report = await scanPack(dir, VERSIONED);
 				check.equal(report.verdict, "fail", "pack fails");
@@ -782,7 +782,7 @@ export const PACK_CASES: PackCase[] = [
 				await writePackFile(
 					dir,
 					"assets/minecraft/models/block/stone.json",
-					modelJson({ textures: { all: "minecraft:block/gone" } }),
+					modelJson({ textures: { all: "testpack:block/gone" } }),
 				);
 				await writePackFile(
 					dir,
@@ -1024,7 +1024,7 @@ export const PACK_CASES: PackCase[] = [
 					dir,
 					"assets/minecraft/items/sword.json",
 					modelJson({
-						model: { type: "minecraft:model", model: "minecraft:item/gone" },
+						model: { type: "minecraft:model", model: "testpack:item/gone" },
 					}),
 				);
 				const report = await scanPack(dir, VERSIONED);
@@ -1103,7 +1103,7 @@ export const PACK_CASES: PackCase[] = [
 											threshold: 0.5,
 											model: {
 												type: "minecraft:model",
-												model: "minecraft:item/gone",
+												model: "testpack:item/gone",
 											},
 										},
 									],
@@ -1211,7 +1211,7 @@ export const PACK_CASES: PackCase[] = [
 					dir,
 					"assets/minecraft/items/sword.json",
 					modelJson({
-						model: { type: "minecraft:model", model: "minecraft:item/gone" },
+						model: { type: "minecraft:model", model: "testpack:item/gone" },
 					}),
 				);
 				const atGate = await scanPack(dir, {
@@ -1451,6 +1451,306 @@ export const PACK_CASES: PackCase[] = [
 					uniqueCodes(report),
 					["PACK_GUI_SCALING_BORDER"],
 					"only that code",
+				);
+			});
+		},
+	},
+	{
+		name: "pass: builtin item template parent resolves without any file",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ parent: "minecraft:item/generated" }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "pass", "builtin hit passes");
+				check.deepEqual(uniqueCodes(report), [], "no findings at all");
+				check.ok(
+					!codesOf(report).includes("PACK_MISSING_ASSET"),
+					"never accused as a missing asset",
+				);
+				check.deepEqual(
+					report.coverage,
+					{ status: "complete", skipped: [] },
+					"builtin hit needs no coverage skip",
+				);
+			});
+		},
+	},
+	{
+		name: "pass: vanilla texture without a vanilla tree is unresolved, not missing",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ textures: { layer0: "minecraft:item/sword" } }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "pass", "unresolved never fails");
+				check.deepEqual(
+					uniqueCodes(report),
+					["PACK_UNRESOLVED_EXTERNAL"],
+					"only the unresolved warning",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_MISSING_TEXTURE"),
+					"never accused as a missing texture",
+				);
+				check.deepEqual(
+					report.coverage,
+					{
+						status: "partial",
+						skipped: [
+							{
+								kind: "external-reference",
+								reason: "vanilla-not-provided",
+								target: "minecraft:item/sword",
+							},
+						],
+					},
+					"coverage records the skip",
+				);
+			});
+		},
+	},
+	{
+		name: "pass: one unresolved warning per target no matter how many referrers",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/a.json",
+					modelJson({ parent: "minecraft:item/sword" }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/b.json",
+					modelJson({
+						parent: "minecraft:item/sword",
+						textures: { layer0: "minecraft:item/generated_tex" },
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "pass", "unresolved never fails");
+				check.equal(
+					report.findings.filter(
+						(finding) => finding.code === "PACK_UNRESOLVED_EXTERNAL",
+					).length,
+					2,
+					"one warning per distinct target",
+				);
+				check.deepEqual(
+					report.coverage,
+					{
+						status: "partial",
+						skipped: [
+							{
+								kind: "external-reference",
+								reason: "vanilla-not-provided",
+								target: "minecraft:item/generated_tex",
+							},
+							{
+								kind: "external-reference",
+								reason: "vanilla-not-provided",
+								target: "minecraft:item/sword",
+							},
+						],
+					},
+					"skips sort by target bytes",
+				);
+			});
+		},
+	},
+	{
+		name: "pass: items/ definition pointing at vanilla is unresolved without a tree",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/sword" },
+					}),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "pass", "unresolved never fails");
+				check.deepEqual(
+					uniqueCodes(report),
+					["PACK_UNRESOLVED_EXTERNAL"],
+					"only the unresolved warning",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"never accused as a broken reference",
+				);
+			});
+		},
+	},
+	{
+		name: "pass: vanilla tree resolves the parent with complete coverage",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ parent: "minecraft:item/generated" }),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/models/item/generated.json",
+						modelJson({ parent: "minecraft:builtin/generated" }),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "pass", "vanilla hit passes");
+					check.deepEqual(uniqueCodes(report), [], "no findings at all");
+					check.deepEqual(
+						report.coverage,
+						{ status: "complete", skipped: [] },
+						"coverage is complete",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "fail: provided vanilla tree still missing is a determined missing asset",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ parent: "minecraft:item/gone" }),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/models/item/other.json",
+						modelJson({ textures: {} }),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "fail", "determined missing fails");
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_MISSING_ASSET"],
+						"missing error returns",
+					);
+					check.deepEqual(
+						report.coverage,
+						{ status: "complete", skipped: [] },
+						"no skip when the miss is determined",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "fail: provided vanilla tree still missing texture is a determined miss",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/sword.json",
+					modelJson({ textures: { layer0: "testpack:item/gone" } }),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/models/item/generated.json",
+						modelJson({ textures: {} }),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "fail", "non-minecraft miss fails");
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_MISSING_TEXTURE"],
+						"missing error even with vanilla around",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "pass: dependency pack resolves the parent with complete coverage",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/sword.json",
+					modelJson({ parent: "testpack:item/base" }),
+				);
+				await withPackDir(async (depDir) => {
+					await writePackFile(
+						depDir,
+						"assets/testpack/models/item/base.json",
+						modelJson({ textures: {} }),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						dependencyPaths: [depDir],
+					});
+					check.equal(report.verdict, "pass", "dependency hit passes");
+					check.deepEqual(uniqueCodes(report), [], "no findings at all");
+					check.deepEqual(
+						report.coverage,
+						{ status: "complete", skipped: [] },
+						"coverage is complete",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "fail: case-only difference against a dependency file is still a mismatch",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/sword.json",
+					modelJson({ textures: { layer0: "testpack:item/sword" } }),
+				);
+				await withPackDir(async (depDir) => {
+					await writePackFile(
+						depDir,
+						"assets/testpack/textures/item/Sword.png",
+						makePngBytes(),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						dependencyPaths: [depDir],
+					});
+					check.equal(report.verdict, "fail", "case mismatch fails");
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_CASE_MISMATCH"],
+						"only the mismatch code",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "pass: clean pack reports complete coverage",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writeCleanBaseline(dir);
+				const report = await scanPack(dir, VERSIONED);
+				check.deepEqual(
+					report.coverage,
+					{ status: "complete", skipped: [] },
+					"no skips means complete",
 				);
 			});
 		},

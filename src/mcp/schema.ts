@@ -441,6 +441,19 @@ export const TOOL_INPUT_SCHEMAS = {
 		packPath: z.string().min(1).describe("Resource pack root directory."),
 		minecraftVersion: minecraftVersionField,
 		resourcePackVersion: resourcePackVersionField,
+		vanillaPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Vanilla assets directory used to resolve minecraft references.",
+			),
+		dependencyPaths: z
+			.array(z.string().min(1))
+			.optional()
+			.describe(
+				"Dependency pack roots; the first entry has the highest priority.",
+			),
 	},
 	scale_gui_asset: {
 		inputPath: z

@@ -532,4 +532,120 @@ describe("mcp v0.7 twelve tools over stdio", () => {
 		expect(result.isError).toBe(true);
 		expect(result.json?.code).toBe("FILESYSTEM_ERROR");
 	}, 30_000);
+
+	test("validate_pack_asset resolves vanilla parents through vanillaPath", async () => {
+		const connected = await connect();
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcp-pack-"));
+		const vanilla = await mkdtemp(join(tmpdir(), "mc-asset-mcp-vanilla-"));
+		try {
+			await mkdir(join(vanilla, "assets/minecraft/models/item"), {
+				recursive: true,
+			});
+			await writeFile(
+				join(vanilla, "assets/minecraft/models/item/sword.json"),
+				JSON.stringify({ parent: "minecraft:builtin/generated" }),
+			);
+			await mkdir(join(dir, "assets/minecraft/models/item"), {
+				recursive: true,
+			});
+			await writeFile(
+				join(dir, "assets/minecraft/models/item/custom.json"),
+				JSON.stringify({ parent: "minecraft:item/sword" }),
+			);
+			const result = await callTool(connected, "validate_pack_asset", {
+				packPath: dir,
+				resourcePackVersion: "75",
+				vanillaPath: vanilla,
+			});
+			expect(result.isError).toBe(false);
+			expect(result.json?.verdict).toBe("pass");
+			expect(result.json?.coverage).toEqual({
+				status: "complete",
+				skipped: [],
+			});
+		} finally {
+			const { rm } = await import("node:fs/promises");
+			await rm(dir, { recursive: true, force: true });
+			await rm(vanilla, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("validate_pack_asset without vanilla reports unresolved externals", async () => {
+		const connected = await connect();
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcp-pack-"));
+		try {
+			await mkdir(join(dir, "assets/minecraft/models/item"), {
+				recursive: true,
+			});
+			await writeFile(
+				join(dir, "assets/minecraft/models/item/custom.json"),
+				JSON.stringify({ parent: "minecraft:item/sword" }),
+			);
+			const result = await callTool(connected, "validate_pack_asset", {
+				packPath: dir,
+				resourcePackVersion: "75",
+			});
+			expect(result.isError).toBe(false);
+			expect(result.json?.verdict).toBe("pass");
+			const findings = result.json?.findings as Array<{ code: string }>;
+			expect(findings.map((finding) => finding.code)).toEqual([
+				"PACK_UNRESOLVED_EXTERNAL",
+			]);
+			expect(result.json?.coverage).toEqual({
+				status: "partial",
+				skipped: [
+					{
+						kind: "external-reference",
+						reason: "vanilla-not-provided",
+						target: "minecraft:item/sword",
+					},
+				],
+			});
+		} finally {
+			const { rm } = await import("node:fs/promises");
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("validate_pack_asset searches every dependencyPaths layer in order", async () => {
+		const connected = await connect();
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcp-pack-"));
+		const first = await mkdtemp(join(tmpdir(), "mc-asset-mcp-dep1-"));
+		const second = await mkdtemp(join(tmpdir(), "mc-asset-mcp-dep2-"));
+		try {
+			await mkdir(join(dir, "assets/testpack/models/item"), {
+				recursive: true,
+			});
+			await writeFile(
+				join(dir, "assets/testpack/models/item/sword.json"),
+				JSON.stringify({ parent: "testpack:item/base" }),
+			);
+			await mkdir(join(first, "assets/testpack/models/item"), {
+				recursive: true,
+			});
+			await writeFile(
+				join(first, "assets/testpack/models/item/unrelated.json"),
+				JSON.stringify({ textures: {} }),
+			);
+			await mkdir(join(second, "assets/testpack/models/item"), {
+				recursive: true,
+			});
+			await writeFile(
+				join(second, "assets/testpack/models/item/base.json"),
+				JSON.stringify({ textures: {} }),
+			);
+			const result = await callTool(connected, "validate_pack_asset", {
+				packPath: dir,
+				resourcePackVersion: "75",
+				dependencyPaths: [first, second],
+			});
+			expect(result.isError).toBe(false);
+			expect(result.json?.verdict).toBe("pass");
+		} finally {
+			const { rm } = await import("node:fs/promises");
+			await rm(dir, { recursive: true, force: true });
+			await rm(first, { recursive: true, force: true });
+			await rm(second, { recursive: true, force: true });
+		}
+	}, 30_000);
 });

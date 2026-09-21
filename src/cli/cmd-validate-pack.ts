@@ -17,6 +17,8 @@ import {
 export interface ValidatePackCommandOptions {
 	minecraftVersion?: string | undefined;
 	resourcePackVersion?: string | undefined;
+	vanillaPath?: string | undefined;
+	dependencyPaths?: string[] | undefined;
 }
 
 /** Minimal human verdict: the JSON envelope is the primary output. */
@@ -26,12 +28,24 @@ export function formatHumanPackReport(report: PackReport): string {
 		`path: ${report.path}`,
 		`target: ${report.target}`,
 		`verdict: ${report.verdict}`,
+		coverageLine(report),
 	];
 	for (const finding of report.findings) {
 		const where = finding.path === undefined ? "" : ` ${finding.path}:`;
 		lines.push(`${finding.level} [${finding.code}]${where} ${finding.message}`);
 	}
+	for (const skip of report.coverage.skipped) {
+		lines.push(`skip [${skip.kind}] ${skip.target}: ${skip.reason}`);
+	}
 	return lines.join("\n");
+}
+
+function coverageLine(report: PackReport): string {
+	if (report.coverage.status === "complete") {
+		return "coverage: complete";
+	}
+	const count = report.coverage.skipped.length;
+	return `coverage: partial (${count} skipped)`;
 }
 
 function summarize(report: PackReport): string {
@@ -53,6 +67,32 @@ function summarize(report: PackReport): string {
  * worked but the pack failed; every tool failure keeps its own exit code.
  * The pack tree is only read, never written, and no file flag exists.
  */
+async function assertLayerRoot(
+	layerPath: string | undefined,
+	label: string,
+): Promise<void> {
+	if (layerPath === undefined || layerPath === "") {
+		return;
+	}
+	try {
+		const root = await stat(layerPath);
+		if (!root.isDirectory()) {
+			throw new McAssetError(
+				"FILESYSTEM_ERROR",
+				`${label} root is not a directory: ${layerPath}.`,
+			);
+		}
+		await readdir(layerPath);
+	} catch (error) {
+		if (error instanceof McAssetError) {
+			throw error;
+		}
+		throw new McAssetError(
+			"FILESYSTEM_ERROR",
+			`Cannot read ${label.toLowerCase()} root: ${layerPath}.`,
+		);
+	}
+}
 export async function runValidatePack(
 	packPath: string | undefined,
 	options: ValidatePackCommandOptions,
@@ -91,9 +131,18 @@ export async function runValidatePack(
 			);
 		}
 		const targetSummary = formatVersionTarget(target);
+		await assertLayerRoot(options.vanillaPath, "Vanilla");
+		const dependencyPaths = options.dependencyPaths ?? [];
+		for (const dependency of dependencyPaths) {
+			await assertLayerRoot(dependency, "Dependency");
+		}
 		const report = await scanPack(packPath, {
 			packFormat: target.packFormat,
 			target: targetSummary,
+			...(options.vanillaPath === undefined
+				? {}
+				: { vanillaPath: options.vanillaPath }),
+			...(dependencyPaths.length === 0 ? {} : { dependencyPaths }),
 		});
 		if (report.verdict === "fail") {
 			failed = report;

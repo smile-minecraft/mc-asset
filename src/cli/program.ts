@@ -29,10 +29,7 @@ import { type RecolorOptions, runRecolor } from "./cmd-recolor.ts";
 import { type RenderOptions, runRender } from "./cmd-render.ts";
 import { runTile, type TileOptions } from "./cmd-tile.ts";
 import { runTransform, type TransformOptions } from "./cmd-transform.ts";
-import {
-	runValidatePack,
-	type ValidatePackCommandOptions,
-} from "./cmd-validate-pack.ts";
+import { runValidatePack } from "./cmd-validate-pack.ts";
 import { runVariant, type VariantOptions } from "./cmd-variant.ts";
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
 import { exitCodeForMcAssetError } from "./exit.ts";
@@ -292,16 +289,42 @@ export function buildProgram(): Command {
 			"Target resource-pack version as N or N.M (e.g. 84, 97.1).",
 			singleUseOption("--resource-pack-version"),
 		)
+		.option(
+			"--vanilla <path>",
+			"Vanilla assets directory used to resolve minecraft references.",
+			singleUseOption("--vanilla"),
+		)
+		.option(
+			"--dependency <path>",
+			"Dependency pack root; repeatable, first given wins.",
+			(value: string, previous: string[]): string[] => [...previous, value],
+			[] as string[],
+		)
 		.action(
 			async (
 				path: string,
-				options: ValidatePackCommandOptions,
+				options: {
+					minecraftVersion?: string | undefined;
+					resourcePackVersion?: string | undefined;
+					vanilla?: string | undefined;
+					dependency?: string[] | undefined;
+				},
 				command: Command,
 			) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const dependencies = options.dependency ?? [];
 				const code = await runValidatePack(
 					path,
-					options,
+					{
+						minecraftVersion: options.minecraftVersion,
+						resourcePackVersion: options.resourcePackVersion,
+						...(options.vanilla === undefined
+							? {}
+							: { vanillaPath: options.vanilla }),
+						...(dependencies.length === 0
+							? {}
+							: { dependencyPaths: dependencies }),
+					},
 					globals.json === true,
 					realStreams(),
 				);

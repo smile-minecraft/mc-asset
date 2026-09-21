@@ -117,7 +117,7 @@ describe("validate-pack command via spawn", () => {
 			await writePackFile(
 				dir,
 				"assets/minecraft/models/item/sword.json",
-				modelJson({ textures: { layer0: "minecraft:item/missing" } }),
+				modelJson({ textures: { layer0: "testpack:item/missing" } }),
 			);
 			const before = await treeHash(dir);
 			const { stdout, code } = await runCli([
@@ -538,6 +538,239 @@ describe("validate-pack command via spawn", () => {
 				)?.level,
 			).toBe("warning");
 			expect(await treeHash(dir)).toBe(before);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("vanilla parent without --vanilla is unresolved with partial coverage", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		try {
+			await writePackFile(
+				dir,
+				"assets/minecraft/models/item/custom.json",
+				modelJson({ parent: "minecraft:item/sword" }),
+			);
+			const { stdout, code } = await runCli([
+				"validate-pack",
+				dir,
+				"--resource-pack-version",
+				"75",
+				"--json",
+			]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: {
+					verdict: string;
+					findings: Array<{ code: string; level: string }>;
+					coverage: {
+						status: string;
+						skipped: Array<{ kind: string; reason: string; target: string }>;
+					};
+				};
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.verdict).toBe("pass");
+			expect(envelope.result.findings.map((f) => f.code)).toEqual([
+				"PACK_UNRESOLVED_EXTERNAL",
+			]);
+			expect(envelope.result.findings[0]?.level).toBe("warning");
+			expect(envelope.result.coverage).toEqual({
+				status: "partial",
+				skipped: [
+					{
+						kind: "external-reference",
+						reason: "vanilla-not-provided",
+						target: "minecraft:item/sword",
+					},
+				],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("--vanilla resolves the parent with complete coverage", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		const vanilla = await mkdtemp(join(tmpdir(), "mc-asset-vanilla-"));
+		try {
+			await writePackFile(
+				dir,
+				"assets/minecraft/models/item/sword.json",
+				modelJson({ parent: "minecraft:item/generated" }),
+			);
+			await writePackFile(
+				vanilla,
+				"assets/minecraft/models/item/generated.json",
+				modelJson({ parent: "minecraft:builtin/generated" }),
+			);
+			const { stdout, code } = await runCli([
+				"validate-pack",
+				dir,
+				"--resource-pack-version",
+				"75",
+				"--vanilla",
+				vanilla,
+				"--json",
+			]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: {
+					verdict: string;
+					findings: Array<{ code: string }>;
+					coverage: { status: string; skipped: unknown[] };
+				};
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.verdict).toBe("pass");
+			expect(envelope.result.findings).toEqual([]);
+			expect(envelope.result.coverage).toEqual({
+				status: "complete",
+				skipped: [],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+			await rm(vanilla, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("--vanilla present but still absent is a determined missing with exit 3", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		const vanilla = await mkdtemp(join(tmpdir(), "mc-asset-vanilla-"));
+		try {
+			await writePackFile(
+				dir,
+				"assets/minecraft/models/item/sword.json",
+				modelJson({ parent: "minecraft:item/gone" }),
+			);
+			await writePackFile(
+				vanilla,
+				"assets/minecraft/models/item/other.json",
+				modelJson({ textures: {} }),
+			);
+			const { stdout, code } = await runCli([
+				"validate-pack",
+				dir,
+				"--resource-pack-version",
+				"75",
+				"--vanilla",
+				vanilla,
+				"--json",
+			]);
+			expect(code).toBe(3);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				error: { code: string };
+				result: { findings: Array<{ code: string }> };
+			};
+			expect(envelope.success).toBe(false);
+			expect(envelope.error.code).toBe("VALIDATION_FAILED");
+			expect(envelope.result.findings.map((f) => f.code)).toEqual([
+				"PACK_MISSING_ASSET",
+			]);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+			await rm(vanilla, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("--dependency is repeatable and every layer is searched", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		const first = await mkdtemp(join(tmpdir(), "mc-asset-dep1-"));
+		const second = await mkdtemp(join(tmpdir(), "mc-asset-dep2-"));
+		try {
+			await writePackFile(
+				dir,
+				"assets/testpack/models/item/sword.json",
+				modelJson({ parent: "testpack:item/base" }),
+			);
+			await writePackFile(
+				first,
+				"assets/testpack/models/item/unrelated.json",
+				modelJson({ textures: {} }),
+			);
+			await writePackFile(
+				second,
+				"assets/testpack/models/item/base.json",
+				modelJson({ textures: {} }),
+			);
+			const { stdout, code } = await runCli([
+				"validate-pack",
+				dir,
+				"--resource-pack-version",
+				"75",
+				"--dependency",
+				first,
+				"--dependency",
+				second,
+				"--json",
+			]);
+			expect(code).toBe(0);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				result: {
+					verdict: string;
+					coverage: { status: string; skipped: unknown[] };
+				};
+			};
+			expect(envelope.success).toBe(true);
+			expect(envelope.result.verdict).toBe("pass");
+			expect(envelope.result.coverage).toEqual({
+				status: "complete",
+				skipped: [],
+			});
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+			await rm(first, { recursive: true, force: true });
+			await rm(second, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("missing --vanilla root is exit 4, never exit 3", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		try {
+			await writeCleanBaseline(dir);
+			const { stdout, code } = await runCli([
+				"validate-pack",
+				dir,
+				"--resource-pack-version",
+				"75",
+				"--vanilla",
+				"/no/such/dir/missing-vanilla",
+				"--json",
+			]);
+			expect(code).toBe(4);
+			expect(code).not.toBe(3);
+			const envelope = JSON.parse(stdout) as {
+				success: boolean;
+				error: { code: string };
+			};
+			expect(envelope.success).toBe(false);
+			expect(envelope.error.code).toBe("FILESYSTEM_ERROR");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("human output names the coverage line on partial packs", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
+		try {
+			await writePackFile(
+				dir,
+				"assets/minecraft/models/item/custom.json",
+				modelJson({ parent: "minecraft:item/sword" }),
+			);
+			const passed = await runCli([
+				"validate-pack",
+				dir,
+				"--resource-pack-version",
+				"75",
+			]);
+			expect(passed.code).toBe(0);
+			expect(passed.stdout).toContain("verdict: pass");
+			expect(passed.stdout).toContain("coverage: partial (1 skipped)");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

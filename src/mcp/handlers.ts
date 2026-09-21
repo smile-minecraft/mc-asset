@@ -2216,6 +2216,32 @@ export async function handleAnimateAsset(
  * result carrying findings (like validate_asset), never an error; the
  * CLI exit-3 mapping stays on the CLI side. Never writes.
  */
+async function assertPackLayerRoot(
+	layerPath: string | undefined,
+	label: string,
+): Promise<void> {
+	if (layerPath === undefined || layerPath === "") {
+		return;
+	}
+	try {
+		const root = await stat(layerPath);
+		if (!root.isDirectory()) {
+			throw new McAssetError(
+				"FILESYSTEM_ERROR",
+				`${label} root is not a directory: ${layerPath}.`,
+			);
+		}
+		await readdir(layerPath);
+	} catch (error) {
+		if (error instanceof McAssetError) {
+			throw error;
+		}
+		throw new McAssetError(
+			"FILESYSTEM_ERROR",
+			`Cannot read ${label.toLowerCase()} root: ${layerPath}.`,
+		);
+	}
+}
 export async function handleValidatePackAsset(
 	args: ValidatePackAssetInput,
 ): Promise<McpTextResult> {
@@ -2247,9 +2273,18 @@ export async function handleValidatePackAsset(
 			);
 		}
 		const targetSummary = formatVersionTarget(target);
+		await assertPackLayerRoot(args.vanillaPath, "Vanilla");
+		const dependencyPaths = args.dependencyPaths ?? [];
+		for (const dependency of dependencyPaths) {
+			await assertPackLayerRoot(dependency, "Dependency");
+		}
 		const report = await scanPack(args.packPath, {
 			packFormat: target.packFormat,
 			target: targetSummary,
+			...(args.vanillaPath === undefined
+				? {}
+				: { vanillaPath: args.vanillaPath }),
+			...(dependencyPaths.length === 0 ? {} : { dependencyPaths }),
 		});
 		return textResult({ ...report, version: versionReportShape(target) });
 	} catch (error) {

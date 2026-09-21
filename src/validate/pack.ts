@@ -22,6 +22,16 @@ import {
 } from "./atlas.ts";
 import type { ValidateFindingLevel } from "./checks.ts";
 import {
+	buildLayerIndex,
+	createResourceContext,
+	findCaseVariant,
+	type LayerIndex,
+	layerIndexFromRels,
+	type ResourceContext,
+	resolveModelReference,
+	resolveTextureReference,
+} from "./resource-context.ts";
+import {
 	parseResourceLocation,
 	validateDiskFilename,
 	validateResourceLocation,
@@ -61,11 +71,25 @@ export interface PackReport {
 	target: string;
 	verdict: "pass" | "fail";
 	findings: PackFinding[];
+	coverage: PackCoverage;
+}
+
+export interface PackCoverageSkip {
+	kind: string;
+	reason: string;
+	target: string;
+}
+
+export interface PackCoverage {
+	status: "complete" | "partial";
+	skipped: PackCoverageSkip[];
 }
 
 export interface PackScanOptions {
 	packFormat?: string | undefined;
 	target?: string | undefined;
+	vanillaPath?: string | undefined;
+	dependencyPaths?: string[] | undefined;
 }
 
 /** Guard before any parsing starts: an absurd tree is exit 5, not a verdict. */
@@ -89,6 +113,7 @@ const FINDING_ORDER: Readonly<Record<string, number>> = {
 	PACK_ORPHAN_TEXTURE: 13,
 	PACK_VERSION_UNDETERMINED: 14,
 	PACK_TEXTURE_NOT_IN_ATLAS: 15,
+	PACK_UNRESOLVED_EXTERNAL: 16,
 };
 
 const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -323,6 +348,15 @@ interface ScanState {
 		value: string;
 		target: string;
 	}>;
+	unresolved: Map<
+		string,
+		{
+			kind: "parent" | "texture" | "item-model";
+			field: string;
+			value: string;
+			firstRel: string;
+		}
+	>;
 }
 
 /** Per-file checks that need no cross-file view. Order matches FINDING_ORDER. */
@@ -575,8 +609,7 @@ function checkGuiScalingBorder(rel: string, state: ScanState): void {
 /** Model parent and textures references; missing targets stay distinct. */
 function checkModelReferences(
 	rel: string,
-	knownFiles: Set<string>,
-	lowerIndex: Map<string, string>,
+	context: ResourceContext,
 	state: ScanState,
 ): void {
 	const doc = state.docs.get(rel);
@@ -585,7 +618,7 @@ function checkModelReferences(
 	}
 	const parent = doc.parent;
 	if (parent !== undefined) {
-		checkParentReference(rel, parent, knownFiles, lowerIndex, state);
+		checkParentReference(rel, parent, context, state);
 	}
 	const textures = doc.textures;
 	if (textures === undefined) {
@@ -608,18 +641,34 @@ function checkModelReferences(
 			rel,
 			`textures.${key}`,
 			textures[key],
-			knownFiles,
-			lowerIndex,
+			context,
 			state,
 		);
+	}
+}
+
+/**
+ * One unresolved minecraft reference, remembered by its computed rel path
+ * so every referrer of the same target yields a single warning and a
+ * single coverage skip. The first referrer lends the finding its path.
+ */
+function recordUnresolved(
+	kind: "parent" | "texture" | "item-model",
+	field: string,
+	value: string,
+	target: string,
+	rel: string,
+	state: ScanState,
+): void {
+	if (!state.unresolved.has(target)) {
+		state.unresolved.set(target, { kind, field, value, firstRel: rel });
 	}
 }
 
 function checkParentReference(
 	rel: string,
 	value: unknown,
-	knownFiles: Set<string>,
-	lowerIndex: Map<string, string>,
+	context: ResourceContext,
 	state: ScanState,
 ): void {
 	if (typeof value !== "string" || value.trim() === "") {
@@ -653,19 +702,24 @@ function checkParentReference(
 		return;
 	}
 	const target = resolveParentRel(value);
-	if (knownFiles.has(target)) {
+	const resolved = resolveModelReference(context, value);
+	if (resolved.status === "resolved") {
 		return;
 	}
-	const folded = lowerIndex.get(target.toLowerCase());
+	const folded = findCaseVariant(context, "model", value);
 	if (folded !== undefined) {
 		push(
 			state.findings,
 			"PACK_CASE_MISMATCH",
 			"error",
-			`parent "${value}" in "${rel}" differs from "${folded}" by case only.`,
+			`parent "${value}" in "${rel}" differs from "${folded.target}" by case only.`,
 			rel,
 		);
 		state.errorFiles.add(rel);
+		return;
+	}
+	if (resolved.status === "unresolved") {
+		recordUnresolved("parent", "", value, target, rel, state);
 		return;
 	}
 	push(
@@ -682,8 +736,7 @@ function checkTextureReference(
 	rel: string,
 	field: string,
 	value: unknown,
-	knownFiles: Set<string>,
-	lowerIndex: Map<string, string>,
+	context: ResourceContext,
 	state: ScanState,
 ): void {
 	if (typeof value !== "string" || value.trim() === "") {
@@ -717,22 +770,31 @@ function checkTextureReference(
 		return;
 	}
 	const target = resolveTextureRel(value);
-	if (knownFiles.has(target)) {
-		state.referencedTextures.add(target);
-		state.atlasRefs.push({ modelRel: rel, field, value, target });
+	const resolved = resolveTextureReference(context, value);
+	if (resolved.status === "resolved") {
+		if (resolved.source === "current") {
+			state.referencedTextures.add(target);
+			state.atlasRefs.push({ modelRel: rel, field, value, target });
+		}
 		return;
 	}
-	const folded = lowerIndex.get(target.toLowerCase());
+	const folded = findCaseVariant(context, "texture", value);
 	if (folded !== undefined) {
 		push(
 			state.findings,
 			"PACK_CASE_MISMATCH",
 			"error",
-			`"${field}" "${value}" in "${rel}" differs from "${folded}" by case only.`,
+			`"${field}" "${value}" in "${rel}" differs from "${folded.target}" by case only.`,
 			rel,
 		);
 		state.errorFiles.add(rel);
-		state.referencedTextures.add(folded);
+		if (folded.source === "current") {
+			state.referencedTextures.add(folded.target);
+		}
+		return;
+	}
+	if (resolved.status === "unresolved") {
+		recordUnresolved("texture", field, value, target, rel, state);
 		return;
 	}
 	push(
@@ -829,8 +891,7 @@ function collectItemModelRefs(node: unknown, out: string[]): void {
  */
 function checkItemModelDefinitions(
 	state: ScanState,
-	knownFiles: Set<string>,
-	lowerIndex: Map<string, string>,
+	context: ResourceContext,
 	options: PackScanOptions | undefined,
 	mcmetaDoc: unknown,
 ): void {
@@ -873,20 +934,25 @@ function checkItemModelDefinitions(
 				break;
 			}
 			const target = resolveParentRel(value);
-			if (knownFiles.has(target)) {
+			const resolved = resolveModelReference(context, value);
+			if (resolved.status === "resolved") {
 				continue;
 			}
-			const folded = lowerIndex.get(target.toLowerCase());
+			const folded = findCaseVariant(context, "model", value);
 			if (folded !== undefined) {
 				push(
 					state.findings,
 					"PACK_CASE_MISMATCH",
 					"error",
-					`model "${value}" in "${rel}" differs from "${folded}" by case only.`,
+					`model "${value}" in "${rel}" differs from "${folded.target}" by case only.`,
 					rel,
 				);
 				state.errorFiles.add(rel);
 				break;
+			}
+			if (resolved.status === "unresolved") {
+				recordUnresolved("item-model", "", value, target, rel, state);
+				continue;
 			}
 			push(
 				state.findings,
@@ -966,14 +1032,21 @@ export async function scanPack(
 	options?: PackScanOptions,
 ): Promise<PackReport> {
 	const rels = await collectPackFiles(packRoot);
-	const knownFiles = new Set(rels);
-	const lowerIndex = new Map<string, string>();
-	for (const rel of rels) {
-		const folded = rel.toLowerCase();
-		if (!lowerIndex.has(folded)) {
-			lowerIndex.set(folded, rel);
-		}
+	const dependencyPaths = options?.dependencyPaths ?? [];
+	const dependencies: LayerIndex[] = [];
+	for (const dependency of dependencyPaths) {
+		dependencies.push(await buildLayerIndex(dependency));
 	}
+	const vanilla =
+		options?.vanillaPath === undefined
+			? undefined
+			: await buildLayerIndex(options.vanillaPath);
+	const context = createResourceContext(
+		layerIndexFromRels(rels),
+		dependencies,
+		vanilla,
+	);
+	const knownFiles = new Set(rels);
 	const state: ScanState = {
 		findings: [],
 		docs: new Map(),
@@ -983,6 +1056,7 @@ export async function scanPack(
 		modelRels: [],
 		itemRels: [],
 		atlasRefs: [],
+		unresolved: new Map(),
 	};
 	for (const rel of rels) {
 		if (rel === "pack.mcmeta") {
@@ -1043,9 +1117,9 @@ export async function scanPack(
 		checkGuiScalingBorder(rel, state);
 	}
 	for (const rel of state.modelRels) {
-		checkModelReferences(rel, knownFiles, lowerIndex, state);
+		checkModelReferences(rel, context, state);
 	}
-	checkItemModelDefinitions(state, knownFiles, lowerIndex, options, mcmetaDoc);
+	checkItemModelDefinitions(state, context, options, mcmetaDoc);
 	checkAtlasCoverage(state, options, mcmetaDoc);
 	// Orphan is warning-only over lowercase-.png textures that decoded
 	// cleanly, and it skips files that already carry an error, so one
@@ -1095,6 +1169,38 @@ export async function scanPack(
 			);
 		}
 	}
+	// Unresolved externals: one warning per distinct target, lending the
+	// first referrer's path, plus one coverage skip each. Warnings never
+	// fail the verdict; the coverage status carries the partial signal.
+	// Both lists sort by target bytes, so reruns stay byte-identical.
+	const pending = [...state.unresolved.values()].sort((a, b) =>
+		compareBytes(a.value, b.value),
+	);
+	const skipped: PackCoverageSkip[] = [];
+	for (const entry of pending) {
+		skipped.push({
+			kind: "external-reference",
+			reason: "vanilla-not-provided",
+			target: entry.value,
+		});
+		const message =
+			entry.kind === "parent"
+				? `parent "${entry.value}" in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`
+				: entry.kind === "texture"
+					? `"${entry.field}" "${entry.value}" in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`
+					: `model "${entry.value}" in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`;
+		push(
+			state.findings,
+			"PACK_UNRESOLVED_EXTERNAL",
+			"warning",
+			message,
+			entry.firstRel,
+		);
+	}
+	const coverage: PackCoverage = {
+		status: skipped.length === 0 ? "complete" : "partial",
+		skipped,
+	};
 	const findings = [...state.findings].sort((a, b) => {
 		const pa = a.path ?? "";
 		const pb = b.path ?? "";
@@ -1117,5 +1223,6 @@ export async function scanPack(
 		target: effectiveTarget,
 		verdict,
 		findings,
+		coverage,
 	};
 }
