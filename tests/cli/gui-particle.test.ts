@@ -138,7 +138,7 @@ describe("gui and particle profiles via spawn", () => {
 						command: string;
 						preset: string;
 						presetDetail: string;
-						stages: string[];
+						stages: Array<{ stage: string; status: string; reason?: string }>;
 					};
 				};
 				expect(envelope.success).toBe(true);
@@ -146,7 +146,7 @@ describe("gui and particle profiles via spawn", () => {
 				expect(envelope.result.preset).toBe(preset);
 				expect(envelope.result.presetDetail).toContain(`preset=${preset}`);
 				// The frozen eleven-stage pipeline order never changes per preset.
-				expect(envelope.result.stages).toEqual([
+				expect(envelope.result.stages.map((entry) => entry.stage)).toEqual([
 					"decode",
 					"crop",
 					"background",
@@ -159,6 +159,18 @@ describe("gui and particle profiles via spawn", () => {
 					"preset",
 					"output",
 				]);
+				// Gui and particle presets leave the five shape stages off.
+				for (const entry of envelope.result.stages) {
+					if (
+						entry.stage === "crop" ||
+						entry.stage === "background" ||
+						entry.stage === "subject" ||
+						entry.stage === "edge" ||
+						entry.stage === "cluster"
+					) {
+						expect(entry.status).toBe("disabled");
+					}
+				}
 				// The gui preset never synthesizes nine-slice metadata.
 				expect("nineSlice" in envelope.result).toBe(false);
 				expect("scaling" in envelope.result).toBe(false);

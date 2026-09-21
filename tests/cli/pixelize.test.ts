@@ -360,4 +360,135 @@ describe("pixelize wiring via spawn", () => {
 			await rm(dir, { recursive: true, force: true });
 		}
 	}, 30_000);
+
+	test("non-item presets keep byte-identical outputs", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-px-"));
+		try {
+			// Goldens captured before the five-stage rollout: only the item
+			// preset may change bytes, every other preset stays bit-identical.
+			const goldens: Record<string, string> = {
+				generic:
+					"43feead1281b7b7d0b03b777ff1d1b3b2a172431ab069fa1b77a25eee03da801",
+				block:
+					"ee1db6211f9cd6b1a838f32c000e3616480da80461e81a5c0d78a605edc5c13c",
+				gui: "d4f5137957a73e24905e5191d7366db21ed25f5ec8ec432f634ad0db3c688baa",
+				particle:
+					"c4d1425e94bc2b7d0067a99cd90f3ad736993d172d297874c0fc380aa844b306",
+			};
+			for (const [preset, golden] of Object.entries(goldens)) {
+				const out = join(dir, `${preset}.png`);
+				const result = await runCli([
+					"pixelize",
+					PNG,
+					"--size",
+					"16",
+					"--preset",
+					preset,
+					"--output",
+					out,
+				]);
+				expect(result.code).toBe(0);
+				expect(sha256(new Uint8Array(await readFile(out)))).toBe(golden);
+			}
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
+
+	test("stage report passes through with per-stage statuses", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-px-"));
+		try {
+			const frozen = [
+				"decode",
+				"crop",
+				"background",
+				"subject",
+				"resize",
+				"edge",
+				"quantize",
+				"cluster",
+				"cleanup",
+				"preset",
+				"output",
+			];
+			const item = await runCli([
+				"pixelize",
+				PNG,
+				"--size",
+				"16",
+				"--preset",
+				"item",
+				"--output",
+				join(dir, "item.png"),
+				"--json",
+			]);
+			expect(item.code).toBe(0);
+			const itemBody = JSON.parse(stdoutText(item)) as {
+				success: boolean;
+				result: {
+					preset: string;
+					presetDetail: string;
+					stages: Array<{ stage: string; status: string; reason?: string }>;
+				};
+			};
+			expect(itemBody.success).toBe(true);
+			expect(itemBody.result.stages.map((entry) => entry.stage)).toEqual(
+				frozen,
+			);
+			for (const entry of itemBody.result.stages) {
+				expect(["applied", "not-needed", "disabled", "unsupported"]).toContain(
+					entry.status,
+				);
+			}
+			const byStage = new Map(
+				itemBody.result.stages.map((entry) => [entry.stage, entry.status]),
+			);
+			// Item enables every shape stage: none of them reports disabled.
+			for (const stage of [
+				"crop",
+				"background",
+				"subject",
+				"edge",
+				"cluster",
+			]) {
+				expect(byStage.get(stage)).not.toBe("disabled");
+			}
+			expect(itemBody.result.presetDetail).toContain("preset=item");
+			expect(itemBody.result.presetDetail).not.toContain("pending");
+			expect(itemBody.result.presetDetail).not.toContain("starter");
+			expect(itemBody.result.presetDetail).not.toContain("no-op");
+			const generic = await runCli([
+				"pixelize",
+				PNG,
+				"--size",
+				"16",
+				"--preset",
+				"generic",
+				"--output",
+				join(dir, "generic.png"),
+				"--json",
+			]);
+			expect(generic.code).toBe(0);
+			const genericBody = JSON.parse(stdoutText(generic)) as {
+				success: boolean;
+				result: {
+					stages: Array<{ stage: string; status: string }>;
+				};
+			};
+			const genericByStage = new Map(
+				genericBody.result.stages.map((entry) => [entry.stage, entry.status]),
+			);
+			for (const stage of [
+				"crop",
+				"background",
+				"subject",
+				"edge",
+				"cluster",
+			]) {
+				expect(genericByStage.get(stage)).toBe("disabled");
+			}
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 60_000);
 });

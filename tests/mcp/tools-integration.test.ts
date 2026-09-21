@@ -334,6 +334,43 @@ describe("mcp seven tools over stdio", () => {
 		expect(second.text).toBe(first.text);
 	}, 30_000);
 
+	test("pixelize_asset passes the per-stage report through", async () => {
+		const connected = await connect();
+		const result = await callTool(connected, "pixelize_asset", {
+			inputPath: PNG_8X8,
+			size: "16",
+			preset: "item",
+		});
+		expect(result.isError).toBe(false);
+		const stages = result.json?.stages as
+			| Array<{ stage: string; status: string }>
+			| undefined;
+		expect(stages?.map((entry) => entry.stage)).toEqual([
+			"decode",
+			"crop",
+			"background",
+			"subject",
+			"resize",
+			"edge",
+			"quantize",
+			"cluster",
+			"cleanup",
+			"preset",
+			"output",
+		]);
+		for (const entry of stages ?? []) {
+			expect(["applied", "not-needed", "disabled", "unsupported"]).toContain(
+				entry.status,
+			);
+		}
+		const byStage = new Map(
+			(stages ?? []).map((entry) => [entry.stage, entry.status]),
+		);
+		for (const stage of ["crop", "background", "subject", "edge", "cluster"]) {
+			expect(byStage.get(stage)).not.toBe("disabled");
+		}
+	}, 30_000);
+
 	test("variant reruns into fresh directories stay byte-identical", async () => {
 		const connected = await connect();
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcp-det-"));
