@@ -261,7 +261,7 @@ describe("mcmeta wiring via spawn", () => {
 		}
 	}, 90_000);
 
-	test("animate validate --mcmeta fails the count mismatch with exit 3", async () => {
+	test("animate validate --mcmeta passes a repeated-index playback sequence", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcmeta-"));
 		try {
 			const { framesDir } = await packVerticalSheet(dir, [RED, GREEN], 4, 4);
@@ -281,8 +281,129 @@ describe("mcmeta wiring via spawn", () => {
 				"--mcmeta",
 				mcmeta,
 			]);
-			expect(result.code).toBe(3);
-			expect(mustError(parseJsonStdout(result)).code).toBe("VALIDATION_FAILED");
+			expect(result.code).toBe(0);
+			expect(mustResult(parseJsonStdout(result)).verdict).toBe("pass");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 90_000);
+
+	test("animate validate --mcmeta passes playback sequence [0,1,0] with per-step time", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcmeta-"));
+		try {
+			const { framesDir } = await packVerticalSheet(dir, [RED, GREEN], 4, 4);
+			const mcmeta = join(dir, "anim.mcmeta");
+			await writeFile(
+				mcmeta,
+				JSON.stringify({
+					animation: {
+						width: 4,
+						height: 4,
+						frames: [0, { index: 1, time: 3 }, 0],
+					},
+				}),
+			);
+			const result = await runCli([
+				"--json",
+				"animate",
+				"validate",
+				"--frames-dir",
+				framesDir,
+				"--mcmeta",
+				mcmeta,
+			]);
+			expect(result.code).toBe(0);
+			expect(mustResult(parseJsonStdout(result)).verdict).toBe("pass");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 90_000);
+
+	test("animate validate --mcmeta passes a partial-frame playback sequence", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcmeta-"));
+		try {
+			const { framesDir } = await packVerticalSheet(
+				dir,
+				[RED, GREEN, RED, GREEN],
+				4,
+				4,
+			);
+			const mcmeta = join(dir, "anim.mcmeta");
+			await writeFile(
+				mcmeta,
+				JSON.stringify({
+					animation: { width: 4, height: 4, frames: [0, 2] },
+				}),
+			);
+			const result = await runCli([
+				"--json",
+				"animate",
+				"validate",
+				"--frames-dir",
+				framesDir,
+				"--mcmeta",
+				mcmeta,
+			]);
+			expect(result.code).toBe(0);
+			expect(mustResult(parseJsonStdout(result)).verdict).toBe("pass");
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 90_000);
+
+	test("validate, animate validate and animate unpack agree on a repeated-index sequence", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcmeta-"));
+		try {
+			const { sheet, framesDir } = await packVerticalSheet(
+				dir,
+				[RED, GREEN],
+				4,
+				4,
+			);
+			const mcmeta = join(dir, "anim.mcmeta");
+			await writeFile(
+				mcmeta,
+				JSON.stringify({
+					animation: { width: 4, height: 4, frames: [0, 1, 0] },
+				}),
+			);
+			const single = await runCli([
+				"--json",
+				"validate",
+				sheet,
+				"--mcmeta",
+				mcmeta,
+			]);
+			expect(single.code).toBe(0);
+			expect(mustResult(parseJsonStdout(single)).verdict).toBe("pass");
+			const animateValidate = await runCli([
+				"--json",
+				"animate",
+				"validate",
+				"--frames-dir",
+				framesDir,
+				"--mcmeta",
+				mcmeta,
+			]);
+			expect(animateValidate.code).toBe(0);
+			expect(mustResult(parseJsonStdout(animateValidate)).verdict).toBe("pass");
+			const outDir = join(dir, "unpacked");
+			const unpack = await runCli([
+				"--json",
+				"animate",
+				"unpack",
+				sheet,
+				"--layout",
+				"vertical",
+				"--frame-size",
+				"4x4",
+				"--output-dir",
+				outDir,
+				"--mkdir",
+				"--mcmeta",
+				mcmeta,
+			]);
+			expect(unpack.code).toBe(0);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

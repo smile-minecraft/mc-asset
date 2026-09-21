@@ -192,16 +192,9 @@ async function applyMcmetaOption(
 			layout: geometry.layout,
 			frameIndices: animation.frames.map((frame) => frame.index),
 		};
-		if (
-			animation.hasExplicitFrames &&
-			animation.frames.length !== geometry.frameCount
-		) {
-			findings.push({
-				code: "ANIMATION_FRAME_COUNT_MISMATCH",
-				level: "error",
-				message: `mcmeta declares ${animation.frames.length} frame(s) but the sheet holds ${geometry.frameCount}.`,
-			});
-		}
+		// Playback-sequence length is independent of the physical frame count:
+		// repeated or partial indices are legal; only out-of-range indices
+		// fail via checkAnimationFrameIndices above.
 	}
 	return { mcmeta: section, findings };
 }

@@ -383,24 +383,9 @@ async function runUnpack(
 					);
 				}
 				checkAnimationFrameIndices(animation, geometry.frameCount);
-				if (
-					animation.hasExplicitFrames &&
-					animation.frames.length !== geometry.frameCount
-				) {
-					throw new McAssetError(
-						"INVALID_ANIMATION_FRAME",
-						`mcmeta declares ${animation.frames.length} frame(s) but the sheet holds ${geometry.frameCount}.`,
-						{
-							layout,
-							sheetWidth: decoded.canvas.width,
-							sheetHeight: decoded.canvas.height,
-							frameWidth: size.width,
-							frameHeight: size.height,
-							expected: geometry.frameCount,
-							actual: animation.frames.length,
-						},
-					);
-				}
+				// Playback-sequence length is independent of the physical
+				// frame count: unpack keeps the geometry and index-range
+				// checks above, but repeated or partial indices are legal.
 			}
 		}
 		const frameSet = unpackSheetToFrameSet(
@@ -599,19 +584,9 @@ async function runValidate(
 					);
 				}
 				checkAnimationFrameIndices(animation, frameSet.frames.length);
-				if (
-					animation.hasExplicitFrames &&
-					animation.frames.length !== frameSet.frames.length
-				) {
-					throw new McAssetError(
-						"VALIDATION_FAILED",
-						`animate validate failed: mcmeta declares ${animation.frames.length} frame(s) but the frames directory holds ${frameSet.frames.length}.`,
-						{
-							expected: animation.frames.length,
-							actual: frameSet.frames.length,
-						},
-					);
-				}
+				// Playback-sequence length is independent of the physical
+				// frame count: repeated or partial indices are legal; only
+				// out-of-range indices fail via the check above.
 			}
 		}
 		if (report.verdict === "fail") {
