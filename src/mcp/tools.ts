@@ -7,9 +7,10 @@ export interface McpToolDefinition {
 }
 
 /**
- * Frozen tool surface: twenty tools for v0.7 CLI parity — the seven
- * original §90 tools plus twelve v0.7 additions — plus the
- * capability-completion scale_gui_asset, each with its final
+ * Frozen tool surface: twenty-one tools for v0.7 CLI parity plus agent
+ * authoring — the seven original §90 tools plus twelve v0.7 additions —
+ * plus the capability-completion scale_gui_asset and the authoring-round
+ * inspect_asset, each with its final
  * name, description, and input schema. Descriptions state the read/write
  * contract so agents pick batch or grid paths instead of per-pixel calls.
  */
@@ -133,5 +134,11 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 		description:
 			"Scale a GUI sprite to N or WxH with the mcmeta stretch/tile/nine_slice mapping. Returns PNG bytes and/or the scaled PNG via an explicit output path; never invents filenames.",
 		inputSchema: TOOL_INPUT_SCHEMAS.scale_gui_asset,
+	},
+	{
+		name: "inspect_asset",
+		description:
+			"Inspect an editable .mcpx source or raster image without writing: structure reports layers, regions, color usage, and overlaps; view returns the composited PNG plus metadata. Raster inputs read as a single base layer.",
+		inputSchema: TOOL_INPUT_SCHEMAS.inspect_asset,
 	},
 ];

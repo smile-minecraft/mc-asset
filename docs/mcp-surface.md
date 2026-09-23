@@ -15,8 +15,9 @@ The current release (`v0.3.1`) expands Minecraft version support to
 `validate_pack_asset`; `palette_asset`, `material_asset`, `preview_asset`,
 and `animate_asset` merge CLI subcommands into a `mode` field) were added
 in `v0.3.0` for full CLI parity. Their names and input shapes are frozen
-here; the capability-completion round adds `scale_gui_asset`, and
-the running server exposes all twenty tools.
+here; the capability-completion round adds `scale_gui_asset`, the
+authoring round adds `inspect_asset`, and
+the running server exposes all twenty-one tools.
 
 Capability base: full CLI parity — intake and source build, spatial
 transforms, palette and quantization, the deterministic pixelize
@@ -52,6 +53,7 @@ is no `set_pixel` tool on purpose.
 | `preview_asset` | Raster image or `.mcpx`, one `mode` (`ascii` / `palette-map` / `scale` / `nine-slice`) | Optional explicit PNG path (`scale`, `nine-slice`) | Read-only report, or preview PNG |
 | `animate_asset` | Frames directory or sprite sheet, one `mode` (`pack` / `unpack` / `reorder` / `resize` / `validate` / `preview`) | Explicit PNG path (`pack`) or output directory (`unpack`, `reorder`, `resize`) | Sheet PNG, frames, or read-only report |
 | `validate_pack_asset` | Resource pack root, plus optional vanilla tree and dependency roots | Nothing | Read-only verdict with findings and a coverage object |
+| `inspect_asset` | Editable `.mcpx` source or raster image (raster reads as a single base layer), one `mode` (`structure` / `view`), view-only `crop` and `scale` | Nothing | Read-only report (structure), or composited PNG image block plus metadata (view) |
 
 ## Input semantics
 
@@ -76,6 +78,27 @@ is no `set_pixel` tool on purpose.
   `atomic` defaults to true. Pixel operations accept an optional
   `selection` expression; an empty match refuses the write with
   `EMPTY_SELECTION` and rolls the batch back.
+- `apply_asset_operations` accepts an optional `feedback` object
+  (`image`: `none` / `full` / `changed`; `scale`: integer 1–16;
+  `crop`: selection expression; `diff`: `none` / `summary`). Absent
+  `feedback` keeps the output fields and bytes exactly as before. With
+  `feedback`, the result carries a `feedback` object (`image`,
+  `imageIncluded`, optional `noVisibleChange`, optional `diff` with
+  `raw` / `composited` / `structural` / `outsideSelectionUnchanged`)
+  and never embeds `pngBase64`: an included image travels as a standard
+  image content block (`type: "image"`, `mimeType: "image/png"`) with no
+  duplicate bytes in the text block. `changed` renders the composited
+  change bounds (the crop is ignored) and reports `noVisibleChange`
+  instead of an image when nothing visible moved; guide pixels (grids,
+  checkers) never enter artwork bytes. A `crop` with `none` is
+  `INVALID_ARGUMENT`.
+- `inspect_asset` takes `inputPath` plus `mode`: `structure` returns
+  layers (bounds, area, visibility, raw RGBA color usage), regions
+  (identity, bounds, area only), and overlaps; `view` returns the
+  composited PNG as an image block plus the six-key metadata, with the
+  same crop/scale/1024px-edge rules as the top-level `inspect` command.
+  View scale defaults to 1; the long-edge auto-scale applies to
+  `apply_asset_operations` feedback images only.
 - The full per-type parameter table lives in the “Batch Operations Specification”
   section of [CLI Surface](cli-surface.md); both surfaces share that JSON shape.
 - `scale_gui_asset` takes `size` (`N` or `WxH`), an optional

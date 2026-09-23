@@ -16,6 +16,7 @@ import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
 import { type GenerateOptions, runGenerate } from "./cmd-generate.ts";
 import { type GuiScaleOptions, runGuiScale } from "./cmd-gui-scale.ts";
 import { type ImportOptions, runImport } from "./cmd-import.ts";
+import { type InspectOptions, runInspect } from "./cmd-inspect.ts";
 import { type MaterialOptions, runMaterial } from "./cmd-material.ts";
 import { runMcp } from "./cmd-mcp.ts";
 import { type PaletteOptions, runPalette } from "./cmd-palette.ts";
@@ -1102,6 +1103,41 @@ export function buildProgram(): Command {
 			);
 			process.exitCode = code;
 		});
+
+	program
+		.command("inspect <input>")
+		.description(
+			"Inspect structure or the composited view of an image or .mcpx source (read-only, no artifact files).",
+		)
+		.option("--mode <mode>", 'Inspect mode: "structure" (default) or "view".')
+		.option(
+			"--crop <scope>",
+			"View-only crop scope (rect:<x>,<y>,<w>,<h>, region:<id>, alpha:, color:, connected:, or a JSON expression starting with {).",
+		)
+		.option(
+			"--scale <N>",
+			"View-only integer upscale factor in [1, 16] with nearest sampling (default 1).",
+		)
+		.option("--output <path>", "Rejected: reports take no file flags.")
+		.option("--stdout", "Rejected: reports take no file flags.")
+		.option("--source <path>", "Rejected: reports take no file flags.")
+		.option("--force", "Rejected: reports take no file flags.")
+		.option("--mkdir", "Rejected: reports take no file flags.")
+		.option("--in-place", "Rejected: reports take no file flags.")
+		.option("--input <path>", "Rejected: reports take no file flags.")
+		.option("--profile <name>", "Rejected: reports take no profile flag.")
+		.action(
+			async (input: string, options: InspectOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runInspect(
+					input,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
 
 	program
 		.command("mcp")

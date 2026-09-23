@@ -2,6 +2,13 @@ import { Buffer } from "node:buffer";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join as joinPath } from "node:path";
 import type { z } from "zod";
+import {
+	buildFeedback,
+	inspectStructure,
+	normalizeFeedbackRequest,
+	renderInspectView,
+	snapshotCanvas,
+} from "../analyze/inspect.ts";
 import { analyzeCanvas } from "../analyze/metrics.ts";
 import {
 	applyBatchText,
@@ -138,7 +145,10 @@ import type { TOOL_INPUT_SCHEMAS } from "./schema.ts";
 
 export interface McpTextResult {
 	[k: string]: unknown;
-	content: Array<{ type: "text"; text: string }>;
+	content: Array<
+		| { type: "text"; text: string }
+		| { type: "image"; data: string; mimeType: string }
+	>;
 	isError?: boolean | undefined;
 }
 
@@ -201,6 +211,9 @@ export type ValidatePackAssetInput = z.infer<
 >;
 export type ScaleGuiAssetInput = z.infer<
 	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.scale_gui_asset>
+>;
+export type InspectAssetInput = z.infer<
+	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.inspect_asset>
 >;
 
 function stripCodePrefix(message: string): string {
@@ -459,6 +472,12 @@ export async function handleRenderPixelAsset(
  * Single-call batch edit over an `.mcpx` source. Atomic by default: the
  * first failure rolls the canvas back and the whole call fails with the
  * original error code plus the batch position in details.
+ *
+ * Without `feedback` the result shape is frozen (applied, failed,
+ * operations, warnings, then the PNG and source artifacts). With
+ * `feedback` the PNG bytes never embed as `pngBase64`: an included image
+ * travels as a standard image content block instead, and the `feedback`
+ * object carries the flags plus the optional diff summary.
  */
 export async function handleApplyAssetOperations(
 	args: ApplyAssetOperationsInput,
@@ -468,34 +487,123 @@ export async function handleApplyAssetOperations(
 		const canvas = parseMcpx(
 			await readInputText(args.sourcePath, "mcpx source"),
 		);
+		const before = snapshotCanvas(canvas);
 		const typed = parseOperationsJson(
 			JSON.stringify({ operations: args.operations }),
 			defaultLayerFor(canvas),
 		);
+		const feedbackRequest = normalizeFeedbackRequest(args.feedback);
 		const report = applyOperations(canvas, typed, {
 			atomic: args.atomic ?? true,
 		});
 		assertMcpxPaletteCapacity(collectCanvasColors(canvas).length);
 		const pngBytes = encodePng(canvas);
 		const mcpxText = ensureMcpxText(canvas, () => undefined);
+		// The full feedback response builds before any artifact write, so
+		// an invalid crop, an empty crop, or an over-limit image refuses
+		// with zero files created or modified.
+		const feedback =
+			feedbackRequest === undefined
+				? undefined
+				: buildFeedback(before, canvas, typed, feedbackRequest);
 		if (args.outputPngPath !== undefined) {
 			await writeMcpArtifact(args.outputPngPath, pngBytes);
 		}
 		if (args.outputMcpxPath !== undefined) {
 			await writeMcpArtifact(args.outputMcpxPath, mcpxText);
 		}
-		return textResult({
+		if (feedback === undefined) {
+			return textResult({
+				applied: report.applied,
+				failed: report.failed,
+				operations: report.operations,
+				warnings: [],
+				...(args.outputPngPath !== undefined
+					? { output: args.outputPngPath }
+					: { pngBase64: pngBase64(pngBytes) }),
+				...(args.outputMcpxPath !== undefined
+					? { source: args.outputMcpxPath }
+					: { mcpxText }),
+			});
+		}
+		const body: Record<string, unknown> = {
 			applied: report.applied,
 			failed: report.failed,
 			operations: report.operations,
 			warnings: [],
-			...(args.outputPngPath !== undefined
-				? { output: args.outputPngPath }
-				: { pngBase64: pngBase64(pngBytes) }),
-			...(args.outputMcpxPath !== undefined
-				? { source: args.outputMcpxPath }
-				: { mcpxText }),
+			feedback: feedback.feedback,
+		};
+		if (args.outputPngPath !== undefined) {
+			body.output = args.outputPngPath;
+		}
+		if (args.outputMcpxPath !== undefined) {
+			body.source = args.outputMcpxPath;
+		} else {
+			body.mcpxText = mcpxText;
+		}
+		const content: McpTextResult["content"] = [
+			{ type: "text", text: JSON.stringify(body) },
+		];
+		if (feedback.pngBytes !== undefined) {
+			content.push({
+				type: "image",
+				data: pngBase64(feedback.pngBytes),
+				mimeType: "image/png",
+			});
+		}
+		return { content };
+	} catch (error) {
+		return errorResult(error);
+	}
+}
+
+/**
+ * Read-only inspection over an `.mcpx` source or raster image (raster
+ * reads as a single base layer, the same intake the CLI commands use).
+ * Structure returns the frozen layer/region report; view returns the
+ * composited PNG as a standard image block plus the six-key metadata and
+ * never embeds the same bytes as `pngBase64`. Nothing here writes.
+ */
+export async function handleInspectAsset(
+	args: InspectAssetInput,
+): Promise<McpTextResult> {
+	try {
+		if (args.mode !== "structure" && args.mode !== "view") {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				'inspect_asset mode must be "structure" or "view".',
+				{ mode: args.mode },
+			);
+		}
+		if (
+			args.mode === "structure" &&
+			(args.crop !== undefined || args.scale !== undefined)
+		) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				"inspect_asset structure takes no crop or scale; use mode view.",
+				{ mode: args.mode },
+			);
+		}
+		const loaded = await loadEditableCanvas(args.inputPath);
+		const canvas = loaded.canvas;
+		if (args.mode === "structure") {
+			return textResult({ ...inspectStructure(canvas) });
+		}
+		const view = renderInspectView(canvas, {
+			...(args.crop === undefined ? {} : { crop: args.crop }),
+			...(args.scale === undefined ? {} : { scale: args.scale }),
 		});
+		return {
+			content: [
+				{ type: "text", text: JSON.stringify(view.metadata) },
+				{
+					type: "image",
+					data: pngBase64(view.pngBytes),
+					mimeType: "image/png",
+				},
+			],
+		};
 	} catch (error) {
 		return errorResult(error);
 	}

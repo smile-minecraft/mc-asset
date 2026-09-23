@@ -480,3 +480,128 @@ describe("mcp seven tools over stdio", () => {
 		expect(mcmeta?.animation?.frametime).toBe(2);
 	}, 30_000);
 });
+
+describe("mcp inspect and feedback over stdio", () => {
+	async function callRaw(
+		connected: Client,
+		name: string,
+		args: Record<string, unknown>,
+	): Promise<{
+		isError: boolean;
+		blocks: Array<{
+			type: string;
+			text?: string;
+			data?: string;
+			mimeType?: string;
+		}>;
+	}> {
+		const result = await connected.callTool({ name, arguments: args });
+		return {
+			isError: result.isError === true,
+			blocks: result.content as Array<{
+				type: string;
+				text?: string;
+				data?: string;
+				mimeType?: string;
+			}>,
+		};
+	}
+
+	test("inspect_asset structure reports the frozen layer and region shape", async () => {
+		const connected = await connect();
+		const result = await callTool(connected, "inspect_asset", {
+			inputPath: SWORD_MCPX,
+			mode: "structure",
+		});
+		expect(result.isError).toBe(false);
+		const report = result.json as unknown as {
+			mode: string;
+			width: number;
+			height: number;
+			layers: Array<{ id: string; colorUsage: { uniqueColors: number } }>;
+			regions: unknown[];
+			overlaps: { layerBounds: unknown[]; regionPixels: unknown[] };
+		};
+		expect(report.mode).toBe("structure");
+		expect(report.width).toBe(4);
+		expect(report.height).toBe(4);
+		expect(report.layers[0]?.id).toBe("base");
+		expect(typeof report.layers[0]?.colorUsage.uniqueColors).toBe("number");
+		expect(Array.isArray(report.overlaps.layerBounds)).toBe(true);
+	}, 30_000);
+
+	test("inspect_asset view returns a standard image block without duplicate bytes", async () => {
+		const connected = await connect();
+		const result = await callRaw(connected, "inspect_asset", {
+			inputPath: PNG_8X8,
+			mode: "view",
+		});
+		expect(result.isError).toBe(false);
+		expect(result.blocks.length).toBe(2);
+		const text = JSON.parse(result.blocks[0]?.text ?? "{}") as Record<
+			string,
+			unknown
+		>;
+		expect(text.mode).toBe("view");
+		expect("pngBase64" in text).toBe(false);
+		expect(result.blocks[1]?.type).toBe("image");
+		expect(result.blocks[1]?.mimeType).toBe("image/png");
+		expect(
+			pngMagic(
+				new Uint8Array(Buffer.from(result.blocks[1]?.data ?? "", "base64")),
+			),
+		).toBe(true);
+	}, 30_000);
+
+	test("apply with feedback full and summary travels over stdio", async () => {
+		const connected = await connect();
+		const result = await callRaw(connected, "apply_asset_operations", {
+			sourcePath: SWORD_MCPX,
+			operations: [
+				{
+					type: "setPixel",
+					layerId: "base",
+					x: 0,
+					y: 0,
+					color: "#FF0000FF",
+				},
+			],
+			feedback: { image: "full", diff: "summary" },
+		});
+		expect(result.isError).toBe(false);
+		expect(result.blocks.length).toBe(2);
+		const text = JSON.parse(result.blocks[0]?.text ?? "{}") as {
+			feedback: {
+				image: string;
+				imageIncluded: boolean;
+				diff: { outsideSelectionUnchanged: boolean };
+			};
+			pngBase64?: unknown;
+		};
+		expect("pngBase64" in text).toBe(false);
+		expect(text.feedback.image).toBe("full");
+		expect(text.feedback.imageIncluded).toBe(true);
+		expect(typeof text.feedback.diff.outsideSelectionUnchanged).toBe("boolean");
+		expect(result.blocks[1]?.type).toBe("image");
+	}, 30_000);
+
+	test("apply without feedback keeps the legacy embedded bytes over stdio", async () => {
+		const connected = await connect();
+		const result = await callTool(connected, "apply_asset_operations", {
+			sourcePath: SWORD_MCPX,
+			operations: [
+				{
+					type: "setPixel",
+					layerId: "base",
+					x: 0,
+					y: 0,
+					color: "#FF0000FF",
+				},
+			],
+		});
+		expect(result.isError).toBe(false);
+		expect(typeof result.json?.pngBase64).toBe("string");
+		expect(typeof result.json?.mcpxText).toBe("string");
+		expect("feedback" in (result.json ?? {})).toBe(false);
+	}, 30_000);
+});

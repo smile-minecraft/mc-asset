@@ -1,10 +1,11 @@
 import { z } from "zod";
 
 /**
- * Frozen MCP tool surface: twenty tools for v0.7 CLI parity — the seven
- * original §90 tools plus twelve v0.7 additions (import through
+ * Frozen MCP tool surface: twenty-one tools for agent authoring — the
+ * seven original §90 tools plus twelve v0.7 additions (import through
  * validate-pack, with palette/material/preview/animate mode merges) plus
- * the capability-completion scale_gui_asset. The
+ * the capability-completion scale_gui_asset plus the authoring-round
+ * inspect_asset. The
  * product document once listed `edit_asset` for the batch-edit slot, and
  * §90 wins, so the frozen name is `apply_asset_operations`. The input
  * shapes below are the frozen contract; handler behavior lives in
@@ -32,6 +33,7 @@ export const MCP_TOOL_NAMES = [
 	"animate_asset",
 	"validate_pack_asset",
 	"scale_gui_asset",
+	"inspect_asset",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -85,6 +87,42 @@ const batchOperationField = z
 	.passthrough()
 	.describe(
 		"Batch operation object with a `type` (setPixel, drawLine, fillRect, floodFill, createLayer, setRegionPixel, and the rest of the Core batch vocabulary) plus its per-type arguments.",
+	);
+
+/** Optional visual feedback for apply_asset_operations; absent means the legacy output shape. */
+const feedbackField = z
+	.object({
+		image: z
+			.enum(["none", "full", "changed"])
+			.optional()
+			.describe(
+				"Feedback image: none (default, flags only), full (whole crop), or changed (composited change bounds; the crop is ignored). Changed with no visible difference returns noVisibleChange instead of an image.",
+			),
+		scale: z
+			.number()
+			.int()
+			.min(1)
+			.max(16)
+			.optional()
+			.describe(
+				"Feedback integer upscale factor 1-16 with nearest sampling; omitted auto-scales from the pre-scale long edge below 128.",
+			),
+		crop: z
+			.unknown()
+			.optional()
+			.describe(
+				"Feedback selection expression (atom string or JSON expression object); refused with image none, ignored with image changed.",
+			),
+		diff: z
+			.enum(["none", "summary"])
+			.optional()
+			.describe(
+				"Feedback diff: none (default) or summary with raw, composited, structural, and outsideSelectionUnchanged.",
+			),
+	})
+	.optional()
+	.describe(
+		"Optional visual feedback for the batch; absent keeps the output fields and bytes exactly as before.",
 	);
 
 export const TOOL_INPUT_SCHEMAS = {
@@ -156,6 +194,7 @@ export const TOOL_INPUT_SCHEMAS = {
 			.describe(
 				"Default true: the first failure rolls the canvas back and the whole batch fails.",
 			),
+		feedback: feedbackField,
 		outputPngPath: outputPngField,
 		outputMcpxPath: outputMcpxField,
 	},
@@ -471,5 +510,33 @@ export const TOOL_INPUT_SCHEMAS = {
 		minecraftVersion: minecraftVersionField,
 		resourcePackVersion: resourcePackVersionField,
 		outputPngPath: outputPngField,
+	},
+	inspect_asset: {
+		inputPath: z
+			.string()
+			.min(1)
+			.describe(
+				"Editable .mcpx source or raster image path to inspect; raster inputs read as a single base layer. Never written.",
+			),
+		mode: z
+			.enum(["structure", "view"])
+			.describe(
+				"Inspect mode: structure for layers, regions, color usage, and overlaps; view for the composited PNG plus metadata.",
+			),
+		crop: z
+			.unknown()
+			.optional()
+			.describe(
+				"View-only selection expression (atom string or JSON expression object) naming the crop; an empty match refuses with EMPTY_SELECTION.",
+			),
+		scale: z
+			.number()
+			.int()
+			.min(1)
+			.max(16)
+			.optional()
+			.describe(
+				"View-only integer upscale factor 1-16 with nearest sampling; omitted means 1.",
+			),
 	},
 } satisfies Record<McpToolName, Record<string, z.ZodTypeAny>>;

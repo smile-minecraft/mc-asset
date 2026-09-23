@@ -188,15 +188,17 @@ animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--colum
 | Command | Input | Output | Description |
 |---|---|---|---|
 | `analyze <image>` | PNG, JPEG, WebP | Report only | Structural and color metrics (predicted classification). |
+| `inspect <input>` | PNG, JPEG, WebP, `.mcpx` | Report only (plus PNG bytes in `--json` view) | Frozen structure report or composited view (read-only). |
 | `validate <asset>` | Asset file (PNG) | Report only (exit 3 on defect) | Validates single asset texture and optional `.mcmeta`. |
 | `validate-pack <path>` | Resource Pack root directory | Report only (exit 3 on defect) | Full scan of resource pack integrity, namespaces, models, textures, and atlases. |
 
 ```text
 analyze       <image> [--profile <p>] [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+inspect       <input> --mode <structure|view> [--crop <scope>] [--scale <N>] [--json]
 validate      <asset> [--profile <p>] [--minecraft-version <v>] [--resource-pack-version <n>]
-                      [--mcmeta <path>] [--json]
+                       [--mcmeta <path>] [--json]
 validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
-                       [--vanilla <path>] [--dependency <path>]... [--json]
+                        [--vanilla <path>] [--dependency <path>]... [--json]
 ```
 
 - Validation exit behavior: Exit 0 on pass; Exit 3 (`VALIDATION_FAILED`) when validation checks fail; Exit 2 on invocation syntax error; Exit 4 on filesystem error.
@@ -206,6 +208,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
 - `--vanilla`: caller-provided vanilla resource tree (pack-root shape, including `assets/`). Once provided, `minecraft`-namespace references are confirmed against that tree; without it they report a `PACK_UNRESOLVED_EXTERNAL` warning and a coverage entry instead of a missing-asset error.
 - `--dependency`: dependency pack roots, repeatable; the first occurrence has the highest priority.
 - Coverage: `validate` and `validate-pack` reports carry `coverage: {status, skipped}`; `partial` means some checks were skipped (for example `vanilla-not-provided`, `unsupported-source-type`, `unsupported-regex`, `unknown-node-type`, `renderer-fields-not-interpreted`, `version-undetermined`, `model-documents-not-loaded`), each skip with `kind` / `reason` / `target`. Coverage never changes the exit code (pass stays 0, fail stays 3). Texture-variable resolution reads the current pack's model documents only; a variable that leaves them is reported as `model-documents-not-loaded` coverage instead of being resolved across dependency or vanilla packs.
+- `inspect` is read-only and takes no file flags (`INVALID_ARGUMENT`): `--mode structure` (default) reports layers (id, name, index, raw-alpha bounds, area, visibility, opacity, blend mode, raw RGBA color usage with hidden alpha-zero colors and stable top-16 truncation), regions (id, name, index, bounds, area only), and overlaps (layer box intersections plus real region-mask intersections); `--mode view` renders the composited pixels with `--crop <scope>` (a selection expression; an empty match is `EMPTY_SELECTION`) and `--scale <N>` (integer 1–16, nearest; default 1), returning the six-key metadata (`mode`, `sourceDimensions`, `crop`, `scale`, `outputDimensions`, `colorFormat`) plus `pngBase64` under `--json`. The long-edge auto-scale (a pre-scale long edge below 128 scales up toward 128, capped at 16) applies to `apply_asset_operations` feedback images only, never to `inspect view`. Outputs beyond the 1024px edge are `RESOURCE_LIMIT_EXCEEDED` with a crop hint instead of a silent downscale. Do not confuse top-level `inspect` with `palette inspect` (palette characteristics).
 
 ---
 
@@ -215,7 +218,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
 mc-asset mcp
 ```
 
-Runs the native Model Context Protocol (MCP) stdio server for LLM agent integration. Provides 20 native tools without subprocess spawning:
+Runs the native Model Context Protocol (MCP) stdio server for LLM agent integration. Provides 21 native tools without subprocess spawning:
 - `analyze_asset`
 - `pixelize_asset`
 - `render_pixel_asset`
@@ -236,6 +239,7 @@ Runs the native Model Context Protocol (MCP) stdio server for LLM agent integrat
 - `animate_asset`
 - `validate_pack_asset`
 - `scale_gui_asset`
+- `inspect_asset`
 
 ---
 

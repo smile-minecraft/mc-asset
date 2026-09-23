@@ -11,6 +11,7 @@ import {
 	handleCreateVariants,
 	handleGenerateAsset,
 	handleImportAsset,
+	handleInspectAsset,
 	handleMaterialAsset,
 	handlePaletteAsset,
 	handlePixelizeAsset,
@@ -204,6 +205,14 @@ export function createMcpServer(): McpServer {
 			inputSchema: TOOL_INPUT_SCHEMAS.scale_gui_asset,
 		},
 		handleScaleGuiAsset,
+	);
+	server.registerTool(
+		"inspect_asset",
+		{
+			description: toolDescription("inspect_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.inspect_asset,
+		},
+		handleInspectAsset,
 	);
 	return server;
 }
