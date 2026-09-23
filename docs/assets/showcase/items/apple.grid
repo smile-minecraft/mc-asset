@@ -1,0 +1,32 @@
+; Apple
+[palette]
+. = transparent
+o = #4E0B12FF role=outline
+s = #8E1520FF role=dark
+D = #A3141FFF role=shadow
+r = #BF1B27FF role=shadow
+m = #D9282FFF role=base
+l = #F0524FFF role=light
+W = #FF9E96FF role=highlight
+t = #4A3015FF role=custom
+L = #4E9A2EFF role=custom
+g = #7CC23EFF role=custom
+G = #23451AFF role=custom
+
+[grid]
+..........GG....
+.........GLLG...
+........tLgG....
+....ssstGgGs....
+...sllmtsmmro...
+..sWWlmmmmrrro..
+.sWWWlmmmmmrrDo.
+.sWWllmmmmmmrDo.
+.slllmmmmmmmrDo.
+.smmmmmmmmmmrDo.
+.smmmmmmmmmmrDo.
+..omrmmmmmmrro..
+..srrrmmmmrrDo..
+...orrrrrrrDo...
+....oDDDDDDo....
+.....oooooo.....

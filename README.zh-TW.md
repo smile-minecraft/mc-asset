@@ -13,6 +13,9 @@
 
 語言模型沒辦法用眼睛擺像素，所以 `mc-asset` 把做貼圖這件事變成文字和指令：用字元網格畫圖、把參考圖像素化、生成可平鋪的紋理、打包動畫圖集、驗證整個資源包。這些都能在終端機裡做，也能透過 MCP 呼叫。相同的輸入和種子，永遠得到相同的位元組。
 
+![劍、鎬、蘋果、藥水、藍寶石與鑰匙，每個都是原版風格的 16×16 像素圖](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/items.png)
+
+*六個 16×16 物品，每個都寫成文字網格，再由 `mc-asset render` 算繪（×6 顯示），畫法依照 [`minecraft-pixel-art`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/minecraft-pixel-art) skill 的原版風格規則。網格原始檔在 [`docs/assets/showcase/items/`](https://github.com/smile-minecraft/mc-asset/tree/main/docs/assets/showcase/items)。*
 
 ---
 
@@ -52,15 +55,23 @@
 | ![pixelize 前](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-before.png) → ![pixelize 後](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-after.png) | ![quantize 前](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-before.png) → ![quantize 後](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-after.png) |
 | 高細節參考圖（128px，×2 顯示）縮到 16px（×16 顯示）：顆粒變粗，形狀收斂成整齊的像素格。 | 64 色漸層壓到 8 色（皆為 ×4 顯示）：顏色數變少，出現明顯的色階。 |
 
-**材質變體**：同一份來源展開為四種材質階級（`iron`、`gold`、`wood`、`crystal`）；形狀不變，只換調色盤：
+**材質變體**：把本頁開頭那把劍展開成全部七種內建材質（`copper`、`crystal`、`gold`、`iron`、`oxidized_copper`、`stone`、`wood`，×5 顯示）。它的調色盤替每個顏色標了角色，所以劍身和護手換上新色階，最深的外框、白色反光、木頭握柄和護手上的寶石維持原色：
 
-![variant iron](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-iron.png) ![variant gold](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-gold.png) ![variant wood](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-wood.png) ![variant crystal](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-crystal.png)
+![換成七種材質的劍](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variants.png)
 
-**無縫平鋪**：單一 32px 無縫磚（左，×4 顯示）與它的 2×2 重複（右，×4 顯示）；邊緣接得起來，看不到接縫：
+**程序化紋理**：每種 `generate` 圖樣各一張 16px 樣本，使用固定 seed（×4 顯示）：
 
-![tile pattern](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-pattern.png) ![2x2 平鋪預覽](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-preview-2x2.png)
+| `noise` | `clustered-noise` | `stripes` | `checker` | `gradient` |
+|:-:|:-:|:-:|:-:|:-:|
+| ![noise](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/noise.png) | ![clustered-noise](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/clustered-noise.png) | ![stripes](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/stripes.png) | ![checker](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/checker.png) | ![gradient](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/gradient.png) |
+| `brick` | `spots` | `veins` | `cracks` | `grain` |
+| ![brick](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/brick.png) | ![spots](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/spots.png) | ![veins](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/veins.png) | ![cracks](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/cracks.png) | ![grain](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/grain.png) |
 
-**動畫圖集**，由單張影格打包而成：
+**無縫平鋪**：一張 16px 的磚塊方塊貼圖（左，×8 顯示）與它鋪成的 4×4 牆面（右，×4 顯示）；灰縫在每條邊上都接得起來：
+
+![平鋪來源](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-pattern.png) ![4x4 平鋪牆面](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-preview.png)
+
+**動畫圖集**：發光礦石方塊的四張影格，打包成一條直向圖集（×4 顯示），也就是 Minecraft 搭配 `.mcmeta` 動畫讀取的排列方式：
 
 ![動畫圖集](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/anim-sheet.png)
 
@@ -115,6 +126,19 @@ bun run build
 - [`docs/mcp-surface.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-surface.zh-TW.md)：已凍結的 MCP 介面——工具名稱、輸入與讀寫契約。
 - [`AGENTS.md`](https://github.com/smile-minecraft/mc-asset/blob/main/AGENTS.md)：修改本專案時必須遵守的規則。
 
+### Agent Skills
+
+本專案在 [`skills/`](https://github.com/smile-minecraft/mc-asset/tree/main/skills) 附上兩個 [Agent Skill](https://skills.sh/)，可以用 skills CLI 安裝：
+
+```sh
+npx skills add smile-minecraft/mc-asset
+```
+
+- [`mc-asset`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/mc-asset)：用這套工具畫圖的流程（撰寫 → 算繪 → 預覽 → 量測 → 驗證）、CLI 與 MCP 的指令對照，以及調色盤角色如何決定換色結果。
+- [`minecraft-pixel-art`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/minecraft-pixel-art)：物品、方塊、GUI 與動畫的原版風格規則，包括調色盤與色相偏移色階、依材質上色的外框、左上光源、平鋪，以及一份常見錯誤的審查清單。
+
+只想裝其中一個時，加上 `--skill mc-asset` 或 `--skill minecraft-pixel-art`。
+
 ---
 
 ## 快速上手
@@ -128,27 +152,31 @@ mkdir -p /tmp/mc-asset-demo
 cat << 'EOF' > /tmp/mc-asset-demo/gem.grid
 [palette]
 . = transparent
-R = #E74C3CFF
-D = #C0392BFF
-L = #F1948AFF
+o = #0E1846FF
+s = #1E3A8CFF
+D = #2448A8FF
+m = #3569D0FF
+l = #5A92EEFF
+t = #7FB2F6FF
+T = #A9D2FFFF
 W = #FFFFFFFF
 
 [grid]
 ................
-......LLLL......
-.....LRRRRD.....
-....LRRRRRRD....
-...LRRRWWRRRD...
-...LRRWWWRRRD...
-..LRRRWWWRRRRD..
-..LRRRRRRRRRRD..
-..LRRRRRRRRRRD..
-..LRRRRRRRRRRD..
-...DRRRRRRRRD...
-...DRRRRRRRRD...
-....DRRRRRRD....
-.....DRRRRD.....
-......DDDD......
+................
+......sssss.....
+.....sTTTTTo....
+....sTTWWTTto...
+...sTTWWTTttto..
+..slllTTTtttmmo.
+..slllllmmmmmDo.
+..slllllmmmmmDo.
+..slllllmmmmDDo.
+...olllmmmmDDo..
+....ollmmmDDo...
+.....olmmmDo....
+......ommDo.....
+.......ooo......
 ................
 EOF
 ```
@@ -162,18 +190,22 @@ mc-asset render /tmp/mc-asset-demo/gem.grid \
 # ok render profile=generic applied=0 output=/tmp/mc-asset-demo/gem.png source=/tmp/mc-asset-demo/gem.mcpx
 ```
 
+算繪出來的 `gem.png`（×8 顯示）：
+
+![算繪出的寶石](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quickstart-gem.png)
+
 檢查它的顏色和透明度：
 
 ```sh
 mc-asset analyze /tmp/mc-asset-demo/gem.png
 # dimensions: 16x16
-# colors: 5
-# alpha: predicted cutout (opaque=124 transparent=132 partial=0)
-# dominant: #00000000 x132 (0.5156), #E74C3CFF x84 (0.3281), #C0392BFF x20 (0.0781), #F1948AFF x12 (0.0469), #FFFFFFFF x8 (0.0313)
+# colors: 9
+# alpha: predicted cutout (opaque=119 transparent=137 partial=0)
+# dominant: #00000000 x137 (0.5352), #3569D0FF x28 (0.1094), #5A92EEFF x24 (0.0938), #0E1846FF x18 (0.0703), #A9D2FFFF x16 (0.0625), #1E3A8CFF x12 (0.0469), #2448A8FF x10 (0.0391), #7FB2F6FF x7 (0.0273)
 # profile: predicted profile generic has no Minecraft-specific restrictions.
-# palette: colorCount=5 alphaLevels=2 transparent=132 partial=0
+# palette: colorCount=9 alphaLevels=2 transparent=137 partial=0
 # pixel-art: 16x16 aspect=1:1 isolated=0 semiTransparent=0 tileFriendly=true
-# recommended: quantize.colors=8 cleanup=none resize=nearest
+# recommended: quantize.colors=16 cleanup=none resize=nearest
 ```
 
 以 Minecraft 物品貼圖的規格驗證它：
@@ -182,8 +214,8 @@ mc-asset analyze /tmp/mc-asset-demo/gem.png
 mc-asset validate /tmp/mc-asset-demo/gem.png --profile minecraft:item
 # verdict: pass
 # dimensions: 16x16
-# colors: 5
-# alpha: predicted cutout (opaque=124 transparent=132 partial=0)
+# colors: 9
+# alpha: predicted cutout (opaque=119 transparent=137 partial=0)
 # profile: predicted profile minecraft:item prefers the items atlas without mipmaps.
 ```
 
@@ -298,6 +330,10 @@ mc-asset build /tmp/mc-asset-demo/gem.mcpx \
 # ok build profile=generic applied=2 output=/tmp/mc-asset-demo/gem_modified.png
 ```
 
+套用這批操作前後（皆為 ×8 顯示）：
+
+![套用前的寶石](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quickstart-gem.png) → ![套用後的寶石](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/batch-edit-gem.png)
+
 透過 MCP，`apply_asset_operations` 會跑同一批操作，還能把改動的部分畫給你看：
 
 ```json
@@ -331,6 +367,12 @@ mc-asset gui-scale ./textures/gui/dialog.png \
 ```
 
 `gui-scale` 不會自己去找同名的 `.mcmeta`；沒給 `--mcmeta` 時會把整張圖直接拉伸。
+
+| 原圖 16×16 | `nine_slice`，48×32 | 不給 `--mcmeta`（拉伸），48×32 |
+|:-:|:-:|:-:|
+| ![dialog 原圖](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/dialog.png) | ![九宮格結果](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/nine-slice.png) | ![拉伸結果](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/stretch.png) |
+
+三張皆為 ×4 顯示。有 mcmeta 時，切角和 2px 斜面 1:1 複製，寬度不變；直接拉伸則會讓斜面粗細不一，切角也糊掉。
 
 ---
 

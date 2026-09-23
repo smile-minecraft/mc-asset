@@ -1,26 +1,29 @@
-; Central glow pulse - frame 1 of 4 (16x16, hand-authored)
+; Glowing sapphire ore - frame 1 of 4
 [palette]
 . = transparent
-k = #14141C
-d = #2F9E9E
-m = #4FD3D3
-b = #A9F1EC
-w = #FFFFFFFF
+1 = #5F5F66FF
+2 = #74747BFF
+3 = #86868DFF
+4 = #99999FFF
+d = #2448A8FF
+m = #3F7FE0FF
+l = #8CC0FFFF
+W = #E8F4FFFF
 
 [grid]
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkwwkkkkkkk
-kkkkkkkwwkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
-kkkkkkkkkkkkkkkk
+3333343333332333
+3443443322333333
+33dd133323333443
+33ddd12333334433
+221dd13333333333
+3231133344dd1322
+3333333343ddd132
+33443333331ddd13
+3343333223311133
+3333333323333443
+2333dd1333333343
+2233ddd133223333
+33331dd13223dd13
+333441133333dd13
+3334333443331123
+3333333334333333

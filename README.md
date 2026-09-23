@@ -13,6 +13,10 @@ A pixel-native 2D asset engine and deterministic CLI/MCP toolchain for Minecraft
 
 Language models can't place pixels by eye, so `mc-asset` turns texture work into text and commands. Draw a sprite as a character grid, pixelize reference art, generate tiling textures, pack animation sheets, and validate a whole resource pack, from a shell or over MCP. The same input and seed always produce the same bytes.
 
+![A sword, pickaxe, apple, potion, sapphire, and key, each a 16×16 sprite in the vanilla style](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/items.png)
+
+*Six 16×16 items, each written as a text grid and rendered by `mc-asset render` (shown ×6), drawn to the vanilla style rules in the [`minecraft-pixel-art`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/minecraft-pixel-art) skill. The grids are in [`docs/assets/showcase/items/`](https://github.com/smile-minecraft/mc-asset/tree/main/docs/assets/showcase/items).*
+
 ---
 
 ## Contents
@@ -51,15 +55,23 @@ Every image below is produced by mc-asset itself, with fixed seeds for the proce
 | ![pixelize before](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-before.png) → ![pixelize after](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-after.png) | ![quantize before](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-before.png) → ![quantize after](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-after.png) |
 | A detailed reference image (128px, shown ×2) reduced to 16px (shown ×16): the grain coarsens and shapes snap to a tidy pixel grid. | A 64-color gradient reduced to 8 colors (both ×4): the color count drops and the result settles into clear steps. |
 
-**Material variants** — one source fanned out into four ramps (`iron`, `gold`, `wood`, `crystal`); the shape stays the same and only the palette changes:
+**Material variants** — the sword from the top of this page fanned out into all seven built-in materials (`copper`, `crystal`, `gold`, `iron`, `oxidized_copper`, `stone`, `wood`, shown ×5). Its palette gives each color a role, so the blade and guard take the new ramp while the darkest outline, the white glint, the wooden grip, and the guard's gem keep their colors:
 
-![variant iron](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-iron.png) ![variant gold](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-gold.png) ![variant wood](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-wood.png) ![variant crystal](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variant-crystal.png)
+![the sword recolored into seven materials](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variants.png)
 
-**Seamless tiling** — a single 32px seamless tile (left, ×4) and a 2×2 repeat of it (right, ×4); the edges meet with no visible seam:
+**Procedural patterns** — every `generate` pattern as a 16px swatch from a fixed seed (shown ×4):
 
-![tile pattern](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-pattern.png) ![2x2 tiled preview](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-preview-2x2.png)
+| `noise` | `clustered-noise` | `stripes` | `checker` | `gradient` |
+|:-:|:-:|:-:|:-:|:-:|
+| ![noise](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/noise.png) | ![clustered-noise](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/clustered-noise.png) | ![stripes](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/stripes.png) | ![checker](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/checker.png) | ![gradient](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/gradient.png) |
+| `brick` | `spots` | `veins` | `cracks` | `grain` |
+| ![brick](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/brick.png) | ![spots](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/spots.png) | ![veins](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/veins.png) | ![cracks](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/cracks.png) | ![grain](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/grain.png) |
 
-**Animation sheet** packed from individual frames:
+**Seamless tiling** — a 16px brick block face (left, ×8) and a 4×4 wall of it (right, ×4); the mortar lines continue across every edge:
+
+![tile source](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-pattern.png) ![4x4 tiled wall](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-preview.png)
+
+**Animation sheet** — four frames of a glowing ore block packed into one vertical strip (×4), the layout Minecraft reads with an `.mcmeta` animation:
 
 ![animation sprite sheet](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/anim-sheet.png)
 
@@ -114,6 +126,19 @@ bun run build
 - [`docs/mcp-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-surface.md) — the frozen MCP surface: tool names, inputs, and the read/write contract.
 - [`AGENTS.md`](https://github.com/smile-minecraft/mc-asset/blob/main/AGENTS.md) — the rules for changing this repository.
 
+### Agent skills
+
+The repository ships two [Agent Skills](https://skills.sh/) in [`skills/`](https://github.com/smile-minecraft/mc-asset/tree/main/skills), installable with the skills CLI:
+
+```sh
+npx skills add smile-minecraft/mc-asset
+```
+
+- [`mc-asset`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/mc-asset) — the draw → render → preview → measure → validate loop with this tool, the CLI/MCP command map, and how palette roles drive recoloring.
+- [`minecraft-pixel-art`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/minecraft-pixel-art) — the vanilla style rules for items, blocks, GUI sprites, and animations: palettes and hue-shifted ramps, material outlines, top-left light, tiling, and an anti-pattern review checklist.
+
+Add `--skill mc-asset` or `--skill minecraft-pixel-art` to install only one.
+
 ---
 
 ## Quickstart
@@ -127,27 +152,31 @@ mkdir -p /tmp/mc-asset-demo
 cat << 'EOF' > /tmp/mc-asset-demo/gem.grid
 [palette]
 . = transparent
-R = #E74C3CFF
-D = #C0392BFF
-L = #F1948AFF
+o = #0E1846FF
+s = #1E3A8CFF
+D = #2448A8FF
+m = #3569D0FF
+l = #5A92EEFF
+t = #7FB2F6FF
+T = #A9D2FFFF
 W = #FFFFFFFF
 
 [grid]
 ................
-......LLLL......
-.....LRRRRD.....
-....LRRRRRRD....
-...LRRRWWRRRD...
-...LRRWWWRRRD...
-..LRRRWWWRRRRD..
-..LRRRRRRRRRRD..
-..LRRRRRRRRRRD..
-..LRRRRRRRRRRD..
-...DRRRRRRRRD...
-...DRRRRRRRRD...
-....DRRRRRRD....
-.....DRRRRD.....
-......DDDD......
+................
+......sssss.....
+.....sTTTTTo....
+....sTTWWTTto...
+...sTTWWTTttto..
+..slllTTTtttmmo.
+..slllllmmmmmDo.
+..slllllmmmmmDo.
+..slllllmmmmDDo.
+...olllmmmmDDo..
+....ollmmmDDo...
+.....olmmmDo....
+......ommDo.....
+.......ooo......
 ................
 EOF
 ```
@@ -161,18 +190,22 @@ mc-asset render /tmp/mc-asset-demo/gem.grid \
 # ok render profile=generic applied=0 output=/tmp/mc-asset-demo/gem.png source=/tmp/mc-asset-demo/gem.mcpx
 ```
 
+The rendered `gem.png`, shown ×8:
+
+![the rendered gem](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quickstart-gem.png)
+
 Check its colors and alpha:
 
 ```sh
 mc-asset analyze /tmp/mc-asset-demo/gem.png
 # dimensions: 16x16
-# colors: 5
-# alpha: predicted cutout (opaque=124 transparent=132 partial=0)
-# dominant: #00000000 x132 (0.5156), #E74C3CFF x84 (0.3281), #C0392BFF x20 (0.0781), #F1948AFF x12 (0.0469), #FFFFFFFF x8 (0.0313)
+# colors: 9
+# alpha: predicted cutout (opaque=119 transparent=137 partial=0)
+# dominant: #00000000 x137 (0.5352), #3569D0FF x28 (0.1094), #5A92EEFF x24 (0.0938), #0E1846FF x18 (0.0703), #A9D2FFFF x16 (0.0625), #1E3A8CFF x12 (0.0469), #2448A8FF x10 (0.0391), #7FB2F6FF x7 (0.0273)
 # profile: predicted profile generic has no Minecraft-specific restrictions.
-# palette: colorCount=5 alphaLevels=2 transparent=132 partial=0
+# palette: colorCount=9 alphaLevels=2 transparent=137 partial=0
 # pixel-art: 16x16 aspect=1:1 isolated=0 semiTransparent=0 tileFriendly=true
-# recommended: quantize.colors=8 cleanup=none resize=nearest
+# recommended: quantize.colors=16 cleanup=none resize=nearest
 ```
 
 Validate it as a Minecraft item texture:
@@ -181,8 +214,8 @@ Validate it as a Minecraft item texture:
 mc-asset validate /tmp/mc-asset-demo/gem.png --profile minecraft:item
 # verdict: pass
 # dimensions: 16x16
-# colors: 5
-# alpha: predicted cutout (opaque=124 transparent=132 partial=0)
+# colors: 9
+# alpha: predicted cutout (opaque=119 transparent=137 partial=0)
 # profile: predicted profile minecraft:item prefers the items atlas without mipmaps.
 ```
 
@@ -297,6 +330,10 @@ mc-asset build /tmp/mc-asset-demo/gem.mcpx \
 # ok build profile=generic applied=2 output=/tmp/mc-asset-demo/gem_modified.png
 ```
 
+Before and after the batch (both ×8):
+
+![gem before the batch](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quickstart-gem.png) → ![gem after the batch](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/batch-edit-gem.png)
+
 Over MCP, `apply_asset_operations` runs the same batch and can send back a picture of what changed:
 
 ```json
@@ -330,6 +367,12 @@ mc-asset gui-scale ./textures/gui/dialog.png \
 ```
 
 `gui-scale` never picks up a sibling `.mcmeta` on its own; without `--mcmeta` it stretches the whole sprite.
+
+| Source, 16×16 | `nine_slice`, 48×32 | No `--mcmeta` (stretch), 48×32 |
+|:-:|:-:|:-:|
+| ![dialog source](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/dialog.png) | ![nine-slice result](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/nine-slice.png) | ![stretched result](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/stretch.png) |
+
+All three are shown ×4. With the mcmeta the cut corners and the 2px bevels copy 1:1 and keep their width; the plain stretch thickens the bevels unevenly and smears the corners.
 
 ---
 
