@@ -4,10 +4,14 @@
 
 `mc-asset mcp` starts a stdio MCP server: stdout carries only MCP JSON-RPC,
 diagnostics go to stderr, and the process ends when stdin closes. The frozen
-surface — twenty tool names, their inputs, and the read/write contract — lives
+surface — twenty-one tool names, their inputs, and the read/write contract — lives
 in `docs/mcp-surface.md`; the input fields are frozen in `src/mcp/schema.ts`.
-This guide covers registration, one verbatim capture per tool, the error
-model, and the limits.
+This guide covers registration, one capture per tool (image bytes are
+abbreviated where noted, never verbatim), the error model, and the limits.
+The latest published release remains `v0.3.1`; `scale_gui_asset` and the authoring additions in the
+source tree (`inspect_asset`, the `apply_asset_operations` feedback object,
+and the `ellipse` / `polygonFill` / `strokeMask` operations) are unreleased,
+so `v0.3.1` does not include them. A server built from the current source exposes all twenty-one tools.
 
 The server hangs directly off Core, so every tool runs the same engine the CLI
 commands use. Pixel-granularity authorship travels through the ASCII Grid
@@ -102,11 +106,13 @@ without a restart proves nothing. To roll back, remove the entry (or restore
 the config backup) and restart again.
 
 The captures below were taken with the MCP client SDK from a demo working
-directory; every path in them is relative to that directory. The seven
-original captures come from the installed build and the twelve additions from
+directory; every path in them is relative to that directory, except the
+`inspect_asset` structure capture, which names the repo fixture
+`tests/cli/fixtures/sword.mcpx` directly. The seven
+original captures come from the installed build and the later additions from
 the local source server — the same server code runs either way.
 
-## The twenty tools
+## The twenty-one tools
 
 ### analyze_asset
 
@@ -185,6 +191,70 @@ embedded):
 
 ```text
 {"applied":2,"failed":0,"operations":[{"index":0,"status":"applied"},{"index":1,"status":"applied"}],"warnings":[],"output":"out/applied.png","source":"out/applied.mcpx"}
+```
+
+Without `feedback` the shape above is frozen: `applied`, `failed`, the
+per-operation `operations` array, `warnings`, then the PNG and source
+artifacts (explicit paths, or embedded `pngBase64` / `mcpxText`). Passing
+`feedback` is optional and only adds to that shape — leaving it out keeps the
+output fields and bytes exactly as before.
+
+`feedback` takes `image` (`none` / `full` / `changed`), `scale` (integer
+1–16), `crop` (a selection expression), and `diff` (`none` / `summary`):
+
+- `image: "none"` (the default) returns flags only. `"full"` renders the whole
+  crop; `"changed"` ignores the crop and renders the composited change bounds,
+  reporting `noVisibleChange: true` instead of an image when nothing visible
+  moved. A `crop` combined with `none` is `INVALID_ARGUMENT`.
+- An included image is never embedded as `pngBase64`: it travels as a second,
+  standard image content block (`type: "image"`, `mimeType: "image/png"`) with
+  no duplicate bytes in the text block.
+- An omitted `scale` auto-scales from the pre-scale long edge only: an edge
+  below 128 scales up toward 128, capped at 16. Outputs beyond the 1024px edge
+  refuse with `RESOURCE_LIMIT_EXCEEDED` instead of downsampling. Guide pixels
+  (grids, checkers) never enter the artwork bytes.
+- `diff: "summary"` adds `raw` / `composited` / `structural` plus
+  `outsideSelectionUnchanged`, which is true when every pixel outside the
+  selection survived byte-identical, including hidden RGB under alpha 0.
+- `atomic: false` runs every operation and keeps the partial successes: the
+  result still reports per-operation applied/failed statuses (for example
+  `applied: 1, failed: 1`) instead of rolling back, including alongside a
+  `changed` image or a diff summary.
+
+Pixel operations accept an optional `selection`: only selected pixels are
+written and everything else is restored verbatim. A selection names atoms —
+`all`, `rect:x,y,w,h`, `region:id`, `alpha[:layer]`,
+`color[:layer]:r,g,b,a`, `connected[:layer]:x,y` — or a JSON AST object
+(`{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}`),
+capped at depth 32 and 1024 nodes. An empty match refuses the write with
+`EMPTY_SELECTION` and rolls the batch back.
+
+The pixel vocabulary is nine operations; the three shape additions are
+`ellipse` (the ellipse inscribed in `rect`; `mode` is required, `fill` or
+`outline`), `polygonFill` (fills the polygon named by `points`), and
+`strokeMask` (outlines the `source` selection read scope on `layerId` without
+painting the scope itself). `polygonFill` takes at most 4096 points
+(`RESOURCE_LIMIT_EXCEEDED` beyond that); a self-intersecting ring is
+`SELF_INTERSECTING_POLYGON`, and holes are unsupported. The full per-type
+table lives in the “Batch Operations Specification” section of
+`docs/cli-surface.md`.
+
+Feedback example — one changed pixel with a summary (abbreviated, not
+verbatim; image data omitted):
+
+Call:
+
+```json
+{"sourcePath":"sword.mcpx","operations":[{"type":"setPixel","layerId":"base","x":0,"y":0,"color":"#FF0000FF"}],"feedback":{"image":"changed","diff":"summary"}}
+```
+
+Result: the text block carries `applied: 1, failed: 0`, one raw and one
+composited changed pixel, and `outsideSelectionUnchanged: true`; the image
+arrives as a second `type: "image"`, `mimeType: "image/png"` block:
+
+```text
+{"applied":1,"failed":0,"operations":[{"index":0,"status":"applied"}],"warnings":[],"feedback":{"image":"changed","imageIncluded":true,"diff":{"raw":{"changedPixels":1 …},"composited":{"changedPixels":1 …},"structural":…,"outsideSelectionUnchanged":true}},"mcpxText":"mcpx 1\n… (truncated) …"}
+[second block: {"type":"image","mimeType":"image/png","data":"… (omitted) …"}]
 ```
 
 ### recolor_asset
@@ -479,6 +549,38 @@ Result (verbatim):
 {"command":"validate-pack","path":"clean-pack","target":"resource-pack 75.0","verdict":"pass","findings":[{"code":"PACK_COVERAGE_SKIPPED","level":"warning","message":"atlas \"items\" for sprite \"minecraft:item/sword\" in \"assets/minecraft/models/item/sword.json\" cannot be completed without the vanilla resource tree; coverage recorded as skipped.","path":"assets/minecraft/models/item/sword.json"}],"coverage":{"status":"partial","skipped":[{"kind":"atlas-source","reason":"vanilla-not-provided","target":"items","detail":"sprite \"minecraft:item/sword\" needs the vanilla atlas sources"}]},"version":{"resourcePackVersion":"75.0"}}
 ```
 
+### inspect_asset
+
+Read-only inspection over an `.mcpx` source or a raster image — a raster
+reads as a single base layer — and it never writes. It takes `inputPath` plus
+`mode` (`structure` / `view`); `crop` and `scale` are view-only, so
+`structure` with either is `INVALID_ARGUMENT`.
+
+Call:
+
+```json
+{"inputPath":"tests/cli/fixtures/sword.mcpx","mode":"structure"}
+```
+
+Result (actual local MCP text-block response on that fixture):
+
+```text
+{"mode":"structure","width":4,"height":4,"layers":[{"id":"base","name":"base","index":0,"bounds":{"x":0,"y":0,"width":4,"height":4},"area":12,"visible":true,"opacity":1,"blendMode":"normal","colorUsage":{"uniqueColors":3,"transparentPixels":4,"topColors":[{"rgba":"#FF0000FF","count":8},{"rgba":"#00000000","count":4},{"rgba":"#00FF00FF","count":4}],"truncated":false}}],"regions":[],"overlaps":{"layerBounds":[],"regionPixels":[]}}
+```
+
+`structure` reports layers (bounds, area, visibility, raw RGBA color usage),
+regions (identity, bounds, area only), and overlaps. `view` instead returns
+the composited pixels as a standard image block plus a six-key metadata object
+(`mode`, `sourceDimensions`, `crop`, `scale`, `outputDimensions`,
+`colorFormat`) — under the same crop/scale/1024px-edge rules as the top-level
+`inspect` command, with no `pngBase64` duplicate of the image bytes. View
+`scale` is an integer 1–16 and defaults to 1; the long-edge auto-scale (a
+pre-scale edge below 128 scaling up toward 128) applies to
+`apply_asset_operations` feedback images only, never to `view`. `crop` is a
+selection expression like the batch `selection`; an empty match refuses with
+`EMPTY_SELECTION`, and outputs beyond the 1024px edge refuse with
+`RESOURCE_LIMIT_EXCEEDED` and a crop hint.
+
 ## How failures come back
 
 A tool failure sets `isError: true`, and the payload is a JSON string in
@@ -524,7 +626,14 @@ File-rule failures to expect:
   result carries `pngBase64` (PNG) or `mcpxText` (`.mcpx`) instead of writing
   a file. This is decided per artifact: giving only `outputPngPath` writes the
   PNG and still returns the `.mcpx` text inline.
-- **Full CLI parity.** The twenty tools cover intake and source build,
+- **View and feedback images are image blocks, never duplicates.** Neither
+  `inspect_asset` `view` nor `apply_asset_operations` feedback repeats its PNG
+  as `pngBase64`; the bytes travel as a standard `type: "image"`,
+  `mimeType: "image/png"` block. View scale defaults to 1; the long-edge
+  auto-scale (a pre-scale edge below 128 scaling up toward 128, capped at 16)
+  applies to feedback images only. Anything beyond the 1024px edge is
+  `RESOURCE_LIMIT_EXCEEDED`, never a silent downscale.
+- **Full CLI parity.** The twenty-one tools cover intake and source build,
   transforms, palette and quantization, the deterministic pixelize
   pipeline, procedural generation, tiles and previews, animation sheets,
   and single-asset plus whole-pack validation, including

@@ -93,7 +93,7 @@ bun run build
 ## 給 AI Agent
 
 - [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt)：給 Agent 的專案精簡索引。
-- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份資訊的單檔版本，涵蓋安裝、二十個 MCP 工具、批次操作、錯誤模型與限制。
+- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份資訊的單檔版本，涵蓋安裝、二十一個 MCP 工具、批次操作、錯誤模型與限制。
 - [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md)：註冊方式、每個 MCP 工具一份原樣擷取，以及錯誤模型。
 - [`docs/mcp-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-surface.md)：已凍結的 MCP 介面——工具名稱、輸入與讀寫契約。
 - [`AGENTS.md`](https://github.com/smile-minecraft/mc-asset/blob/main/AGENTS.md)：修改本專案時必須遵守的規則。
@@ -269,6 +269,8 @@ mc-asset validate-pack ./MyResourcePack \
 
 `mc-asset` 內建以標準輸入輸出（stdio）運作的 Model Context Protocol 伺服器。AI 代理可直接呼叫結構化工具操作核心引擎，無需透過子行程繁複解析 CLI 字串。
 
+執行中的伺服器提供 21 個工具。`scale_gui_asset` 及所有 authoring 新增項目（`inspect_asset`、`apply_asset_operations.feedback`、`ellipse`／`polygonFill`／`strokeMask`）皆為 `[Unreleased]` 的 source-tree 新增功能；最新發布版本仍是 v0.3.1。
+
 ### 提供之 MCP 工具
 
 | 工具名稱 | 功能說明 |
@@ -283,6 +285,7 @@ mc-asset validate-pack ./MyResourcePack \
 | `import_asset` | 將點陣圖輸入（PNG/JPEG/WebP）解碼至像素畫布，可選擇套用批次修訂操作。 |
 | `build_asset` | 將 `.mcpx` 原始碼建置為 PNG 位元組或重新序列化的原始碼，可選擇套用批次修訂操作。 |
 | `transform_asset` | 對點陣圖或 `.mcpx` 輸入套用單一幾何操作（flip、rotate、crop、pad、resize、translate）。 |
+| `scale_gui_asset` | 依 mcmeta 的 stretch/tile/nine_slice 規則縮放 GUI 貼圖；只輸出 PNG。 |
 | `quantize_asset` | 將相異色彩數縮減至指定數量。 |
 | `cleanup_asset` | 偵測或修復像素瑕疵（`isolated`、`noise`、`cluster`、`fringe`、`outlier`、`hole`、`aa`）。 |
 | `palette_asset` | 唯讀調色盤 `extract`/`inspect` 報告（相異色彩、分布、角色、對比）。 |
@@ -292,6 +295,11 @@ mc-asset validate-pack ./MyResourcePack \
 | `preview_asset` | `ascii`/`palette-map` 報告，以及 `scale` 與 `nine-slice` 輔助 PNG。 |
 | `animate_asset` | 對動畫幀組提供 `pack`/`unpack`/`reorder`/`resize`/`validate`/`preview`。 |
 | `validate_pack_asset` | 唯讀整包掃描：命名空間、模型、材質、圖集、版本對應。 |
+| `inspect_asset` | 唯讀 `structure`（圖層、區域、色彩用量、重疊）或 `view`（合成 PNG 圖塊加 metadata）；輸入為 `inputPath`。 |
+
+`inspect_asset` 有兩種模式。`structure` 回報圖層（邊界、面積、可見性、原始 RGBA 色彩用量）、區域（只報識別、邊界、面積）與重疊情形；`view` 把合成結果以標準圖片區塊回傳，另附六鍵 metadata，可選 `crop` 與 `scale`（1–16 整數，預設 1）。輸出邊長超過 1024px 會以 `RESOURCE_LIMIT_EXCEEDED` 拒絕並提示改用 crop；小圖自動放大只用在 apply 的回饋圖，不會套到 inspect view。圖片位元組只走 `type: "image"`，不會在文字區塊重複一份。
+
+`apply_asset_operations` 可加選填的 `feedback`（`image`：`none`／`full`／`changed`；`scale` 1–16；`crop` 選取表示式；`diff`：`none`／`summary`）。沒給就維持原本的輸出形狀，一個位元組也不差。
 
 ### 設定方式
 
@@ -362,6 +370,7 @@ mc-asset validate-pack ./MyResourcePack \
 | **程序生成與平鋪** | `generate <pattern>` | 確定性程序化紋理生成（支援 `--seed <int>`）。 |
 | | `tile <input>` | 接縫瑕疵檢測與自動無縫化修正。 |
 | | `preview <input>` | 多模式預覽：`--ascii`、`--palette-map`、`--scale <N>`、`--nine-slice`。 |
+| | `gui-scale <input>` | 依 mcmeta stretch/tile/nine_slice 規則縮放 GUI 貼圖至 `--size <N\|WxH>`。 |
 | **動畫與圖集** | `animate pack` | 將各影格目錄打包為連續貼圖集。 |
 | | `animate unpack` | 將動畫連續貼圖拆解為單格圖檔。 |
 | | `animate reorder` | 重排影格播放順序。 |
@@ -369,6 +378,7 @@ mc-asset validate-pack ./MyResourcePack \
 | | `animate validate`| 依 `.mcmeta` 檢查影格數與排版規格。 |
 | | `animate preview` | 預覽動畫播放效果。 |
 | **檢查與校驗** | `analyze <image>` | 唯讀結構與色彩數值報告。 |
+| | `inspect <input>` | 唯讀結構報告或合成檢視（`--mode structure\|view`、`--crop`、`--scale`）。 |
 | | `validate <asset>` | 單一檔案素材規範檢核（可附加 `.mcmeta`）。 |
 | | `validate-pack <path>`| 資源包全目錄關聯與結構檢查。 |
 | **Agent 介面** | `mcp` | 啟動 stdio MCP 伺服器。 |
@@ -391,6 +401,9 @@ mc-asset validate-pack ./MyResourcePack \
 
 - **原子性保證**：全有或全無。批次中任一項操作失敗（例如坐標超出畫布），所有變更均會自動回滾（Rollback）。
 - **顏色表示法**：支援 `transparent`、`#RRGGBB` 或 `#RRGGBBAA`。
+- **操作種類**：共 25 種，除了 9 個像素操作（`setPixel`、`clearPixel`、`drawLine`、`drawRect`、`fillRect`、`floodFill`、`ellipse`、`polygonFill`、`strokeMask`），還有圖層、區域、`stampRect` 與 `regionFromSelection`。完整參數表見 `docs/cli-surface.md`。
+- **精簡繪圖形狀**：`ellipse` 吃 `rect` 加 `color` 加 `mode`（`fill`／`outline`）；`polygonFill` 吃整數 `[x, y]` 的 `points` 加 `color`，最多 4096 點，不收自交、不收孔洞；`strokeMask` 吃 `layerId` 加 `source` 選取加 `color`，另可拿 `selection` 當寫入裁剪。4097 點會在座標映射前以 `RESOURCE_LIMIT_EXCEEDED` 退回；自交環會以 `SELF_INTERSECTING_POLYGON` 退回。
+- **選取範圍**：像素操作可帶選填的 `selection`；選到空集合會以 `EMPTY_SELECTION` 拒絕寫入並整批回滾。
 
 ---
 

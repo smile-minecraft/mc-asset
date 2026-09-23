@@ -2,7 +2,7 @@
 
 [English](mcp-guide.md) | [繁體中文](mcp-guide.zh-TW.md) | [简体中文](mcp-guide.zh-CN.md)
 
-`mc-asset mcp` 会启动 stdio MCP 服务器：stdout 只输出 MCP JSON-RPC，诊断信息走 stderr，stdin 关闭时进程退出。已冻结的接口（二十个工具名称、各自的输入，以及读写契约）记录在 `docs/mcp-surface.zh-CN.md`，输入字段则冻结在 `src/mcp/schema.ts`。本指南涵盖注册方式、每个工具一份原样捕获、错误模型与限制。
+`mc-asset mcp` 会启动 stdio MCP 服务器：stdout 只输出 MCP JSON-RPC，诊断信息走 stderr，stdin 关闭时进程退出。已冻结的接口（二十一个工具名称、各自的输入，以及读写契约）记录在 `docs/mcp-surface.zh-CN.md`，输入字段则冻结在 `src/mcp/schema.ts`。本指南涵盖注册方式、每个工具一份捕获（图片字节在注明处截短显示，不作原样引用）、错误模型与限制。最新发布版本仍是 `v0.3.1`；源码树上的 `scale_gui_asset` 与创作新增功能（`inspect_asset`、`apply_asset_operations` 的 `feedback` 对象，以及 `ellipse`／`polygonFill`／`strokeMask` 操作）尚未发布，`v0.3.1` 不包含它们。由当前源码构建的服务器提供全部二十一个工具。
 
 服务器直接挂在 Core 上，所以每个工具都跑与 CLI 命令相同的引擎。像素级的创作，通过 ASCII Grid 文档、批处理操作数组，或内联返回的可编辑 `.mcpx` 源码来完成；刻意不提供 `set_pixel` 工具。
 
@@ -87,9 +87,9 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 然后完整重启客户端。MCP 服务器在启动时加载，配置改了却没重启，什么都证明不了。要回滚时，移除该条目（或还原配置备份）并再重启一次。
 
-以下捕获通过 MCP 客户端 SDK 在一个演示工作目录中执行，其中所有路径都相对于该目录。原有七个工具的捕获取自已安装的版本，本次新增的十二个工具则取自本地源码服务器——两者执行的是同一份服务器代码。
+以下捕获通过 MCP 客户端 SDK 在一个演示工作目录中执行，其中所有路径都相对于该目录，只有 `inspect_asset` 的结构捕获直接指向仓库内的 fixture `tests/cli/fixtures/sword.mcpx`。原有七个工具的捕获取自已安装的版本，后续新增的工具则取自本地源码服务器——两者执行的是同一份服务器代码。
 
-## 二十个工具
+## 二十一个工具
 
 ### analyze_asset
 
@@ -155,6 +155,35 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 ```text
 {"applied":2,"failed":0,"operations":[{"index":0,"status":"applied"},{"index":1,"status":"applied"}],"warnings":[],"output":"out/applied.png","source":"out/applied.mcpx"}
+```
+
+不带 `feedback` 时，上面的形状是冻结的：`applied`、`failed`、逐个操作的 `operations` 数组、`warnings`，再加上 PNG 与源码产物（显式路径，或内联的 `pngBase64`／`mcpxText`）。`feedback` 是可选的，只会往上叠加内容——不传 `feedback`，输出字段与字节就和以前完全一致。
+
+`feedback` 有四个字段：`image`（`none`／`full`／`changed`）、`scale`（整数 1–16）、`crop`（选择表达式）、`diff`（`none`／`summary`）：
+
+- `image: "none"`（默认）只返回标志，不带图。`"full"` 渲染整个裁剪范围；`"changed"` 忽略 `crop`，只渲染合成后发生变化的外框，画面完全没动时改报 `noVisibleChange: true`，不附图。`crop` 配 `none` 是 `INVALID_ARGUMENT`。
+- 附图永远不会以 `pngBase64` 内联：它以第二个标准图片内容块发出（`type: "image"`、`mimeType: "image/png"`），文本块里不会留一份重复字节。
+- 省略 `scale` 时，只按缩放前的长边自动放大：长边不足 128 才向 128 放大，上限 16。输出边长超过 1024px 会以 `RESOURCE_LIMIT_EXCEEDED` 拒绝，不会悄悄缩图。辅助像素（网格、棋盘格）永远不会混入作品字节。
+- `diff: "summary"` 会追加 `raw`／`composited`／`structural`，以及 `outsideSelectionUnchanged`——选择范围外的每个像素都逐字节保留（含 alpha 0 之下隐藏的 RGB）时为 true。
+- `atomic: false` 会跑完每个操作、保留成功的部分：结果照常逐个报告成功／失败（例如 `applied: 1, failed: 1`），不会整体回滚，配 `changed` 图片或 diff 摘要也一样。
+
+像素操作都可以带可选的 `selection`：只有选中的像素会被写入，其余全部逐字节还原。选择可以写原子——`all`、`rect:x,y,w,h`、`region:id`、`alpha[:layer]`、`color[:layer]:r,g,b,a`、`connected[:layer]:x,y`——或 JSON AST 对象（`{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}`），深度上限 32、节点上限 1024。选择落空时以 `EMPTY_SELECTION` 拒绝写入并回滚整批。
+
+像素词汇共九个操作，新增的三个形状是：`ellipse`（`rect` 的内切椭圆；`mode` 必填，`fill` 或 `outline`）、`polygonFill`（填充 `points` 指定的多边形）、`strokeMask`（沿 `layerId` 上 `source` 选择范围的读取轮廓描边，不涂抹范围本身）。`polygonFill` 最多 4096 个点，超出是 `RESOURCE_LIMIT_EXCEEDED`；自交的环是 `SELF_INTERSECTING_POLYGON`，不支持挖洞。完整的分类型参数表见 `docs/cli-surface.zh-CN.md` 的批处理操作规格节。
+
+附图示例——一个变化像素加摘要（截短显示，非原样引用；图片数据省略）：
+
+调用：
+
+```json
+{"sourcePath":"sword.mcpx","operations":[{"type":"setPixel","layerId":"base","x":0,"y":0,"color":"#FF0000FF"}],"feedback":{"image":"changed","diff":"summary"}}
+```
+
+结果：文本块带 `applied: 1, failed: 0`，raw 与合成各一个变化像素，`outsideSelectionUnchanged: true`；图片以第二个 `type: "image"`、`mimeType: "image/png"` 块送达：
+
+```text
+{"applied":1,"failed":0,"operations":[{"index":0,"status":"applied"}],"warnings":[],"feedback":{"image":"changed","imageIncluded":true,"diff":{"raw":{"changedPixels":1 …},"composited":{"changedPixels":1 …},"structural":…,"outsideSelectionUnchanged":true}},"mcpxText":"mcpx 1\n… (truncated) …"}
+[second block: {"type":"image","mimeType":"image/png","data":"… (omitted) …"}]
 ```
 
 ### recolor_asset
@@ -413,6 +442,24 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 {"command":"validate-pack","path":"clean-pack","target":"resource-pack 75.0","verdict":"pass","findings":[{"code":"PACK_COVERAGE_SKIPPED","level":"warning","message":"atlas \"items\" for sprite \"minecraft:item/sword\" in \"assets/minecraft/models/item/sword.json\" cannot be completed without the vanilla resource tree; coverage recorded as skipped.","path":"assets/minecraft/models/item/sword.json"}],"coverage":{"status":"partial","skipped":[{"kind":"atlas-source","reason":"vanilla-not-provided","target":"items","detail":"sprite \"minecraft:item/sword\" needs the vanilla atlas sources"}]},"version":{"resourcePackVersion":"75.0"}}
 ```
 
+### inspect_asset
+
+针对 `.mcpx` 源码或位图的只读检查——位图会被读成单个 base 图层——绝不写入。调用带 `inputPath` 加 `mode`（`structure`／`view`）；`crop` 与 `scale` 只有 `view` 能用，`structure` 带任一个都是 `INVALID_ARGUMENT`。
+
+调用：
+
+```json
+{"inputPath":"tests/cli/fixtures/sword.mcpx","mode":"structure"}
+```
+
+结果（该 fixture 的本地 MCP 文本块响应实况）：
+
+```text
+{"mode":"structure","width":4,"height":4,"layers":[{"id":"base","name":"base","index":0,"bounds":{"x":0,"y":0,"width":4,"height":4},"area":12,"visible":true,"opacity":1,"blendMode":"normal","colorUsage":{"uniqueColors":3,"transparentPixels":4,"topColors":[{"rgba":"#FF0000FF","count":8},{"rgba":"#00000000","count":4},{"rgba":"#00FF00FF","count":4}],"truncated":false}}],"regions":[],"overlaps":{"layerBounds":[],"regionPixels":[]}}
+```
+
+`structure` 报告图层（范围、面积、可见性、原始 RGBA 用色）、区域（仅含标识、范围、面积）与重叠。`view` 则把合成像素以标准图片块返回，外加六键元数据（`mode`、`sourceDimensions`、`crop`、`scale`、`outputDimensions`、`colorFormat`）——裁剪／缩放／1024px 边长规则与顶层 `inspect` 命令一致，图片字节不会另存一份 `pngBase64`。`view` 的 `scale` 是整数 1–16，默认 1；长边自动放大（缩放前长边不足 128 才向 128 放大）只适用于 `apply_asset_operations` 的附图，不适用于 `view`。`crop` 是与批处理 `selection` 同语法的选择表达式，落空时以 `EMPTY_SELECTION` 拒绝；输出边长超过 1024px 时以 `RESOURCE_LIMIT_EXCEEDED` 加裁剪提示拒绝。
+
 ## 失败时如何返回
 
 工具失败时会设置 `isError: true`，内容是放在 `content[0].text` 中的 JSON 字符串：
@@ -442,7 +489,8 @@ isError: true
 - **没有逐像素工具。** 不存在 `set_pixel`；像素工作要通过 ASCII Grid、批处理操作数组或内联的 `.mcpx` 文本来做。
 - **只接受显式路径，不覆盖，不建目录。** 目标已存在是 `OUTPUT_EXISTS`，缺少上级目录是 `FILESYSTEM_ERROR`。错误消息仍会提到 `--force`／`--mkdir`，但通过 MCP 无法传入这两个标志，请改用新路径，或自行创建目录。
 - **省略输出路径会内联产物。** 没有输出路径时，结果会带 `pngBase64`（PNG）或 `mcpxText`（`.mcpx`），而不写入文件。这是逐个产物决定的：只给 `outputPngPath` 会写出 PNG，并仍在结果中内联 `.mcpx` 文本。
-- **与 CLI 完全对等。** 二十个工具覆盖素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证（含依赖／原版解析与 GUI 精灵图缩放）；版本目标设置通过 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 传入。
+- **与 CLI 完全对等。** 二十一个工具覆盖素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证（含依赖／原版解析与 GUI 精灵图缩放）；版本目标设置通过 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 传入。
+- **查看与附图都是图片块，不另存副本。** `inspect_asset` 的 `view` 与 `apply_asset_operations` 的附图都不会再以 `pngBase64` 重复一份 PNG；字节走标准的 `type: "image"`、`mimeType: "image/png"` 块。查看缩放默认 1；长边自动放大（缩放前不足 128 才向 128 放大，上限 16）只适用于附图。超过 1024px 边长一律是 `RESOURCE_LIMIT_EXCEEDED`，不会默默缩图。
 - **`validate_asset` 只检查单个 PNG。** 资源包级与图集感知的验证，请用 `validate_pack_asset`。
 - **确定性只验证过演示输入。** 相同输入加相同参数，对演示用的 `px-8x8.png`／`sword.mcpx`／`v04-anim-frames/` 与一个干净的资源包产生了相同结果。其他输入与选项（WebP、`WxH` 尺寸、`region`、`atomic: false`、`animate` 的 `resize`）也演练过，但没有重跑确认输出是否一致。
 - **运行时。** MCP 路径只使用 `node:` 导入，所以打包后的 `dist` 可在纯 Node 下运行；CI 的 `node` job 使用 Node 22。需要 Node.js 22 或更新，`engines` 字段已声明 `>=22`。

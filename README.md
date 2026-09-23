@@ -93,7 +93,7 @@ bun run build
 ## For AI agents
 
 - [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt) — a compact index of the repository for agents.
-- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt) — the same material as a single file: install, the twenty MCP tools, batch operations, the error model, and the limits.
+- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt) — the same material as a single file: install, the twenty-one MCP tools, batch operations, the error model, and the limits.
 - [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md) — registration, one verbatim capture per MCP tool, and the error model.
 - [`docs/mcp-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-surface.md) — the frozen MCP surface: tool names, inputs, and the read/write contract.
 - [`AGENTS.md`](https://github.com/smile-minecraft/mc-asset/blob/main/AGENTS.md) — the rules for changing this repository.
@@ -269,6 +269,8 @@ mc-asset validate-pack ./MyResourcePack \
 
 `mc-asset` includes a native stdio Model Context Protocol server. Agents interact with the pixel engine directly through structured function calls without subprocess overhead.
 
+The running server exposes 21 tools. `scale_gui_asset` plus all authoring additions (`inspect_asset`, `apply_asset_operations.feedback`, `ellipse`/`polygonFill`/`strokeMask`) are unreleased source-tree additions under `[Unreleased]`; the latest published release is still v0.3.1.
+
 ### Exposed MCP Tools
 
 | Tool | Capability |
@@ -283,6 +285,7 @@ mc-asset validate-pack ./MyResourcePack \
 | `import_asset` | Decodes raster inputs (PNG, JPEG, WebP) into the pixel canvas with an optional batch. |
 | `build_asset` | Builds `.mcpx` sources into PNG bytes or re-serialized source with an optional batch. |
 | `transform_asset` | Applies one geometry operation (flip, rotate, crop, pad, resize, translate) to a raster or `.mcpx` input. |
+| `scale_gui_asset` | Scales a GUI sprite with the mcmeta stretch/tile/nine_slice mapping; PNG only. |
 | `quantize_asset` | Reduces distinct colors to a target count. |
 | `cleanup_asset` | Detects or fixes pixel defects (`isolated`, `noise`, `cluster`, `fringe`, `outlier`, `hole`, `aa`). |
 | `palette_asset` | Read-only palette `extract` / `inspect` reports (unique colors, distribution, roles, contrast). |
@@ -292,6 +295,11 @@ mc-asset validate-pack ./MyResourcePack \
 | `preview_asset` | `ascii` / `palette-map` reports, `scale` and `nine-slice` guide PNGs. |
 | `animate_asset` | Animation `pack` / `unpack` / `reorder` / `resize` / `validate` / `preview` over frame sets. |
 | `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, version targeting. |
+| `inspect_asset` | Read-only `structure` (layers, regions, color usage, overlaps) or `view` (composited PNG image block plus metadata); takes `inputPath`. |
+
+`inspect_asset` has two modes. `structure` reports layers (bounds, area, visibility, raw RGBA color usage), regions (identity, bounds, area only), and overlaps. `view` returns the composited PNG as a standard image block plus six-key metadata, with optional `crop` and `scale` (integer 1–16, default 1). Outputs wider than 1024px are refused with `RESOURCE_LIMIT_EXCEEDED` and a crop hint; the small-image auto-scale applies to apply feedback only, never to inspect view. Image bytes travel as `type: "image"` and are not duplicated in the text block.
+
+`apply_asset_operations` accepts an optional `feedback` object (`image`: `none` / `full` / `changed`; `scale` 1–16; `crop` selection expression; `diff` `none` / `summary`). Omitting it keeps the legacy output byte-for-byte.
 
 ### Configuration
 
@@ -362,6 +370,7 @@ Add to your MCP configuration:
 | **Generation & Tiles** | `generate <pattern>` | Deterministic procedural texture generation (`--seed <int>`). |
 | | `tile <input>` | Seam measurement and automatic tile correction. |
 | | `preview <input>` | Visual previews: `--ascii`, `--palette-map`, `--scale <N>`, `--nine-slice`. |
+| | `gui-scale <input>` | Scales a GUI sprite to `--size <N\|WxH>` with the mcmeta stretch/tile/nine_slice mapping. |
 | **Animation** | `animate pack` | Packs frame directory into sprite sheet. |
 | | `animate unpack` | Unpacks sprite sheet into frame directory. |
 | | `animate reorder` | Re-sequences animation frames. |
@@ -369,6 +378,7 @@ Add to your MCP configuration:
 | | `animate validate`| Validates frame counts and layout against `.mcmeta`. |
 | | `animate preview` | ASCII or diagnostic preview of animation sequence. |
 | **Validation** | `analyze <image>` | Read-only metric analysis (colors, alpha, dimensions). |
+| | `inspect <input>` | Read-only structure report or composited view (`--mode structure\|view`, `--crop`, `--scale`). |
 | | `validate <asset>` | Validates single asset texture and optional `.mcmeta`. |
 | | `validate-pack <path>`| Validates entire resource pack root directory. |
 | **Agent Interface** | `mcp` | Starts the stdio MCP server. |
@@ -391,6 +401,9 @@ The `import`, `render`, and `build` commands support batch pixel edits via `--op
 
 - **Atomicity**: Execution is all-or-nothing. If an operation fails (e.g. out of bounds), all preceding operations in the batch roll back.
 - **Color Values**: Accepts `transparent`, `#RRGGBB`, or `#RRGGBBAA`.
+- **Vocabulary**: 25 typed variants, including 9 pixel operations (`setPixel`, `clearPixel`, `drawLine`, `drawRect`, `fillRect`, `floodFill`, `ellipse`, `polygonFill`, `strokeMask`) plus layer, region, `stampRect`, and `regionFromSelection` operations. The full per-type table lives in `docs/cli-surface.md`.
+- **Compact shapes**: `ellipse` takes `rect` plus `color` plus `mode` (`fill` / `outline`); `polygonFill` takes integer `[x, y]` `points` plus `color`, at most 4096 points with no self-intersection and no holes; `strokeMask` takes `layerId` plus a `source` selection plus `color`, with an optional `selection` clip. A 4097-point polygon fails with `RESOURCE_LIMIT_EXCEEDED` before point mapping; a self-intersecting ring fails with `SELF_INTERSECTING_POLYGON`.
+- **Selection**: Pixel operations accept an optional `selection` expression; an empty match refuses the write with `EMPTY_SELECTION` and rolls the batch back.
 
 ---
 

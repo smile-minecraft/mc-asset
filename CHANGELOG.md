@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `validate-pack` resolution layers (`--vanilla` / `--dependency`), `coverage` reports, and `PACK_UNRESOLVED_EXTERNAL` / `PACK_COVERAGE_SKIPPED` diagnostics.
 - Sprite-ID-centered atlas validation (directory / single / filter / paletted_permutations) and `PACK_GUI_SCALING_BORDER`.
 - Resource reference graph: texture variable expansion, blockstates / items tracing, `PACK_REFERENCE_CYCLE`.
+- `inspect` top-level command and `inspect_asset` MCP tool (twenty to twenty-one tools): read-only `structure` (layers, regions, color usage, overlaps) and `view` (composited PNG image block plus metadata) over `.mcpx` or raster inputs.
+- Optional `feedback` on `apply_asset_operations` (`image` none/full/changed, `scale` 1–16, `crop`, `diff` none/summary); absent feedback keeps the legacy output byte-for-byte, and included images travel as MCP `type:image` blocks without duplicated bytes.
+- Compact drawing operations `ellipse`, `polygonFill`, and `strokeMask` (25 typed batch variants with 9 pixel operations), with `SELF_INTERSECTING_POLYGON` for self-intersecting rings and `RESOURCE_LIMIT_EXCEEDED` beyond 4096 polygon points.
 - Five-stage pixelize pipeline for the item preset.
 
 ### Changed

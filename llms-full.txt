@@ -2,7 +2,7 @@
 
 > mc-asset is a pixel-native 2D asset engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs. It turns raster references, hand-authored ASCII grids, and editable `.mcpx` sources into byte-reproducible PNG textures, animation sheets, palette reports, and validated resource packs — for human creators and AI coding agents.
 
-This file collects, in one place, what an agent needs to use the tool: install, registration, the twenty MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest.
+This file collects, in one place, what an agent needs to use the tool: install, registration, the twenty-one MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest. `scale_gui_asset`, `inspect_asset`, the `feedback` object, and `ellipse`/`polygonFill`/`strokeMask` are branch additions under `[Unreleased]`; the latest published release is still v0.3.1.
 
 ## When to use it
 
@@ -68,7 +68,7 @@ check the client's own documentation when unsure. The guide at
 `docs/mcp-guide.md` carries per-client examples (Claude Code, Claude Desktop,
 Cursor, VS Code, Cline, OpenCode).
 
-## The twenty MCP tools
+## The twenty-one MCP tools (21 tools, not 25 — 25 is the batch-operation variant count)
 
 | Tool | What it does | Required inputs |
 |---|---|---|
@@ -92,12 +92,17 @@ Cursor, VS Code, Cline, OpenCode).
 | `preview_asset` | `ascii` / `palette-map` reports, or `scale` / `nine-slice` guide PNGs. | `inputPath`, `mode` |
 | `animate_asset` | Animation sheets: `pack`, `unpack`, `reorder`, `resize`, `validate`, `preview`. | `mode` + that mode's input path (`layout` for `pack` / `unpack` / `preview`) |
 | `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, dependency/vanilla resolution, version targeting, with a coverage object in the report. | `packPath` |
+| `inspect_asset` | Read-only `structure` (layers with bounds/area/visibility/raw RGBA color usage, regions with identity/bounds/area only, overlaps) or `view` (composited PNG image block plus six-key metadata). | `inputPath`, `mode` (`structure` / `view`; view-only `crop` and `scale`) |
+
+`inspect_asset` takes `inputPath` (an `.mcpx` source or a raster image; raster reads as a single base layer) plus `mode`. `structure` takes no `crop` or `scale`. `view` accepts an optional `crop` selection expression and an optional integer `scale` 1–16 (default 1, nearest). The view returns the composited PNG as a standard image block (`type: "image"`, `mimeType: "image/png"`) plus metadata, with no duplicate `pngBase64` in the text block. Outputs wider than the 1024px edge are `RESOURCE_LIMIT_EXCEEDED` with a crop hint. The small-image auto-scale (a pre-scale long edge below 128 scales up toward 128, capped at 16) applies to `apply_asset_operations` feedback images only, never to inspect view.
 
 Required-input notes that the schema alone does not show: `pixelize_asset`
 raises `INVALID_ARGUMENT` when `size` is omitted, and `animate_asset` requires
 `layout` for `pack`, `unpack`, and `preview`. `transform_asset` cannot combine
 a `selection` with a geometry operation (`ARGUMENT_CONFLICT`), and
-`material_asset` requires `name` only for `show`.
+`material_asset` requires `name` only for `show`. `inspect_asset` `structure`
+refuses `crop`/`scale` with `INVALID_ARGUMENT`; an empty view crop is
+`EMPTY_SELECTION`.
 
 ## Batch operations
 
@@ -115,17 +120,41 @@ bare array or an `{"operations": [...]}` envelope.
 ]
 ```
 
-There are twenty operation `type` values: `setPixel`, `clearPixel`, `drawLine`,
-`drawRect`, `fillRect`, `floodFill`, `createLayer`, `removeLayer`,
-`renameLayer`, `reorderLayer`, `duplicateLayer`, `mergeLayer`, `clearLayer`,
-`fillLayer`, `moveLayer`, `createRegion`, `removeRegion`, `renameRegion`,
-`reorderRegion`, and `setRegionPixel`. Each object carries its per-type
+There are twenty-five operation `type` values: the nine pixel operations
+`setPixel`, `clearPixel`, `drawLine`, `drawRect`, `fillRect`, `floodFill`,
+`ellipse`, `polygonFill`, and `strokeMask`, plus layer operations
+(`createLayer`, `removeLayer`, `renameLayer`, `reorderLayer`,
+`duplicateLayer`, `mergeLayer`, `clearLayer`, `fillLayer`, `moveLayer`),
+region operations (`createRegion`, `removeRegion`, `renameRegion`,
+`reorderRegion`, `setRegionPixel`), `stampRect`, and `regionFromSelection`.
+Each object carries its per-type
 arguments; colors are `transparent`, `#RRGGBB`, or `#RRGGBBAA`. Every operation
 accepts an optional string `id`, unique within one batch.
 
 Execution is atomic: with `atomic` left at its default `true`, the first failing
-operation rolls the whole batch back. The full per-type parameter table lives in
+operation rolls the whole batch back. With `atomic: false` every operation runs
+and the result reports per-operation applied/failed statuses instead. The nine
+pixel operations accept an optional `selection` expression; only selected pixels
+are written and every unselected raw byte is restored verbatim, including hidden
+RGB under alpha 0. A selection that matches no pixels refuses the write with
+`EMPTY_SELECTION` and rolls the batch back. The full per-type parameter table lives in
 the “Batch Operations Specification” section of `docs/cli-surface.md`.
+
+Compact shapes: `ellipse` takes `rect` plus `color` plus `mode` (`fill` /
+`outline`); `polygonFill` takes integer `[x, y]` `points` plus `color`, at most
+4096 points with no self-intersection and no holes; `strokeMask` takes `layerId`
+plus a `source` selection plus `color`, with an optional `selection` clip. A
+4097-point polygon fails with `RESOURCE_LIMIT_EXCEEDED` before point mapping; a
+self-intersecting ring fails with `SELF_INTERSECTING_POLYGON`.
+
+Optional apply feedback: `apply_asset_operations` accepts an optional `feedback`
+object (`image`: `none` / `full` / `changed`; `scale`: integer 1–16; `crop`:
+selection expression; `diff`: `none` / `summary`). Absent `feedback` keeps the
+output fields and bytes exactly as before. With `feedback`, an included image
+travels as a standard image content block (`type: "image"`,
+`mimeType: "image/png"`) with no duplicate bytes in the text block; `changed`
+renders the composited change bounds (the crop is ignored) and reports
+`noVisibleChange` instead of an image when nothing visible moved.
 
 ## How failures come back
 
@@ -219,4 +248,4 @@ MCP — deterministic generation and whole-pack validation:
 ---
 
 Authoritative sources: `docs/mcp-surface.md`, `docs/cli-surface.md`, and
-`docs/mcp-guide.md`. Last updated 2026-09-21.
+`docs/mcp-guide.md`. Last updated 2026-09-23.

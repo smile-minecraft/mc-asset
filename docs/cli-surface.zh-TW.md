@@ -6,6 +6,8 @@
 
 全域行為遵循確定性標準：通道分工、`OUTPUT_EXISTS`／`--force`／`--mkdir`、原子寫入，以及 `--force` 與 `--in-place` 互斥。狀態碼由 `src/core/errors.ts` 的錯誤碼註冊表統一定義。
 
+最新發布版本仍是 `v0.3.1`。目前源碼樹多出的 CLI 內容——頂層 `inspect` 指令（`structure`／`view`）、`gui-scale` 指令、選取範圍的 JSON AST 寫法、`ellipse`／`polygonFill`／`strokeMask`／`stampRect`／`regionFromSelection` 批次操作，以及 `feedback` 相關說明——都尚未發布，`v0.3.1` 不包含它們。
+
 ---
 
 ## 全域旗標
@@ -77,7 +79,7 @@ transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
 ```
 
 - 每次呼叫只能使用**一個**幾何旗標，同時使用多個會回報 `ARGUMENT_CONFLICT`。
-- `--selection` 將操作限定在 `rect:x,y,w,h` 或 `region:id`。幾何操作與 `--selection` 併用會回報 `ARGUMENT_CONFLICT`。
+- `--selection` 將操作限定在選取範圍表示式：`all`、`rect:x,y,w,h`、`region:id`、`alpha[:layer]`、`color[:layer]:r,g,b,a`、`connected[:layer]:x,y`，或 JSON 表示式物件 `{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}`（以 `{` 開頭走 JSON 路徑，其餘解析為原子）。JSON 表示式寫法尚未發布，`v0.3.1` 不包含。幾何操作與 `--selection` 併用會回報 `ARGUMENT_CONFLICT`。
 
 ---
 
@@ -128,7 +130,7 @@ pixelize <image> --size <N|WxH> [--preset <item|block|gui|particle|generic>] <fi
 | `tile <input>` | PNG、JPEG、WebP、`.mcpx` | 僅報告，或 PNG | 接縫分析、邊緣重複分析，或平鋪修復與預覽。 |
 | `generate <pattern>` | 無 | PNG 和／或 `.mcpx` | 確定性的程序化材質產生器。 |
 | `preview <input>` | PNG、JPEG、WebP、`.mcpx` | 僅報告，或 PNG | ASCII 預覽、調色盤對照、九宮格參考線，或最近鄰放大。 |
-| `gui-scale <input>` | PNG、JPEG、WebP、`.mcpx` | PNG | 以 mcmeta 的 stretch／tile／nine_slice 映射，把 GUI 精靈圖縮放到明確的目標尺寸。 |
+| `gui-scale <input>` | PNG、JPEG、WebP、`.mcpx` | PNG | 以 mcmeta 的 stretch／tile／nine_slice 映射，把 GUI 精靈圖縮放到明確的目標尺寸（尚未發布，`v0.3.1` 不包含）。 |
 
 ```text
 tile     <input> [--preview <2x2|4x4|8x8>] [--edge-match <axis>] [--brightness-match <axis>]
@@ -148,7 +150,7 @@ gui-scale <input> --size <N|WxH> [--mcmeta <path>]
   - `--palette-map`：輸出 JSON 調色盤索引。
   - `--scale <N>`：以最近鄰法放大並輸出 PNG。
   - `--nine-slice`：依 `.mcmeta` 評估 GUI 九宮格邊界，並附視覺參考線。
-- `gui-scale` 以 `.mcmeta` 的 `gui.scaling`（stretch／tile／nine_slice）規則，把 GUI 精靈圖對應到明確的目標尺寸：
+- `gui-scale`（尚未發布，`v0.3.1` 不包含）以 `.mcmeta` 的 `gui.scaling`（stretch／tile／nine_slice）規則，把 GUI 精靈圖對應到明確的目標尺寸：
   - `--mcmeta` 必須是明確路徑，絕不推導同名檔；省略即為 `stretch`。
   - 輸出只有 PNG。
   - 九宮格邊框不合法為 `INVALID_MCMETA`（狀態碼 2）。
@@ -188,15 +190,17 @@ animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--colum
 | 指令 | 輸入 | 輸出 | 說明 |
 |---|---|---|---|
 | `analyze <image>` | PNG、JPEG、WebP | 僅報告 | 結構與色彩指標（預測分類）。 |
+| `inspect <input>` | PNG、JPEG、WebP、`.mcpx` | 僅報告（`--json` 的 view 另附 PNG 位元組） | 凍結的結構報告或合成後的 view（唯讀；尚未發布，`v0.3.1` 不包含）。 |
 | `validate <asset>` | 素材檔（PNG） | 僅報告（有缺陷時狀態碼 3） | 驗證單一素材材質與選用的 `.mcmeta`。 |
 | `validate-pack <path>` | 資源包根目錄 | 僅報告（有缺陷時狀態碼 3） | 完整掃描資源包的完整性、命名空間、模型、材質與圖集。 |
 
 ```text
 analyze       <image> [--profile <p>] [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+inspect       <input> --mode <structure|view> [--crop <scope>] [--scale <N>] [--json]
 validate      <asset> [--profile <p>] [--minecraft-version <v>] [--resource-pack-version <n>]
                       [--mcmeta <path>] [--json]
 validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
-                       [--vanilla <path>] [--dependency <path>]... [--json]
+                      [--vanilla <path>] [--dependency <path>]... [--json]
 ```
 
 - 驗證的狀態碼：通過為 0；驗證檢查失敗為 3（`VALIDATION_FAILED`）；呼叫語法錯誤為 2；檔案系統錯誤為 4。
@@ -206,6 +210,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
 - `--vanilla`：呼叫端提供的原版資源樹（pack 根目錄形狀，含 `assets/`）。提供後 `minecraft` 命名空間的參照會在該樹中確認；未提供時回報 `PACK_UNRESOLVED_EXTERNAL` warning 並記入 coverage，不再直接判為缺失。
 - `--dependency`：依賴資源包的根目錄，可重複；第一個優先序最高。
 - coverage：`validate` 與 `validate-pack` 的報告都帶 `coverage: {status, skipped}`；`partial` 表示有檢查因故略過（例如 `vanilla-not-provided`、`unsupported-source-type`、`unsupported-regex`、`unknown-node-type`、`renderer-fields-not-interpreted`、`version-undetermined`、`model-documents-not-loaded`），每個 skip 都帶 `kind`／`reason`／`target`。coverage 不改變狀態碼（通過仍為 0、失敗仍為 3）。texture variable 的解析只讀當前包的模型文件；超出該範圍的變數以 `model-documents-not-loaded` coverage 回報，不跨依賴或原版包解析。
+- `inspect` 尚未發布（`v0.3.1` 不包含），為唯讀，不接受檔案旗標（`INVALID_ARGUMENT`）：`--mode structure`（預設）回報圖層（id、名稱、索引、原始 alpha 邊界、面積、可見性、不透明度、混合模式、原始 RGBA 色彩用量，含 alpha 為 0 下隱藏的色彩，截斷至穩定的前 16 色）、區域（id、名稱、索引、邊界，只報面積）與重疊（圖層方框交集加實際區域遮罩交集）；`--mode view` 以 `--crop <scope>`（選取範圍表示式；空匹配為 `EMPTY_SELECTION`）與 `--scale <N>`（整數 1–16，最近鄰；預設 1）算繪合成像素，在 `--json` 下回傳六鍵 metadata（`mode`、`sourceDimensions`、`crop`、`scale`、`outputDimensions`、`colorFormat`）加 `pngBase64`。長邊自動縮放（縮放前長邊低於 128 時往 128 補整數倍，上限 16）只適用於尚未發布的 `apply_asset_operations` `feedback` 圖，不適用 `inspect view`。輸出任一邊超過 1024px 時以 `RESOURCE_LIMIT_EXCEEDED` 拒絕並提示改用較小的 crop，不會靜默縮小。頂層 `inspect` 與 `palette inspect`（調色盤特徵）是不同入口，不要混淆。
 
 ---
 
@@ -215,7 +220,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
 mc-asset mcp
 ```
 
-啟動原生 Model Context Protocol（MCP）stdio 伺服器，供 LLM Agent 整合，提供 20 個原生工具，不需要另外啟動子行程：
+啟動原生 Model Context Protocol（MCP）stdio 伺服器，供 LLM Agent 整合，提供 21 個原生工具，不需要另外啟動子行程：
 - `analyze_asset`
 - `pixelize_asset`
 - `render_pixel_asset`
@@ -236,6 +241,7 @@ mc-asset mcp
 - `animate_asset`
 - `validate_pack_asset`
 - `scale_gui_asset`
+- `inspect_asset`
 
 ---
 
@@ -251,20 +257,30 @@ mc-asset mcp
   { "type": "drawRect", "rect": { "x": 2, "y": 2, "width": 4, "height": 4 }, "color": "#0000FFFF" },
   { "type": "fillRect", "rect": { "x": 8, "y": 8, "width": 4, "height": 4 }, "color": "#FFFF00FF" },
   { "type": "floodFill", "x": 3, "y": 3, "color": "#FF00FFFF" },
-  { "type": "clearPixel", "x": 0, "y": 0 }
+  { "type": "clearPixel", "x": 0, "y": 0 },
+  { "type": "ellipse", "rect": { "x": 1, "y": 1, "width": 6, "height": 4 }, "color": "#FF0000FF", "mode": "fill" },
+  { "type": "polygonFill", "points": [[0, 0], [4, 0], [2, 3]], "color": "#00FF00FF" },
+  { "type": "strokeMask", "layerId": "base", "source": "alpha:base", "color": "#FFFFFFFF" }
 ]
 ```
 
-同樣的 JSON 形狀也適用於 MCP 的 `apply_asset_operations`：可使用裸陣列或 `{"operations": [...]}` 包裹；空陣列是合法的無操作。每個操作都可附選用的字串 `id`（同一批次內不可重複）。單圖層畫布可省略 `layerId`（預設為唯一圖層）；多圖層畫布必須明確指定。色彩為 `transparent`、`#RRGGBB` 或 `#RRGGBBAA`；座標皆為整數，不做四捨五入。
+同樣的 JSON 形狀也適用於 MCP 的 `apply_asset_operations`：可使用裸陣列或 `{"operations": [...]}` 包裹；空陣列是合法的無操作。每個操作都可附選用的字串 `id`（同一批次內不可重複）。單圖層畫布可省略 `layerId`（預設為唯一圖層）；多圖層畫布必須明確指定（`regionFromSelection`、`mergeLayer` 與區域操作不接受 `layerId`）。色彩為 `transparent`、`#RRGGBB` 或 `#RRGGBBAA`；座標皆為整數，不做四捨五入。
+
+九個像素操作都可附選用的 `selection`（選取範圍表示式的原子字串或物件，文法與 `--selection` 相同）。只有被選中的像素會寫入；未被選中的原始位元組原樣保留，含 alpha 為 0 下隱藏的 RGB。`fillRect` 在有 `selection` 時可省略 `rect`（填滿範圍取選取範圍的邊界框，再以選取範圍裁剪）。新形狀遵守凍結的整數幾何與選取裁剪（三者皆尚未發布，`v0.3.1` 不包含）：`ellipse` 沿 `rect` 內接的橢圓填滿或描邊（`mode` 必填，`fill` 或 `outline`）；`polygonFill` 填滿 `points` 圍出的多邊形；`strokeMask` 在 `layerId` 上描出 `source` 選取讀取範圍的輪廓，不繪製範圍本身。選取範圍一個像素都沒命中時，以 `EMPTY_SELECTION` 拒絕寫入並回復整批；`quantize`／`cleanup`／`recolor` 的 `--selection` 路徑維持既有的還原行為。
+
+選取範圍表示式可寫原子（`all`、`rect:x,y,w,h`、`region:id`、`alpha[:layer]`、`color[:layer]:r,g,b,a`、`connected[:layer]:x,y`）或 JSON AST 物件（`{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}`），深度上限 32、節點上限 1024。JSON AST 物件寫法尚未發布，`v0.3.1` 不包含。
 
 | `type` | 必填鍵 | 選填鍵 | 範例 |
 |---|---|---|---|
-| `setPixel` | `x`、`y`、`color` | `layerId`、`id` | `{"type": "setPixel", "x": 0, "y": 0, "color": "#FF0000FF"}` |
-| `clearPixel` | `x`、`y` | `layerId`、`id` | `{"type": "clearPixel", "x": 0, "y": 0}` |
-| `drawLine` | `from`、`to`、`color` | `layerId`、`id` | `{"type": "drawLine", "from": [0, 0], "to": [15, 15], "color": "#00FF00FF"}` |
-| `drawRect` | `rect`、`color` | `layerId`、`id` | `{"type": "drawRect", "rect": {"x": 2, "y": 2, "width": 4, "height": 4}, "color": "#0000FFFF"}` |
-| `fillRect` | `rect`、`color` | `layerId`、`id` | `{"type": "fillRect", "rect": {"x": 8, "y": 8, "width": 4, "height": 4}, "color": "#FFFF00FF"}` |
-| `floodFill` | `x`、`y`、`color` | `layerId`、`id` | `{"type": "floodFill", "x": 3, "y": 3, "color": "#FF00FFFF"}` |
+| `setPixel` | `x`、`y`、`color` | `layerId`、`selection`、`id` | `{"type": "setPixel", "x": 0, "y": 0, "color": "#FF0000FF"}` |
+| `clearPixel` | `x`、`y` | `layerId`、`selection`、`id` | `{"type": "clearPixel", "x": 0, "y": 0}` |
+| `drawLine` | `from`、`to`、`color` | `layerId`、`selection`、`id` | `{"type": "drawLine", "from": [0, 0], "to": [15, 15], "color": "#00FF00FF"}` |
+| `drawRect` | `rect`、`color` | `layerId`、`selection`、`id` | `{"type": "drawRect", "rect": {"x": 2, "y": 2, "width": 4, "height": 4}, "color": "#0000FFFF"}` |
+| `fillRect` | `color`（有 `selection` 時可省略 `rect`） | `layerId`、`rect`、`selection`、`id` | `{"type": "fillRect", "rect": {"x": 8, "y": 8, "width": 4, "height": 4}, "color": "#FFFF00FF"}` |
+| `floodFill` | `x`、`y`、`color` | `layerId`、`selection`、`id` | `{"type": "floodFill", "x": 3, "y": 3, "color": "#FF00FFFF"}` |
+| `ellipse`（尚未發布） | `rect`、`color`、`mode`（`fill`／`outline`） | `layerId`、`selection`、`id` | `{"type": "ellipse", "rect": {"x": 1, "y": 1, "width": 6, "height": 4}, "color": "#FF0000FF", "mode": "fill"}` |
+| `polygonFill`（尚未發布） | `points`（`[x, y]` 整數對陣列）、`color` | `layerId`、`selection`、`id` | `{"type": "polygonFill", "points": [[0, 0], [4, 0], [2, 3]], "color": "#00FF00FF"}` |
+| `strokeMask`（尚未發布） | `layerId`、`source`（選取範圍表示式）、`color` | `selection`、`id` | `{"type": "strokeMask", "layerId": "base", "source": "alpha:base", "color": "#FFFFFFFF"}` |
 | `createLayer` | （無） | `layerId`（新 id）、`name`、`id` | `{"type": "createLayer", "layerId": "shade"}` |
 | `removeLayer` | `layerId` | `id` | `{"type": "removeLayer", "layerId": "shade"}` |
 | `renameLayer` | `layerId`、`name` | `id` | `{"type": "renameLayer", "layerId": "shade", "name": "shadow"}` |
@@ -279,10 +295,12 @@ mc-asset mcp
 | `renameRegion` | `regionId`、`name` | `id` | `{"type": "renameRegion", "regionId": "mask", "name": "cutout"}` |
 | `reorderRegion` | `regionId`、`toIndex` | `id` | `{"type": "reorderRegion", "regionId": "mask", "toIndex": 0}` |
 | `setRegionPixel` | `regionId`、`x`、`y`、`value` | `id` | `{"type": "setRegionPixel", "regionId": "mask", "x": 1, "y": 2, "value": 1}` |
+| `stampRect`（尚未發布） | `layerId`、`source`、`to`／`offset` 擇一 | `transform`（`flip`：`h`／`v`；`rotate`：`0`／`90`／`180`／`270`）、`merge`（預設 `replace`／`source-over`）、`carryRegions`（預設 false）、`selection`、`id` | `{"type": "stampRect", "layerId": "base", "source": "rect:8,8,8,8", "offset": {"dx": 0, "dy": 8}}` |
+| `regionFromSelection`（尚未發布） | `selection`、`mode`（`create`／`update`） | `regionId`、`name`、`id` | `{"type": "regionFromSelection", "selection": "alpha:base", "mode": "create", "regionId": "body"}` |
 
-`from`／`to` 為 `[x, y]` 整數對；`rect` 為 `{x, y, width, height}`，寬高至少為 1；`toIndex` 為 0 或正整數；`value` 為 `0`（外部）或 `1`（內部）。未知的 `type` 為 `INVALID_ARGUMENT`；重複的 `id` 為 `DUPLICATE_OPERATION_ID`。
+`from`／`to` 為 `[x, y]` 整數對；`rect` 為 `{x, y, width, height}`，寬高至少為 1；`toIndex` 為 0 或正整數；`value` 為 `0`（外部）或 `1`（內部）。`polygonFill` 最多 4096 個點，超過為 `RESOURCE_LIMIT_EXCEEDED`；自交的環為 `SELF_INTERSECTING_POLYGON`，孔洞不支援（巢狀的環會被視為各自獨立的輪廓）。`stampRect` 複製 `source` 讀取範圍而不清空它（`source` 決定讀什麼，`selection` 只裁剪寫入；`to` 固定變換後輸出的左上角，`offset` 相對來源邊界平移，兩者並存為 `ARGUMENT_CONFLICT`）。未知的 `type` 為 `INVALID_ARGUMENT`；重複的 `id` 為 `DUPLICATE_OPERATION_ID`。
 
-批次執行是原子的：只要有一個操作無效，就會回復所有變更。
+批次執行是原子的：只要有一個操作無效，就會回復所有變更。（MCP 的 `apply_asset_operations` 另接受 `atomic: false`，此時會跑完每個操作，以各操作的 applied／failed 狀態回報，不再回復。）
 
 ---
 
