@@ -38,6 +38,7 @@
 	"scripts": {
 		"test": "bun test",
 		"test:typecheck": "tsc --noEmit",
+		"check:docs": "node scripts/check-docs.mjs",
 		"lint": "biome check .",
 		"build": "node scripts/build.mjs",
 		"release": "node scripts/release-artifacts.mjs"

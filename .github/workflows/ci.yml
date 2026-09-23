@@ -17,6 +17,10 @@ jobs:
       - run: bun test
       - run: bun run test:typecheck
       - run: bun run lint
+      # Docs gate: links and heading anchors resolve, and release versions
+      # stay in CHANGELOG.md instead of spreading through the docs.
+      - name: docs check
+        run: node scripts/check-docs.mjs
       - run: bun run build
       # The bundle targets node; prove it loads outside Bun.
       - run: node -e "import('./dist/index.js').then((m) => { if (typeof m.VERSION !== 'string' || m.VERSION.length === 0) process.exit(1); console.log('dist VERSION:', m.VERSION); })"
