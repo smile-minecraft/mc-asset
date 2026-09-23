@@ -10,7 +10,7 @@ reimplements image logic.
 Tool names are frozen. Earlier drafts called the batch-edit tool
 `edit_asset`; the frozen name is `apply_asset_operations`.
 
-The latest published release is still `v0.3.1`, which expands Minecraft version support to `1.19.3`–`26.3`. The twelve tools (`import_asset` through `validate_pack_asset`; `palette_asset`, `material_asset`, `preview_asset`, and `animate_asset` merge CLI subcommands into a `mode` field) were added in `v0.3.0` for full CLI parity. The current source tree adds `scale_gui_asset` and the authoring additions (`inspect_asset`, the `apply_asset_operations` `feedback` object, the `ellipse` / `polygonFill` / `strokeMask` operations, and the JSON AST selection form) — all unreleased, so `v0.3.1` does not include them. A server built from the current source exposes all twenty-one tools.
+The latest published release is `v0.3.2` (2026-09-23), which expands Minecraft version support to `1.19.3`–`26.3`. The twelve tools (`import_asset` through `validate_pack_asset`; `palette_asset`, `material_asset`, `preview_asset`, and `animate_asset` merge CLI subcommands into a `mode` field) were added in `v0.3.0` for full CLI parity. The current source tree adds `scale_gui_asset` and the authoring additions (`inspect_asset`, the `apply_asset_operations` `feedback` object, the `ellipse` / `polygonFill` / `strokeMask` operations, and the JSON AST selection form) — all shipped with `v0.3.2`. A server built from the current source exposes all twenty-one tools.
 
 Capability base: full CLI parity — intake and source build, spatial
 transforms, palette and quantization, the deterministic pixelize

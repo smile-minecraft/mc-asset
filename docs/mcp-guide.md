@@ -8,10 +8,10 @@ surface — twenty-one tool names, their inputs, and the read/write contract —
 in `docs/mcp-surface.md`; the input fields are frozen in `src/mcp/schema.ts`.
 This guide covers registration, one capture per tool (image bytes are
 abbreviated where noted, never verbatim), the error model, and the limits.
-The latest published release remains `v0.3.1`; `scale_gui_asset` and the authoring additions in the
+The latest published release is `v0.3.2` (2026-09-23); `scale_gui_asset` and the authoring additions in the
 source tree (`inspect_asset`, the `apply_asset_operations` feedback object,
-and the `ellipse` / `polygonFill` / `strokeMask` operations) are unreleased,
-so `v0.3.1` does not include them. A server built from the current source exposes all twenty-one tools.
+and the `ellipse` / `polygonFill` / `strokeMask` operations) shipped with
+`v0.3.2`. A server built from the current source exposes all twenty-one tools.
 
 The server hangs directly off Core, so every tool runs the same engine the CLI
 commands use. Pixel-granularity authorship travels through the ASCII Grid

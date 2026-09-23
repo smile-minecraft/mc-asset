@@ -2,7 +2,7 @@
 
 > mc-asset is a pixel-native 2D asset engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs. It turns raster references, hand-authored ASCII grids, and editable `.mcpx` sources into byte-reproducible PNG textures, animation sheets, palette reports, and validated resource packs — for human creators and AI coding agents.
 
-This file collects, in one place, what an agent needs to use the tool: install, registration, the twenty-one MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest. `scale_gui_asset`, `inspect_asset`, the `feedback` object, and `ellipse`/`polygonFill`/`strokeMask` are branch additions under `[Unreleased]`; the latest published release is still v0.3.1.
+This file collects, in one place, what an agent needs to use the tool: install, registration, the twenty-one MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest. `scale_gui_asset`, `inspect_asset`, the `feedback` object, and `ellipse`/`polygonFill`/`strokeMask` shipped with v0.3.2; the latest published release is v0.3.2.
 
 ## When to use it
 

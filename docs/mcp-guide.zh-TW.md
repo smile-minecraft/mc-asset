@@ -2,7 +2,7 @@
 
 [English](mcp-guide.md) | [繁體中文](mcp-guide.zh-TW.md) | [简体中文](mcp-guide.zh-CN.md)
 
-`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十一個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。最新發布版本仍是 `v0.3.1`；源碼樹上的 `scale_gui_asset` 與創作新增功能（`inspect_asset`、`apply_asset_operations` 的 `feedback` 物件，以及 `ellipse`／`polygonFill`／`strokeMask` 操作）尚未發布，`v0.3.1` 不包含它們。由目前源碼建置的伺服器提供全部二十一個工具。
+`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十一個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。最新發布版本為 `v0.3.2`（2026-09-23）；源碼樹上的 `scale_gui_asset` 與創作新增功能（`inspect_asset`、`apply_asset_operations` 的 `feedback` 物件，以及 `ellipse`／`polygonFill`／`strokeMask` 操作）皆隨 `v0.3.2` 發布。由目前源碼建置的伺服器提供全部二十一個工具。
 
 伺服器直接掛在 Core 上，所以每個工具都跑與 CLI 指令相同的引擎。像素層級的創作，透過 ASCII Grid 文件、批次操作陣列，或內嵌回傳的可編輯 `.mcpx` 來源來完成；刻意不提供 `set_pixel` 工具。
 
