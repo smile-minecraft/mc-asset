@@ -192,9 +192,10 @@ export function duplicateLayer(
  * Composite one pixel of straight-alpha src-over. Same arithmetic as the
  * PNG flatten path: integer channels, half-up rounding, deterministic
  * across runtimes. A transparent source over a transparent destination
- * keeps the upper (source) hidden RGB verbatim.
+ * keeps the upper (source) hidden RGB verbatim. Exported so stampRect
+ * reuses the exact arithmetic instead of duplicating it.
  */
-function compositePixel(
+export function compositePixel(
 	src: Uint8Array,
 	srcOffset: number,
 	dst: Uint8Array,

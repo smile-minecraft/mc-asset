@@ -1,5 +1,6 @@
 import type { BatchOperation } from "../core/batch.ts";
 import { McAssetError } from "../core/errors.ts";
+import type { SelectionExpr } from "../core/selection.ts";
 import type { Rect, RGBA } from "../core/types.ts";
 
 /**
@@ -35,6 +36,8 @@ const KNOWN_TYPES: ReadonlySet<string> = new Set([
 	"renameRegion",
 	"reorderRegion",
 	"setRegionPixel",
+	"stampRect",
+	"regionFromSelection",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -253,6 +256,190 @@ function takeMaskValue(op: Record<string, unknown>, path: string): number {
 	return at;
 }
 
+function takeSelectionValue(value: unknown, path: string): SelectionExpr {
+	if (typeof value === "string") {
+		if (value.length === 0) {
+			throw invalid(
+				path,
+				"Selection must be a non-empty atom string or an expression object.",
+				value,
+			);
+		}
+		return value;
+	}
+	if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+		return value as SelectionExpr;
+	}
+	throw invalid(
+		path,
+		"Selection must be an atom string or an expression object with op and operands.",
+		value,
+	);
+}
+
+function takeRequiredSelection(
+	op: Record<string, unknown>,
+	path: string,
+	field: string,
+): SelectionExpr {
+	if (op[field] === undefined) {
+		throw invalid(
+			`${path}.${field}`,
+			`Operation needs ${field}: the SelectionExpr deciding the read scope.`,
+			op,
+		);
+	}
+	return takeSelectionValue(op[field], `${path}.${field}`);
+}
+
+function takeOptionalSelection(
+	op: Record<string, unknown>,
+	path: string,
+): SelectionExpr | undefined {
+	if (op.selection === undefined) {
+		return undefined;
+	}
+	return takeSelectionValue(op.selection, `${path}.selection`);
+}
+
+function takeToPoint(
+	op: Record<string, unknown>,
+	path: string,
+): { x: number; y: number } | undefined {
+	if (op.to === undefined) {
+		return undefined;
+	}
+	const raw = op.to;
+	if (!isRecord(raw)) {
+		throw invalid(
+			`${path}.to`,
+			"Destination to must be an object with x and y.",
+			raw,
+		);
+	}
+	return {
+		x: takeInt(raw.x, `${path}.to.x`, "Destination x"),
+		y: takeInt(raw.y, `${path}.to.y`, "Destination y"),
+	};
+}
+
+function takeOffsetPoint(
+	op: Record<string, unknown>,
+	path: string,
+): { dx: number; dy: number } | undefined {
+	if (op.offset === undefined) {
+		return undefined;
+	}
+	const raw = op.offset;
+	if (!isRecord(raw)) {
+		throw invalid(
+			`${path}.offset`,
+			"Destination offset must be an object with dx and dy.",
+			raw,
+		);
+	}
+	return {
+		dx: takeInt(raw.dx, `${path}.offset.dx`, "Offset dx"),
+		dy: takeInt(raw.dy, `${path}.offset.dy`, "Offset dy"),
+	};
+}
+
+function takeStampTransform(
+	op: Record<string, unknown>,
+	path: string,
+): { flip?: "h" | "v"; rotate?: 0 | 90 | 180 | 270 } | undefined {
+	if (op.transform === undefined) {
+		return undefined;
+	}
+	const raw = op.transform;
+	if (!isRecord(raw)) {
+		throw invalid(
+			`${path}.transform`,
+			"Stamp transform must be an object with optional flip and rotate.",
+			raw,
+		);
+	}
+	let flip: "h" | "v" | undefined;
+	if (raw.flip !== undefined) {
+		if (raw.flip !== "h" && raw.flip !== "v") {
+			throw invalid(
+				`${path}.transform.flip`,
+				'Stamp flip must be "h" or "v".',
+				raw.flip,
+			);
+		}
+		flip = raw.flip;
+	}
+	let rotate: 0 | 90 | 180 | 270 | undefined;
+	if (raw.rotate !== undefined) {
+		if (
+			raw.rotate !== 0 &&
+			raw.rotate !== 90 &&
+			raw.rotate !== 180 &&
+			raw.rotate !== 270
+		) {
+			throw invalid(
+				`${path}.transform.rotate`,
+				"Stamp rotate must be 0, 90, 180, or 270 clockwise.",
+				raw.rotate,
+			);
+		}
+		rotate = raw.rotate;
+	}
+	return {
+		...(flip !== undefined ? { flip } : {}),
+		...(rotate !== undefined ? { rotate } : {}),
+	};
+}
+
+function takeStampMerge(
+	op: Record<string, unknown>,
+	path: string,
+): "replace" | "source-over" | undefined {
+	if (op.merge === undefined) {
+		return undefined;
+	}
+	if (op.merge !== "replace" && op.merge !== "source-over") {
+		throw invalid(
+			`${path}.merge`,
+			'Stamp merge must be "replace" or "source-over".',
+			op.merge,
+		);
+	}
+	return op.merge;
+}
+
+function takeCarryRegions(
+	op: Record<string, unknown>,
+	path: string,
+): boolean | undefined {
+	if (op.carryRegions === undefined) {
+		return undefined;
+	}
+	if (typeof op.carryRegions !== "boolean") {
+		throw invalid(
+			`${path}.carryRegions`,
+			"Stamp carryRegions must be a boolean when provided.",
+			op.carryRegions,
+		);
+	}
+	return op.carryRegions;
+}
+
+function takeRegionMode(
+	op: Record<string, unknown>,
+	path: string,
+): "create" | "update" {
+	if (op.mode !== "create" && op.mode !== "update") {
+		throw invalid(
+			`${path}.mode`,
+			'regionFromSelection mode must be "create" or "update".',
+			op.mode,
+		);
+	}
+	return op.mode;
+}
+
 function takeRegionId(op: Record<string, unknown>, path: string): string {
 	const raw = op.regionId;
 	if (typeof raw !== "string" || raw === "") {
@@ -277,14 +464,19 @@ function parseOneOperation(
 	if (typeof rawType !== "string" || !KNOWN_TYPES.has(rawType)) {
 		throw invalid(
 			`${path}.type`,
-			`Unknown operation type: ${String(rawType)}. Pixel ops are setPixel, clearPixel, drawLine, drawRect, fillRect, floodFill; layer ops are createLayer, removeLayer, renameLayer, reorderLayer, duplicateLayer, mergeLayer, clearLayer, fillLayer, moveLayer; region ops are createRegion, removeRegion, renameRegion, reorderRegion, setRegionPixel. Geometry never enters the batch; use the transform command.`,
+			`Unknown operation type: ${String(rawType)}. Pixel ops are setPixel, clearPixel, drawLine, drawRect, fillRect, floodFill; layer ops are createLayer, removeLayer, renameLayer, reorderLayer, duplicateLayer, mergeLayer, clearLayer, fillLayer, moveLayer; region ops are createRegion, removeRegion, renameRegion, reorderRegion, setRegionPixel; local-edit ops are stampRect, regionFromSelection. Geometry never enters the batch; use the transform command.`,
 			rawType,
 		);
 	}
-	const layerId = takeLayerId(item, path, defaultLayerId);
 	const id = takeId(item, path);
+	// Operations without a top-level layerId (regionFromSelection, mergeLayer,
+	// and the region vocabulary) must parse on multi-layer canvases, so the
+	// layer default resolves lazily inside the branches that declare it.
+	const needLayerId = (): string => takeLayerId(item, path, defaultLayerId);
 	switch (rawType) {
-		case "setPixel":
+		case "setPixel": {
+			const layerId = needLayerId();
+			const selection = takeOptionalSelection(item, path);
 			return attachId(
 				{
 					type: "setPixel" as const,
@@ -292,22 +484,30 @@ function parseOneOperation(
 					x: takeInt(item.x, `${path}.x`, "Pixel x"),
 					y: takeInt(item.y, `${path}.y`, "Pixel y"),
 					color: takeColor(item.color, `${path}.color`),
+					...(selection !== undefined ? { selection } : {}),
 				},
 				id,
 			);
-		case "clearPixel":
+		}
+		case "clearPixel": {
+			const layerId = needLayerId();
+			const selection = takeOptionalSelection(item, path);
 			return attachId(
 				{
 					type: "clearPixel" as const,
 					layerId,
 					x: takeInt(item.x, `${path}.x`, "Pixel x"),
 					y: takeInt(item.y, `${path}.y`, "Pixel y"),
+					...(selection !== undefined ? { selection } : {}),
 				},
 				id,
 			);
+		}
 		case "drawLine": {
+			const layerId = needLayerId();
 			const from = takePoint(item.from, `${path}.from`, "Line from");
 			const to = takePoint(item.to, `${path}.to`, "Line to");
+			const selection = takeOptionalSelection(item, path);
 			return attachId(
 				{
 					type: "drawLine" as const,
@@ -317,31 +517,62 @@ function parseOneOperation(
 					x1: to.x,
 					y1: to.y,
 					color: takeColor(item.color, `${path}.color`),
+					...(selection !== undefined ? { selection } : {}),
 				},
 				id,
 			);
 		}
-		case "drawRect":
+		case "drawRect": {
+			const layerId = needLayerId();
+			const selection = takeOptionalSelection(item, path);
 			return attachId(
 				{
 					type: "drawRect" as const,
 					layerId,
 					rect: takeRect(item.rect, `${path}.rect`),
 					color: takeColor(item.color, `${path}.color`),
+					...(selection !== undefined ? { selection } : {}),
 				},
 				id,
 			);
-		case "fillRect":
+		}
+		case "fillRect": {
+			const layerId = needLayerId();
+			const selection = takeOptionalSelection(item, path);
+			if (item.rect === undefined) {
+				if (selection === undefined) {
+					// Same error as before the selection add-on: rect stays
+					// required when no selection backs the fill.
+					throw invalid(
+						`${path}.rect`,
+						"Rect must be an object with x, y, width, and height.",
+						item.rect,
+					);
+				}
+				return attachId(
+					{
+						type: "fillRect" as const,
+						layerId,
+						color: takeColor(item.color, `${path}.color`),
+						selection,
+					},
+					id,
+				);
+			}
 			return attachId(
 				{
 					type: "fillRect" as const,
 					layerId,
 					rect: takeRect(item.rect, `${path}.rect`),
 					color: takeColor(item.color, `${path}.color`),
+					...(selection !== undefined ? { selection } : {}),
 				},
 				id,
 			);
-		case "floodFill":
+		}
+		case "floodFill": {
+			const layerId = needLayerId();
+			const selection = takeOptionalSelection(item, path);
 			return attachId(
 				{
 					type: "floodFill" as const,
@@ -349,9 +580,11 @@ function parseOneOperation(
 					x: takeInt(item.x, `${path}.x`, "Pixel x"),
 					y: takeInt(item.y, `${path}.y`, "Pixel y"),
 					color: takeColor(item.color, `${path}.color`),
+					...(selection !== undefined ? { selection } : {}),
 				},
 				id,
 			);
+		}
 		case "createLayer": {
 			const createdId = takeOptionalId(item, "layerId", path, "Layer id");
 			const createdName = takeOptionalName(item, path, "Layer");
@@ -365,12 +598,15 @@ function parseOneOperation(
 			);
 		}
 		case "removeLayer":
-			return attachId({ type: "removeLayer" as const, layerId }, id);
+			return attachId(
+				{ type: "removeLayer" as const, layerId: needLayerId() },
+				id,
+			);
 		case "renameLayer":
 			return attachId(
 				{
 					type: "renameLayer" as const,
-					layerId,
+					layerId: needLayerId(),
 					name: takeName(item, path, "Layer"),
 				},
 				id,
@@ -379,12 +615,13 @@ function parseOneOperation(
 			return attachId(
 				{
 					type: "reorderLayer" as const,
-					layerId,
+					layerId: needLayerId(),
 					toIndex: takeToIndex(item, path),
 				},
 				id,
 			);
 		case "duplicateLayer": {
+			const layerId = needLayerId();
 			const copyId = takeOptionalId(item, "newLayerId", path, "New layer id");
 			const copyName = takeOptionalName(item, path, "Layer");
 			return attachId(
@@ -410,12 +647,15 @@ function parseOneOperation(
 			return attachId({ type: "mergeLayer" as const, sourceId, targetId }, id);
 		}
 		case "clearLayer":
-			return attachId({ type: "clearLayer" as const, layerId }, id);
+			return attachId(
+				{ type: "clearLayer" as const, layerId: needLayerId() },
+				id,
+			);
 		case "fillLayer":
 			return attachId(
 				{
 					type: "fillLayer" as const,
-					layerId,
+					layerId: needLayerId(),
 					color: takeColor(item.color, `${path}.color`),
 				},
 				id,
@@ -424,7 +664,7 @@ function parseOneOperation(
 			return attachId(
 				{
 					type: "moveLayer" as const,
-					layerId,
+					layerId: needLayerId(),
 					dx: takeInt(item.dx, `${path}.dx`, "Move dx"),
 					dy: takeInt(item.dy, `${path}.dy`, "Move dy"),
 				},
@@ -474,6 +714,53 @@ function parseOneOperation(
 				},
 				id,
 			);
+		case "stampRect": {
+			const layerId = needLayerId();
+			const source = takeRequiredSelection(item, path, "source");
+			const to = takeToPoint(item, path);
+			const offset = takeOffsetPoint(item, path);
+			if (to === undefined && offset === undefined) {
+				throw invalid(
+					`${path}.to`,
+					"stampRect needs to or offset for the destination origin.",
+					item,
+				);
+			}
+			const transform = takeStampTransform(item, path);
+			const merge = takeStampMerge(item, path);
+			const carryRegions = takeCarryRegions(item, path);
+			const selection = takeOptionalSelection(item, path);
+			return attachId(
+				{
+					type: "stampRect" as const,
+					layerId,
+					source,
+					...(to !== undefined ? { to } : {}),
+					...(offset !== undefined ? { offset } : {}),
+					...(transform !== undefined ? { transform } : {}),
+					...(merge !== undefined ? { merge } : {}),
+					...(carryRegions !== undefined ? { carryRegions } : {}),
+					...(selection !== undefined ? { selection } : {}),
+				},
+				id,
+			);
+		}
+		case "regionFromSelection": {
+			const selection = takeRequiredSelection(item, path, "selection");
+			const mode = takeRegionMode(item, path);
+			const regionId = takeOptionalId(item, "regionId", path, "Region id");
+			const name = takeOptionalName(item, path, "Region");
+			return attachId(
+				{
+					type: "regionFromSelection" as const,
+					selection,
+					mode,
+					...(regionId !== undefined ? { regionId } : {}),
+					...(name !== undefined ? { name } : {}),
+				},
+				id,
+			);
+		}
 		default:
 			return attachId(
 				{
@@ -493,7 +780,9 @@ function parseOneOperation(
  * bare array or an {"operations": [...]} envelope; an empty array is a
  * valid no-op. defaultLayerId backs a missing layerId (the caller passes
  * the sole layer id for single-layer canvases); without it a missing
- * layerId is INVALID_ARGUMENT.
+ * layerId is INVALID_ARGUMENT. Operations without a top-level layerId
+ * (regionFromSelection, mergeLayer, and the region vocabulary) never ask
+ * for one.
  */
 export function parseOperationsJson(
 	text: string,

@@ -1,6 +1,7 @@
 import { parseGridFile } from "../../src/cli/grid.ts";
 import { parseOperationsJson } from "../../src/cli/operations-json.ts";
-import { getPixel } from "../../src/core/canvas.ts";
+import { applyOperations } from "../../src/core/batch.ts";
+import { addLayer, createCanvas, getPixel } from "../../src/core/canvas.ts";
 import { McAssetError } from "../../src/core/errors.ts";
 
 /** Runner-agnostic assertion surface: bun:test and node:test entries adapt to this. */
@@ -156,6 +157,164 @@ export const CONVERT_CASES: ConvertCase[] = [
 					},
 				],
 				"typed fillRect",
+			);
+		},
+	},
+	{
+		name: "pixel op keeps its selection expression verbatim",
+		run: (check) => {
+			const ops = parseOperationsJson(
+				'[{"type": "fillRect", "rect": {"x": 0, "y": 0, "width": 2, "height": 2}, "color": "#00FF00FF", "selection": "region:blade"}]',
+				"base",
+			);
+			check.deepEqual(
+				(ops[0] as { selection?: unknown }).selection,
+				"region:blade",
+				"atom string kept",
+			);
+			const ast = parseOperationsJson(
+				'[{"type": "fillRect", "rect": {"x": 0, "y": 0, "width": 2, "height": 2}, "color": "#00FF00FF", "selection": {"op": "subtract", "operands": ["region:blade", "rect:0,0,1,1"]}}]',
+				"base",
+			);
+			check.deepEqual(
+				(ast[0] as { selection?: unknown }).selection,
+				{
+					op: "subtract",
+					operands: ["region:blade", "rect:0,0,1,1"],
+				},
+				"AST object kept",
+			);
+		},
+	},
+	{
+		name: "fillRect without a rect needs a selection",
+		run: (check) => {
+			expectCode(
+				check,
+				() =>
+					parseOperationsJson(
+						'[{"type": "fillRect", "color": "#00FF00FF"}]',
+						"base",
+					),
+				"INVALID_ARGUMENT",
+				"operations[0].rect",
+			);
+			const ops = parseOperationsJson(
+				'[{"type": "fillRect", "color": "#00FF00FF", "selection": "rect:0,0,2,2"}]',
+				"base",
+			);
+			check.equal(ops.length, 1, "selection-backed fillRect parses");
+		},
+	},
+	{
+		name: "stampRect parses source placement and merge",
+		run: (check) => {
+			const ops = parseOperationsJson(
+				'[{"type": "stampRect", "layerId": "base", "source": "rect:0,0,2,2", "offset": {"dx": 1, "dy": 0}, "merge": "replace"}]',
+				"base",
+			);
+			check.deepEqual(
+				ops,
+				[
+					{
+						type: "stampRect",
+						layerId: "base",
+						source: "rect:0,0,2,2",
+						offset: { dx: 1, dy: 0 },
+						merge: "replace",
+					},
+				],
+				"typed stampRect",
+			);
+			expectCode(
+				check,
+				() =>
+					parseOperationsJson(
+						'[{"type": "stampRect", "to": {"x": 2, "y": 2}}]',
+						"base",
+					),
+				"INVALID_ARGUMENT",
+				"operations[0].source",
+			);
+		},
+	},
+	{
+		name: "regionFromSelection needs no top-level layerId",
+		run: (check) => {
+			// Multi-layer canvases have no default layer; regionFromSelection
+			// carries no layerId by contract, so parsing must not ask for one.
+			const ops = parseOperationsJson(
+				'[{"type": "regionFromSelection", "selection": "rect:0,0,1,1", "mode": "create", "regionId": "body"}]',
+				undefined,
+			);
+			check.deepEqual(
+				ops,
+				[
+					{
+						type: "regionFromSelection",
+						selection: "rect:0,0,1,1",
+						mode: "create",
+						regionId: "body",
+					},
+				],
+				"typed regionFromSelection without layerId",
+			);
+			const regionOps = parseOperationsJson(
+				'[{"type": "removeRegion", "regionId": "body"}]',
+				undefined,
+			);
+			check.deepEqual(
+				regionOps,
+				[{ type: "removeRegion", regionId: "body" }],
+				"region ops take no layerId either",
+			);
+		},
+	},
+	{
+		name: "regionFromSelection parses and applies on a multi-layer canvas",
+		run: (check) => {
+			// The same parse entry the MCP handler uses: no default layer on
+			// a multi-layer canvas, and no top-level layerId by contract.
+			const ops = parseOperationsJson(
+				'[{"type": "regionFromSelection", "selection": "rect:0,0,2,2", "mode": "create", "regionId": "body"}]',
+				undefined,
+			);
+			const canvas = createCanvas(4, 4);
+			addLayer(canvas, { id: "a" });
+			addLayer(canvas, { id: "b" });
+			const report = applyOperations(canvas, ops);
+			check.equal(report.applied, 1, "applied with two layers present");
+			check.deepEqual(
+				canvas.regions.map((region) => region.id),
+				["body"],
+				"region created",
+			);
+			check.equal(canvas.regions[0]?.mask[0], 1, "mask set");
+			check.equal(
+				canvas.regions[0]?.mask[3 * 4 + 3],
+				0,
+				"outside the read scope stays clear",
+			);
+		},
+	},
+	{
+		name: "regionFromSelection parses selection with mode",
+		run: (check) => {
+			const ops = parseOperationsJson(
+				'[{"type": "regionFromSelection", "selection": "alpha:base", "mode": "create", "regionId": "body"}]',
+				"base",
+			);
+			check.deepEqual(
+				ops,
+				[
+					{
+						type: "regionFromSelection",
+						selection: "alpha:base",
+						mode: "create",
+						regionId: "body",
+					},
+				],
+				"typed regionFromSelection",
 			);
 		},
 	},

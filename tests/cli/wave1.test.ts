@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getPixel } from "../../src/core/canvas.ts";
+import { isPixelSelected, resolveSelection } from "../../src/core/selection.ts";
 import { decodePng } from "../../src/io/png.ts";
 import { parseMcpx } from "../../src/mcpx/index.ts";
 
@@ -281,6 +282,58 @@ describe("wave1 wiring via spawn", () => {
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
+	}, 30_000);
+
+	test("quantize --selection accepts new atoms and JSON expressions", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-w1-"));
+		try {
+			for (const [name, selection] of [
+				["qa.png", "alpha:base"],
+				[
+					"qe.png",
+					'{"op":"subtract","operands":["rect:0,0,4,4","rect:0,0,2,2"]}',
+				],
+			] as Array<[string, string]>) {
+				const out = join(dir, name);
+				const result = await runCli([
+					"quantize",
+					SWORD_MCPX,
+					"--colors",
+					"1",
+					"--selection",
+					selection,
+					"--output",
+					out,
+				]);
+				expect(result.code).toBe(0);
+				const before = parseMcpx(await readFile(SWORD_MCPX, "utf-8"));
+				const scope = resolveSelection(before, selection);
+				const after = decodePng(new Uint8Array(await readFile(out)));
+				for (let y = 0; y < 4; y += 1) {
+					for (let x = 0; x < 4; x += 1) {
+						if (!isPixelSelected(scope, before, x, y)) {
+							expect(getPixel(after.canvas, "base", x, y)).toEqual(
+								getPixel(before, "base", x, y),
+							);
+						}
+					}
+				}
+			}
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
+
+	test("pixelize --selection stays ARGUMENT_CONFLICT", async () => {
+		const result = await runCli([
+			"pixelize",
+			SWORD_MCPX,
+			"--selection",
+			"rect:0,0,2,2",
+			"--stdout",
+		]);
+		expect(result.code).toBe(2);
+		expect(combined(result)).toContain("ARGUMENT_CONFLICT");
 	}, 30_000);
 
 	test("cleanup without --fix writes the artifact unchanged", async () => {

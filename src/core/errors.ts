@@ -54,6 +54,7 @@ export type ErrorCode =
 	| "PACK_UNRESOLVED_EXTERNAL"
 	| "PACK_COVERAGE_SKIPPED"
 	| "PACK_REFERENCE_CYCLE"
+	| "EMPTY_SELECTION"
 	| "TRANSACTION_FAILED";
 
 export type FixedErrorCode = Exclude<ErrorCode, "TRANSACTION_FAILED">;
@@ -119,6 +120,8 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	PACK_COVERAGE_SKIPPED: 3,
 	// Reference cycles (parent chains, texture variables) fail the verdict.
 	PACK_REFERENCE_CYCLE: 3,
+	// A selection-scoped write whose read scope matched no pixels.
+	EMPTY_SELECTION: 2,
 };
 
 export function isErrorCode(value: unknown): value is ErrorCode {

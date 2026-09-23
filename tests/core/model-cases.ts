@@ -741,8 +741,9 @@ export const MODEL_CASES: ModelCase[] = [
 				["UNSUPPORTED_IMAGE_FORMAT", 5],
 				["UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT", 5],
 				["RESOURCE_LIMIT_EXCEEDED", 5],
+				["EMPTY_SELECTION", 2],
 			];
-			check.equal(expected.length, 33, "33 fixed codes in the table");
+			check.equal(expected.length, 34, "34 fixed codes in the table");
 			for (const [code, exit] of expected) {
 				check.equal(exitCodeForError(code), exit, `exit for ${code}`);
 			}

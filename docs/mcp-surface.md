@@ -71,8 +71,11 @@ is no `set_pixel` tool on purpose.
   `validate` / `preview`).
 - `apply_asset_operations` takes an array of operation objects, each
   with a `type` (the Core batch vocabulary: `setPixel`, `drawLine`,
-  `fillRect`, `floodFill`, layer and region operations, and the rest)
-  plus its per-type arguments. `atomic` defaults to true.
+  `fillRect`, `floodFill`, layer and region operations, `stampRect`,
+  `regionFromSelection`, and the rest) plus its per-type arguments.
+  `atomic` defaults to true. Pixel operations accept an optional
+  `selection` expression; an empty match refuses the write with
+  `EMPTY_SELECTION` and rolls the batch back.
 - The full per-type parameter table lives in the “Batch Operations Specification”
   section of [CLI Surface](cli-surface.md); both surfaces share that JSON shape.
 - `scale_gui_asset` takes `size` (`N` or `WxH`), an optional

@@ -510,7 +510,7 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--selection <scope>",
-			"Scope pixel writes (rect:<x>,<y>,<w>,<h> or region:<id>).",
+			"Scope pixel writes (rect:<x>,<y>,<w>,<h>, region:<id>, alpha:, color:, connected:, or a JSON expression starting with {).",
 		)
 		.action(
 			async (input: string, options: QuantizeOptions, command: Command) => {
@@ -551,7 +551,7 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--selection <scope>",
-			"Scope pixel writes (rect:<x>,<y>,<w>,<h> or region:<id>).",
+			"Scope pixel writes (rect:<x>,<y>,<w>,<h>, region:<id>, alpha:, color:, connected:, or a JSON expression starting with {).",
 		)
 		.action(
 			async (input: string, options: CleanupOptions, command: Command) => {
@@ -701,7 +701,7 @@ export function buildProgram(): Command {
 		)
 		.option(
 			"--selection <scope>",
-			"Scope pixel writes (rect:<x>,<y>,<w>,<h> or region:<id>).",
+			"Scope pixel writes (rect:<x>,<y>,<w>,<h>, region:<id>, alpha:, color:, connected:, or a JSON expression starting with {).",
 		)
 		.action(
 			async (source: string, options: RecolorOptions, command: Command) => {

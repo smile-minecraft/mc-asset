@@ -77,7 +77,7 @@ transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
 ```
 
 - Exactly **one** geometry flag allowed per invocation; combining multiple flags raises `ARGUMENT_CONFLICT`.
-- `--selection` scopes operations to `rect:x,y,w,h` or `region:id`. Geometry operations combined with `--selection` raise `ARGUMENT_CONFLICT`.
+- `--selection` scopes operations to a selection expression: `all`, `rect:x,y,w,h`, `region:id`, `alpha[:layer]`, `color[:layer]:r,g,b,a`, `connected[:layer]:x,y`, or a JSON expression object `{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}` (a leading `{` enters the JSON path; anything else parses as an atom). Geometry operations combined with `--selection` raise `ARGUMENT_CONFLICT`.
 
 ---
 
@@ -255,16 +255,18 @@ Format is JSON array of operations:
 ]
 ```
 
-The same JSON shape is accepted by `apply_asset_operations` on the MCP surface: a bare array or an `{"operations": [...]}` envelope; an empty array is a valid no-op. Every operation accepts an optional string `id` (unique within one batch). `layerId` defaults to the sole layer on single-layer canvases; set it explicitly when the canvas has more than one layer. Colors are `transparent`, `#RRGGBB`, or `#RRGGBBAA`; coordinates are integers, never rounded.
+The same JSON shape is accepted by `apply_asset_operations` on the MCP surface: a bare array or an `{"operations": [...]}` envelope; an empty array is a valid no-op. Every operation accepts an optional string `id` (unique within one batch). `layerId` defaults to the sole layer on single-layer canvases; set it explicitly when the canvas has more than one layer (`regionFromSelection`, `mergeLayer`, and the region operations take no `layerId`). Colors are `transparent`, `#RRGGBB`, or `#RRGGBBAA`; coordinates are integers, never rounded.
+
+The six pixel operations accept an optional `selection` (a selection-expression atom string or object, same grammar as `--selection`). Only selected pixels are written; every unselected raw byte is restored verbatim, including hidden RGB under alpha 0. `fillRect` may omit `rect` when `selection` is present (the fill covers the selection bounds, clipped by the selection). A selection that matches no pixels refuses the write with `EMPTY_SELECTION` and rolls the batch back; the `quantize` / `cleanup` / `recolor` `--selection` paths keep their existing restore behavior instead.
 
 | `type` | Required keys | Optional keys | Example |
 |---|---|---|---|
-| `setPixel` | `x`, `y`, `color` | `layerId`, `id` | `{"type": "setPixel", "x": 0, "y": 0, "color": "#FF0000FF"}` |
-| `clearPixel` | `x`, `y` | `layerId`, `id` | `{"type": "clearPixel", "x": 0, "y": 0}` |
-| `drawLine` | `from`, `to`, `color` | `layerId`, `id` | `{"type": "drawLine", "from": [0, 0], "to": [15, 15], "color": "#00FF00FF"}` |
-| `drawRect` | `rect`, `color` | `layerId`, `id` | `{"type": "drawRect", "rect": {"x": 2, "y": 2, "width": 4, "height": 4}, "color": "#0000FFFF"}` |
-| `fillRect` | `rect`, `color` | `layerId`, `id` | `{"type": "fillRect", "rect": {"x": 8, "y": 8, "width": 4, "height": 4}, "color": "#FFFF00FF"}` |
-| `floodFill` | `x`, `y`, `color` | `layerId`, `id` | `{"type": "floodFill", "x": 3, "y": 3, "color": "#FF00FFFF"}` |
+| `setPixel` | `x`, `y`, `color` | `layerId`, `selection`, `id` | `{"type": "setPixel", "x": 0, "y": 0, "color": "#FF0000FF"}` |
+| `clearPixel` | `x`, `y` | `layerId`, `selection`, `id` | `{"type": "clearPixel", "x": 0, "y": 0}` |
+| `drawLine` | `from`, `to`, `color` | `layerId`, `selection`, `id` | `{"type": "drawLine", "from": [0, 0], "to": [15, 15], "color": "#00FF00FF"}` |
+| `drawRect` | `rect`, `color` | `layerId`, `selection`, `id` | `{"type": "drawRect", "rect": {"x": 2, "y": 2, "width": 4, "height": 4}, "color": "#0000FFFF"}` |
+| `fillRect` | `color` (`rect` required unless `selection` is present) | `layerId`, `rect`, `selection`, `id` | `{"type": "fillRect", "rect": {"x": 8, "y": 8, "width": 4, "height": 4}, "color": "#FFFF00FF"}` |
+| `floodFill` | `x`, `y`, `color` | `layerId`, `selection`, `id` | `{"type": "floodFill", "x": 3, "y": 3, "color": "#FF00FFFF"}` |
 | `createLayer` | (none) | `layerId` (new id), `name`, `id` | `{"type": "createLayer", "layerId": "shade"}` |
 | `removeLayer` | `layerId` | `id` | `{"type": "removeLayer", "layerId": "shade"}` |
 | `renameLayer` | `layerId`, `name` | `id` | `{"type": "renameLayer", "layerId": "shade", "name": "shadow"}` |
@@ -279,8 +281,10 @@ The same JSON shape is accepted by `apply_asset_operations` on the MCP surface: 
 | `renameRegion` | `regionId`, `name` | `id` | `{"type": "renameRegion", "regionId": "mask", "name": "cutout"}` |
 | `reorderRegion` | `regionId`, `toIndex` | `id` | `{"type": "reorderRegion", "regionId": "mask", "toIndex": 0}` |
 | `setRegionPixel` | `regionId`, `x`, `y`, `value` | `id` | `{"type": "setRegionPixel", "regionId": "mask", "x": 1, "y": 2, "value": 1}` |
+| `stampRect` | `layerId`, `source`, one of `to` / `offset` | `transform` (`flip`: `h` / `v`; `rotate`: `0` / `90` / `180` / `270`), `merge` (`replace` default / `source-over`), `carryRegions` (default false), `selection`, `id` | `{"type": "stampRect", "layerId": "base", "source": "rect:8,8,8,8", "offset": {"dx": 0, "dy": 8}}` |
+| `regionFromSelection` | `selection`, `mode` (`create` / `update`) | `regionId`, `name`, `id` | `{"type": "regionFromSelection", "selection": "alpha:base", "mode": "create", "regionId": "body"}` |
 
-`from`/`to` are `[x, y]` integer pairs; `rect` is `{x, y, width, height}` with width and height at least 1; `toIndex` is 0 or a positive integer; `value` is `0` (outside) or `1` (inside). Unknown `type` values are `INVALID_ARGUMENT`; duplicate `id` values are `DUPLICATE_OPERATION_ID`.
+`from`/`to` are `[x, y]` integer pairs; `rect` is `{x, y, width, height}` with width and height at least 1; `toIndex` is 0 or a positive integer; `value` is `0` (outside) or `1` (inside). `stampRect` copies the `source` read scope without clearing it (`source` decides what is read, `selection` only clips the write; `to` pins the transformed output's top-left, `offset` shifts it relative to the source bounds, and passing both is `ARGUMENT_CONFLICT`). Unknown `type` values are `INVALID_ARGUMENT`; duplicate `id` values are `DUPLICATE_OPERATION_ID`.
 
 Batch execution is atomic: the first invalid operation rolls back all changes.
 

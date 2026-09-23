@@ -166,16 +166,26 @@ export {
 	recolorLayer,
 } from "./recolor.ts";
 export type {
+	EvaluatedSelection,
 	ResolvedSelection,
 	SelectedPoint,
+	SelectionAst,
+	SelectionEvaluateOptions,
+	SelectionExpr,
 	SelectionKind,
 } from "./selection.ts";
 export {
 	countSelectedPixels,
+	estimateSelectionScratchBytes,
+	evaluateSelectionExpr,
 	forEachSelectedPixel,
 	isPixelSelected,
 	listSelectedPixels,
+	parseSelectionExprValue,
 	resolveSelection,
+	SELECTION_CONNECTED_EXTRA_EQUIVALENTS,
+	selectionExpressionDepth,
+	selectionUsesConnectedQueue,
 } from "./selection.ts";
 export type {
 	TileAxis,

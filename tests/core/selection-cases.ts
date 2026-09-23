@@ -9,12 +9,18 @@ import {
 import { McAssetError } from "../../src/core/errors.ts";
 import {
 	countSelectedPixels,
+	estimateSelectionScratchBytes,
+	evaluateSelectionExpr,
 	forEachSelectedPixel,
 	isPixelSelected,
 	listSelectedPixels,
 	resolveSelection,
+	type SelectionExpr,
+	selectionExpressionDepth,
+	selectionUsesConnectedQueue,
 } from "../../src/core/selection.ts";
 import type { PixelCanvas, RGBA } from "../../src/core/types.ts";
+import { MEMORY_BUDGET_BYTES } from "../../src/core/validate.ts";
 import type { CaseCheck } from "./model-cases.ts";
 
 export interface SelectionCase {
@@ -527,6 +533,386 @@ export const SELECTION_CASES: SelectionCase[] = [
 					snapshot(second.canvas, second.layerId),
 				),
 				"same script through selection is byte-identical",
+			);
+		},
+	},
+	{
+		name: "alpha atom selects pixels with nonzero alpha",
+		run: (check) => {
+			const { canvas, layerId } = fresh(4, 4);
+			setPixel(canvas, layerId, 1, 1, { r: 200, g: 100, b: 50, a: 255 });
+			setPixel(canvas, layerId, 2, 2, { r: 17, g: 34, b: 51, a: 0 });
+			const explicit = resolveSelection(canvas, "alpha:base");
+			check.ok(isPixelSelected(explicit, canvas, 1, 1), "opaque in");
+			check.ok(
+				!isPixelSelected(explicit, canvas, 2, 2),
+				"hidden-RGB transparent out",
+			);
+			check.ok(!isPixelSelected(explicit, canvas, 0, 0), "empty out");
+			// Single-layer canvas may omit the layer id.
+			const omitted = resolveSelection(canvas, "alpha");
+			check.deepEqual(
+				listSelectedPixels(omitted, canvas),
+				listSelectedPixels(explicit, canvas),
+				"omitted id matches explicit id",
+			);
+		},
+	},
+	{
+		name: "color atom matches exact RGBA with zero tolerance",
+		run: (check) => {
+			const { canvas, layerId } = fresh(4, 4);
+			setPixel(canvas, layerId, 0, 0, { r: 173, g: 183, b: 192, a: 255 });
+			setPixel(canvas, layerId, 1, 0, { r: 173, g: 183, b: 192, a: 254 });
+			setPixel(canvas, layerId, 2, 0, { r: 17, g: 34, b: 51, a: 0 });
+			const selection = resolveSelection(canvas, "color:base:173,183,192,255");
+			check.ok(isPixelSelected(selection, canvas, 0, 0), "exact in");
+			check.ok(!isPixelSelected(selection, canvas, 1, 0), "one alpha step out");
+			check.ok(!isPixelSelected(selection, canvas, 2, 0), "transparent out");
+			const omitted = resolveSelection(canvas, "color:173,183,192,255");
+			check.equal(
+				countSelectedPixels(omitted, canvas),
+				1,
+				"omitted id matches on a single layer",
+			);
+		},
+	},
+	{
+		name: "connected atom follows the raw RGBA component",
+		run: (check) => {
+			const { canvas, layerId } = fresh(4, 4);
+			const teal: RGBA = { r: 10, g: 20, b: 30, a: 255 };
+			setPixel(canvas, layerId, 0, 0, { ...teal });
+			setPixel(canvas, layerId, 1, 0, { ...teal });
+			setPixel(canvas, layerId, 0, 1, { r: 11, g: 20, b: 30, a: 255 });
+			const selection = resolveSelection(canvas, "connected:base:0,0");
+			check.ok(isPixelSelected(selection, canvas, 0, 0), "seed in");
+			check.ok(isPixelSelected(selection, canvas, 1, 0), "4-neighbor in");
+			check.ok(
+				!isPixelSelected(selection, canvas, 0, 1),
+				"one channel off is out",
+			);
+			check.ok(!isPixelSelected(selection, canvas, 3, 3), "far cell out");
+			const omitted = resolveSelection(canvas, "connected:0,0");
+			check.deepEqual(
+				listSelectedPixels(omitted, canvas),
+				listSelectedPixels(selection, canvas),
+				"omitted id matches explicit id",
+			);
+		},
+	},
+	{
+		name: "omitted layer id on a multi-layer canvas is INVALID_ARGUMENT",
+		run: (check) => {
+			const canvas = createCanvas(4, 4);
+			addLayer(canvas, { id: "a" });
+			addLayer(canvas, { id: "b" });
+			throwsCode(
+				check,
+				() => resolveSelection(canvas, "alpha"),
+				"INVALID_ARGUMENT",
+			);
+			throwsCode(
+				check,
+				() => resolveSelection(canvas, "color:1,2,3,255"),
+				"INVALID_ARGUMENT",
+			);
+			throwsCode(
+				check,
+				() => resolveSelection(canvas, "connected:0,0"),
+				"INVALID_ARGUMENT",
+			);
+			throwsCode(
+				check,
+				() => resolveSelection(canvas, "alpha:nope"),
+				"LAYER_NOT_FOUND",
+			);
+		},
+	},
+	{
+		name: "union AST combines two rects without trimming the dispatch",
+		run: (check) => {
+			const { canvas } = fresh(4, 4);
+			const selection = resolveSelection(
+				canvas,
+				'{"op":"union","operands":["rect:0,0,2,2","rect:2,2,2,2"]}',
+			);
+			check.equal(countSelectedPixels(selection, canvas), 8, "union count");
+			check.ok(isPixelSelected(selection, canvas, 0, 0), "left part in");
+			check.ok(isPixelSelected(selection, canvas, 3, 3), "right part in");
+			check.ok(!isPixelSelected(selection, canvas, 3, 0), "gap out");
+			// A leading space means the value never enters the AST path.
+			throwsCode(
+				check,
+				() =>
+					resolveSelection(
+						canvas,
+						' {"op":"union","operands":["rect:0,0,2,2","rect:2,2,2,2"]}',
+					),
+				"INVALID_ARGUMENT",
+			);
+		},
+	},
+	{
+		name: "intersect subtract and invert follow set semantics",
+		run: (check) => {
+			const { canvas } = fresh(4, 4);
+			const intersect = resolveSelection(
+				canvas,
+				'{"op":"intersect","operands":["rect:0,0,3,3","rect:1,1,3,3"]}',
+			);
+			check.equal(countSelectedPixels(intersect, canvas), 4, "overlap is 2x2");
+			const subtract = resolveSelection(
+				canvas,
+				'{"op":"subtract","operands":["rect:0,0,3,3","rect:1,1,2,2"]}',
+			);
+			check.equal(countSelectedPixels(subtract, canvas), 5, "hole removed");
+			check.ok(!isPixelSelected(subtract, canvas, 1, 1), "hole out");
+			const invert = resolveSelection(
+				canvas,
+				'{"op":"invert","operands":["rect:0,0,2,2"]}',
+			);
+			check.equal(countSelectedPixels(invert, canvas), 12, "rest of canvas");
+			check.ok(!isPixelSelected(invert, canvas, 0, 0), "covered out");
+			check.ok(isPixelSelected(invert, canvas, 3, 3), "far corner in");
+		},
+	},
+	{
+		name: "AST shape and arity errors are INVALID_ARGUMENT with a path",
+		run: (check) => {
+			const { canvas } = fresh(4, 4);
+			for (const raw of [
+				'{"op":"union","operands":["rect:0,0,2,2"]}',
+				'{"op":"subtract","operands":["rect:0,0,2,2","rect:1,1,1,1","rect:2,2,1,1"]}',
+				'{"op":"invert","operands":["rect:0,0,2,2","rect:1,1,1,1"]}',
+				'{"op":"xor","operands":["rect:0,0,2,2","rect:1,1,1,1"]}',
+				'{"op":"union","operands":"rect:0,0,2,2"}',
+				'{"op":"union"}',
+				'{"operands":[]}',
+				'{"op":"union","operands":[],"extra":1}',
+			]) {
+				try {
+					resolveSelection(canvas, raw);
+					check.fail(`expected INVALID_ARGUMENT for ${raw}`);
+				} catch (error) {
+					if (
+						error instanceof McAssetError &&
+						error.code === "INVALID_ARGUMENT"
+					) {
+						const details = error.details as { path?: unknown } | undefined;
+						check.ok(
+							typeof details?.path === "string",
+							`expression path for ${raw}`,
+						);
+						continue;
+					}
+					check.fail(
+						`expected INVALID_ARGUMENT for ${raw} but got ${error instanceof McAssetError ? error.code : String(error)}`,
+					);
+				}
+			}
+			// Broken JSON never reaches the AST validator.
+			throwsCode(
+				check,
+				() => resolveSelection(canvas, '{"op":'),
+				"INVALID_ARGUMENT",
+			);
+		},
+	},
+	{
+		name: "AST past depth 32 or 1024 nodes is RESOURCE_LIMIT_EXCEEDED",
+		run: (check) => {
+			const { canvas } = fresh(4, 4);
+			let deep: unknown = "rect:0,0,1,1";
+			for (let i = 0; i < 33; i += 1) {
+				deep = { op: "invert", operands: [deep] };
+			}
+			throwsCode(
+				check,
+				() => resolveSelection(canvas, JSON.stringify(deep)),
+				"RESOURCE_LIMIT_EXCEEDED",
+			);
+			const wide: unknown[] = [];
+			for (let i = 0; i < 1025; i += 1) {
+				wide.push("rect:0,0,1,1");
+			}
+			throwsCode(
+				check,
+				() =>
+					resolveSelection(
+						canvas,
+						JSON.stringify({ op: "union", operands: wide }),
+					),
+				"RESOURCE_LIMIT_EXCEEDED",
+			);
+			// The caps are inclusive: depth 32 and 1024 nodes still evaluate.
+			let edge: unknown = "rect:0,0,1,1";
+			for (let i = 0; i < 32; i += 1) {
+				edge = { op: "invert", operands: [edge] };
+			}
+			const even = resolveSelection(canvas, JSON.stringify(edge));
+			check.equal(
+				countSelectedPixels(even, canvas),
+				1,
+				"depth 32 with even inverts is the identity",
+			);
+		},
+	},
+	{
+		name: "selection scratch estimator bounds live masks by depth",
+		run: (check) => {
+			check.equal(estimateSelectionScratchBytes(16, 0), 32, "atom holds two");
+			check.equal(
+				estimateSelectionScratchBytes(16, 1),
+				48,
+				"one level holds three",
+			);
+			check.equal(
+				selectionExpressionDepth("rect:0,0,1,1"),
+				0,
+				"atom depth is zero",
+			);
+			check.equal(
+				selectionExpressionDepth({
+					op: "union",
+					operands: ["rect:0,0,1,1", "rect:1,1,1,1"],
+				}),
+				1,
+				"one nesting level",
+			);
+		},
+	},
+	{
+		name: "selection evaluation preflights scratch against an injected budget",
+		run: (check) => {
+			const { canvas } = fresh(4, 4);
+			// 4x4 single layer: 64 bytes resident, 32 bytes of atom scratch.
+			throwsCode(
+				check,
+				() =>
+					evaluateSelectionExpr(canvas, "rect:0,0,1,1", "selection", {
+						budgetBytes: 95,
+					}),
+				"RESOURCE_LIMIT_EXCEEDED",
+			);
+			const exact = evaluateSelectionExpr(canvas, "rect:0,0,1,1", "selection", {
+				budgetBytes: 96,
+			});
+			check.equal(exact.count, 1, "exact budget still evaluates");
+			// Wide expressions reduce correctly without retaining one mask
+			// per operand.
+			const wide: SelectionExpr[] = [];
+			for (let i = 0; i < 1000; i += 1) {
+				wide.push("rect:0,0,1,1");
+			}
+			const many = evaluateSelectionExpr(
+				canvas,
+				{ op: "union", operands: wide },
+				"selection",
+			);
+			check.equal(many.count, 1, "1000-operand union reduces correctly");
+			throwsCode(
+				check,
+				() =>
+					evaluateSelectionExpr(canvas, "rect:0,0,1,1", "selection", {
+						budgetBytes: -1,
+					}),
+				"INVALID_ARGUMENT",
+			);
+		},
+	},
+	{
+		name: "selection budget override can only lower the hard cap",
+		run: (check) => {
+			const { canvas } = fresh(4, 4);
+			throwsCode(
+				check,
+				() =>
+					evaluateSelectionExpr(canvas, "rect:0,0,1,1", "selection", {
+						budgetBytes: MEMORY_BUDGET_BYTES + 1,
+					}),
+				"INVALID_ARGUMENT",
+			);
+			const capped = evaluateSelectionExpr(
+				canvas,
+				"rect:0,0,1,1",
+				"selection",
+				{ budgetBytes: MEMORY_BUDGET_BYTES },
+			);
+			check.equal(capped.count, 1, "the cap itself still evaluates");
+		},
+	},
+	{
+		name: "connected search scratch counts its queue and visited mask",
+		run: (check) => {
+			const { canvas, layerId } = fresh(4, 4);
+			setPixel(canvas, layerId, 0, 0, { r: 9, g: 9, b: 9, a: 255 });
+			// 4x4 single layer: 64 bytes resident; connected scratch is one
+			// out mask plus visited plus a 4-byte-per-cell index queue.
+			const need = 64 + 16 * (0 + 2 + 5);
+			throwsCode(
+				check,
+				() =>
+					evaluateSelectionExpr(canvas, "connected:base:0,0", "selection", {
+						budgetBytes: need - 1,
+					}),
+				"RESOURCE_LIMIT_EXCEEDED",
+			);
+			const exact = evaluateSelectionExpr(
+				canvas,
+				"connected:base:0,0",
+				"selection",
+				{ budgetBytes: need },
+			);
+			check.equal(exact.count, 1, "exact budget still evaluates");
+			check.ok(
+				selectionUsesConnectedQueue("connected:base:0,0"),
+				"connected atom detected",
+			);
+			check.ok(
+				!selectionUsesConnectedQueue({
+					op: "union",
+					operands: ["rect:0,0,1,1", "alpha:base"],
+				}),
+				"no queue without connected",
+			);
+		},
+	},
+	{
+		name: "connected seed outside the canvas is OUT_OF_BOUNDS",
+		run: (check) => {
+			const { canvas } = fresh(4, 4);
+			throwsCode(
+				check,
+				() => resolveSelection(canvas, "connected:base:4,0"),
+				"OUT_OF_BOUNDS",
+			);
+			throwsCode(
+				check,
+				() => resolveSelection(canvas, "connected:base:1.5,0"),
+				"INVALID_COORDINATE",
+			);
+			throwsCode(
+				check,
+				() => resolveSelection(canvas, "color:base:1,2,3,256"),
+				"INVALID_ARGUMENT",
+			);
+		},
+	},
+	{
+		name: "one expression cannot mix two layer ids",
+		run: (check) => {
+			const canvas = createCanvas(4, 4);
+			addLayer(canvas, { id: "a" });
+			addLayer(canvas, { id: "b" });
+			throwsCode(
+				check,
+				() =>
+					resolveSelection(
+						canvas,
+						'{"op":"union","operands":["alpha:a","alpha:b"]}',
+					),
+				"INVALID_ARGUMENT",
 			);
 		},
 	},

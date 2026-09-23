@@ -194,6 +194,60 @@ describe("mcp seven tools over stdio", () => {
 		expect(typeof result.json?.mcpxText).toBe("string");
 	}, 30_000);
 
+	test("apply_asset_operations runs scoped writes stampRect and regionFromSelection", async () => {
+		const connected = await connect();
+		const result = await callTool(connected, "apply_asset_operations", {
+			sourcePath: SWORD_MCPX,
+			operations: [
+				{
+					type: "fillRect",
+					layerId: "base",
+					rect: { x: 0, y: 0, width: 4, height: 4 },
+					color: "#FF0000FF",
+					selection: "rect:0,0,2,2",
+				},
+				{
+					type: "stampRect",
+					layerId: "base",
+					source: "rect:0,0,2,2",
+					offset: { dx: 2, dy: 0 },
+				},
+				{
+					type: "regionFromSelection",
+					selection: "alpha:base",
+					mode: "create",
+					regionId: "body",
+				},
+			],
+		});
+		expect(result.isError).toBe(false);
+		expect(result.json?.applied).toBe(3);
+		expect(typeof result.json?.pngBase64).toBe("string");
+		expect(typeof result.json?.mcpxText).toBe("string");
+	}, 30_000);
+
+	test("apply_asset_operations reports an empty selection without writing", async () => {
+		const connected = await connect();
+		const result = await callTool(connected, "apply_asset_operations", {
+			sourcePath: SWORD_MCPX,
+			operations: [
+				{
+					type: "setPixel",
+					layerId: "base",
+					x: 0,
+					y: 0,
+					color: "#FF0000FF",
+					selection: {
+						op: "intersect",
+						operands: ["rect:0,0,1,1", "rect:3,3,1,1"],
+					},
+				},
+			],
+		});
+		expect(result.isError).toBe(true);
+		expect(result.json?.code).toBe("EMPTY_SELECTION");
+	}, 30_000);
+
 	test("apply_asset_operations reports an unknown operation type", async () => {
 		const connected = await connect();
 		const result = await callTool(connected, "apply_asset_operations", {
