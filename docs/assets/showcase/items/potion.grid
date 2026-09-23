@@ -1,0 +1,34 @@
+; Potion bottle
+[palette]
+. = transparent
+N = #2B1D0EFF role=custom
+n = #4F3818FF role=custom
+K = #7C5A2CFF role=custom
+k = #A8804AFF role=custom
+P = #3E5C92FF role=outline
+p = #8FB4DEFF role=light
+q = #E4F0FBFF role=custom
+Q = #C3D8EEFF role=custom
+D = #5E1E82FF role=shadow
+m = #9636BFFF role=base
+l = #C466E6FF role=light
+L = #E3A6F5FF role=highlight
+W = #FFFFFFFF role=accent
+
+[grid]
+.......nn.......
+......nkKN......
+......nkKN......
+......pqQP......
+......pqQP......
+....ppqqQQPp....
+...pqWqqQQQQP...
+..pLLLLLLLLLLP..
+..plWllmmmDDDP..
+..plWllmmmmDDP..
+..pllllmmmmDDP..
+..pllllmmmLDDP..
+..pmmmmmmLmDDP..
+...PmmmmmmDDP...
+....PDDDDDDP....
+.....PPPPPP.....

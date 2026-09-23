@@ -1,0 +1,30 @@
+; Pickaxe - gold head, oak handle
+[palette]
+. = transparent
+o = #4A2A08FF role=outline
+s = #8A5A12FF role=dark
+S = #C0861EFF role=shadow
+m = #E8B838FF role=base
+l = #F8DE70FF role=highlight
+W = #FFFBD8FF role=accent
+a = #2B1D0EFF role=custom
+b = #4F3818FF role=custom
+c = #7C5A2CFF role=custom
+
+[grid]
+................
+.....ssssss.....
+...sslWWllmo....
+..sSmmmmmmmlos..
+...oooooobcmlSo.
+........bcaolSo.
+.......bca.smSo.
+......bca..smSo.
+.....bca...smSo.
+....bca....smSo.
+...bca.....smSo.
+..bca.......oSo.
+.bca.........o..
+bca.............
+aa..............
+................
