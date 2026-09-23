@@ -10,6 +10,10 @@ Docs:
 - [.mcpx format](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/mcpx-format.md): the editable multi-layer .mcpx and .grid format grammar and specification.
 - [Full agent context](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/llms-full.txt): install, tools, error model, and limits in a single file.
 
+Skills (install with `npx skills add smile-minecraft/mc-asset`):
+- [mc-asset skill](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/skills/mc-asset/SKILL.md): the draw, render, preview, measure, and validate loop; the CLI/MCP command map; palette roles for recoloring.
+- [minecraft-pixel-art skill](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/skills/minecraft-pixel-art/SKILL.md): vanilla Minecraft style rules for items, blocks, GUI sprites, and animations, with an anti-pattern review checklist.
+
 Install:
 - [npm](https://www.npmjs.com/package/mc-asset): `npx -y mc-asset mcp` runs the MCP server; `npm install -g mc-asset` installs the CLI.
 - [Homebrew](https://github.com/smile-minecraft/homebrew-tap): `brew tap smile-minecraft/tap && brew install smile-minecraft/tap/mc-asset`.

@@ -53,6 +53,9 @@ must run under plain Node as well as under Bun.
 - `tests/` — Bun and Node dual-entry suites plus fixtures.
 - `docs/` — the public CLI/MCP surfaces and the MCP guide.
 - `scripts/` — build, release staging, cross-runtime comparison, and the docs check.
+- `skills/` — Agent Skills shipped with the repository (`mc-asset`,
+  `minecraft-pixel-art`), installable with `npx skills add smile-minecraft/mc-asset`.
+  Load `minecraft-pixel-art` before drawing or redrawing any showcase art.
 - `homebrew/` — the Homebrew tap formula source.
 
 ## Tests
