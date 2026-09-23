@@ -2,7 +2,16 @@
 
 [English](mcp-guide.md) | [繁體中文](mcp-guide.zh-TW.md) | [简体中文](mcp-guide.zh-CN.md)
 
-`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十一個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。最新發布版本為 `v0.3.2`（2026-09-23）；源碼樹上的 `scale_gui_asset` 與創作新增功能（`inspect_asset`、`apply_asset_operations` 的 `feedback` 物件，以及 `ellipse`／`polygonFill`／`strokeMask` 操作）皆隨 `v0.3.2` 發布。由目前源碼建置的伺服器提供全部二十一個工具。
+## 目錄
+
+- [安裝與註冊伺服器](#安裝與註冊伺服器)
+- [二十一個工具](#二十一個工具)
+- [失敗時如何回傳](#失敗時如何回傳)
+- [限制與缺口](#限制與缺口)
+
+---
+
+`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十一個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。
 
 伺服器直接掛在 Core 上，所以每個工具都跑與 CLI 指令相同的引擎。像素層級的創作，透過 ASCII Grid 文件、批次操作陣列，或內嵌回傳的可編輯 `.mcpx` 來源來完成；刻意不提供 `set_pixel` 工具。
 
@@ -90,6 +99,16 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 以下擷取透過 MCP 用戶端 SDK 在一個示範工作目錄中執行，其中所有路徑都相對於該目錄，只有 `inspect_asset` 的結構擷取直接指向 repo 內的 fixture `tests/cli/fixtures/sword.mcpx`。原有七個工具的擷取取自已安裝的版本，後續新增的工具則取自本地源碼伺服器——兩者執行的是同一份伺服器程式碼。
 
 ## 二十一個工具
+
+| 工具索引 | | |
+|---|---|---|
+| [`analyze_asset`](#analyze_asset) | [`pixelize_asset`](#pixelize_asset) | [`render_pixel_asset`](#render_pixel_asset) |
+| [`apply_asset_operations`](#apply_asset_operations) | [`recolor_asset`](#recolor_asset) | [`create_variants`](#create_variants) |
+| [`validate_asset`](#validate_asset) | [`import_asset`](#import_asset) | [`build_asset`](#build_asset) |
+| [`transform_asset`](#transform_asset) | [`quantize_asset`](#quantize_asset) | [`cleanup_asset`](#cleanup_asset) |
+| [`palette_asset`](#palette_asset) | [`material_asset`](#material_asset) | [`tile_asset`](#tile_asset) |
+| [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
+| [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
 
 ### analyze_asset
 

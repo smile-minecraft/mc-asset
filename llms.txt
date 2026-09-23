@@ -7,6 +7,7 @@ Docs:
 - [MCP guide](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/mcp-guide.md): registration, one verbatim capture per MCP tool, the error model, the limits.
 - [MCP surface](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/mcp-surface.md): the frozen twenty-one-tool surface — names, inputs, and the read/write contract.
 - [CLI surface](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/cli-surface.md): the frozen CLI commands, the batch operations specification, and the exit-code registry.
+- [.mcpx format](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/mcpx-format.md): the editable multi-layer .mcpx and .grid format grammar and specification.
 - [Full agent context](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/llms-full.txt): install, tools, error model, and limits in a single file.
 
 Install:
@@ -17,7 +18,7 @@ Source:
 - [Repository](https://github.com/smile-minecraft/mc-asset): the source tree, issues, and workflows.
 - [Releases](https://github.com/smile-minecraft/mc-asset/releases): tagged releases with the tarball and its `.sha256`.
 
-Capabilities (running server exposes 21 MCP tools; `scale_gui_asset`, `inspect_asset`, `feedback`, and `ellipse`/`polygonFill`/`strokeMask` shipped with v0.3.2 — latest release is v0.3.2):
+Capabilities:
 - 21 MCP tools, not 25: 25 is the batch-operation variant count. `inspect_asset` takes `inputPath` plus `mode` (`structure` returns layers/regions/color usage/overlaps; `view` returns the composited PNG as an image block plus metadata).
 - 25 typed batch variants including 9 pixel operations (`setPixel`, `clearPixel`, `drawLine`, `drawRect`, `fillRect`, `floodFill`, `ellipse`, `polygonFill`, `strokeMask`); the rest are layer, region, `stampRect`, and `regionFromSelection`.
 - `apply_asset_operations` optional `feedback` (`image` none/full/changed, `scale` 1-16, `crop` selection expression, `diff` none/summary); absent keeps the legacy output. View scale defaults to 1; small feedback images auto-scale toward a 128 long edge (cap 16); outputs over the 1024px edge are `RESOURCE_LIMIT_EXCEEDED` with a crop hint. Images travel as MCP `type:image`, never duplicated in text.

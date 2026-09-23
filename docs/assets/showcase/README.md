@@ -1,6 +1,6 @@
 # Showcase assets — how they were made
 
-Every file in this directory was produced by **mc-asset itself** (CLI 0.3.1).
+Every file in this directory was produced by **mc-asset itself**.
 No external image tools were used. All procedural sources use fixed seeds, so
 the full set below is reproducible end to end. The showcase sources are
 deliberately chosen so each effect stays visible at README display size:

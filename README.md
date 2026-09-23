@@ -9,19 +9,36 @@
 
 ![mc-asset banner](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/banner.png)
 
-A pixel-native 2D asset creation engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs, designed for human creators and AI coding agents.
+A pixel-native 2D asset engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs, built for human creators and AI coding agents.
 
-`mc-asset` bridges the gap where language models struggle with visual pixel art. It provides deterministic pixel manipulation, procedural pattern generation, seamless tiling analysis, animated sprite sheet packaging, palette quantization, and resource pack validation.
+Language models can't place pixels by eye, so `mc-asset` turns texture work into text and commands. Draw a sprite as a character grid, pixelize reference art, generate tiling textures, pack animation sheets, and validate a whole resource pack, from a shell or over MCP. The same input and seed always produce the same bytes.
+
+---
+
+## Contents
+
+- [Highlights](#highlights)
+- [Showcase](#showcase)
+- [Installation](#installation)
+- [For AI agents](#for-ai-agents)
+- [Quickstart](#quickstart)
+- [Practical Recipes](#practical-recipes)
+- [MCP Server](#mcp-server)
+- [Command Reference](#command-reference)
+- [Batch Operations (`--operations`)](#batch-operations---operations)
+- [Architecture & Reliability Guarantees](#architecture--reliability-guarantees)
+- [Development](#development)
+- [License](#license)
 
 ---
 
 ## Highlights
 
-- **Pixel-Native Engine**: All raster formats and editable text specifications map directly to an in-memory `PixelCanvas` with integer coordinates and strict layer/region bounds.
-- **Strict Determinism**: Zero unseeded randomness and zero floating-point drift. Re-running a command with the same inputs and seed produces byte-identical PNG and `.mcpx` files across both Bun and Node runtimes.
-- **Agent-First Architecture**: Clean separation between standard output and diagnostic logs. All core operations support `--json` structured envelopes with standardized error codes.
-- **Dual Interface (CLI & MCP)**: A unified Core engine powers both a command-line interface and a native Model Context Protocol (MCP) server for integration with AI assistants (Claude Desktop, Cursor, and OpenCode).
-- **Filesystem Safety**: Refuses implicit output filenames. Implements per-file atomic staging (`O_EXCL` temp files + rename), collision detection with Unicode NFC and case-folding, and guards against accidental overwrites.
+- **Text in, texture out.** Sprites are character grids (`.grid`) or editable multi-layer sources (`.mcpx`) that build to PNG. See [`docs/mcpx-format.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.md).
+- **Reproducible bytes.** No unseeded randomness and integer-only color blending, so PNG and `.mcpx` output is identical run to run and between Bun and Node.
+- **One engine, two front ends.** The CLI and the stdio MCP server call the same core, so an agent gets exactly what a shell script gets.
+- **Output you can parse.** `--json` returns one `{ success, result, error }` envelope with a stable error code, and logs never mix into data on stdout.
+- **No surprise writes.** Every output path is explicit, existing files need `--force`, and each file lands through a temp file and an atomic rename.
 
 ---
 
@@ -63,7 +80,6 @@ Install the CLI globally to get the `mc-asset` command on your PATH:
 ```sh
 npm install -g mc-asset
 mc-asset --version
-# 0.3.2
 ```
 
 ### Via Homebrew (macOS / Linux)
@@ -72,7 +88,6 @@ mc-asset --version
 brew tap smile-minecraft/tap
 brew install smile-minecraft/tap/mc-asset
 mc-asset --version
-# 0.3.2
 ```
 
 ### Via Bun or Node.js (From Source)
@@ -83,7 +98,6 @@ cd mc-asset
 bun install --frozen-lockfile
 bun run build
 ./bin/mc-asset.js --version
-# 0.3.2
 ```
 
 *Prerequisites*: tested with [Node.js](https://nodejs.org) 22 and [Bun](https://bun.sh) 1.3. `bun run build` needs Bun and `./bin/mc-asset.js` needs Node.js; with Bun alone, run `bun ./bin/mc-asset.js`.
@@ -94,6 +108,8 @@ bun run build
 
 - [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt) — a compact index of the repository for agents.
 - [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt) — the same material as a single file: install, the twenty-one MCP tools, batch operations, the error model, and the limits.
+- [`docs/cli-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.md) — the frozen CLI commands, the batch operations specification, and the exit-code registry.
+- [`docs/mcpx-format.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.md) — the editable multi-layer `.mcpx` and `.grid` grammar and specification.
 - [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md) — registration, one verbatim capture per MCP tool, and the error model.
 - [`docs/mcp-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-surface.md) — the frozen MCP surface: tool names, inputs, and the read/write contract.
 - [`AGENTS.md`](https://github.com/smile-minecraft/mc-asset/blob/main/AGENTS.md) — the rules for changing this repository.
@@ -102,9 +118,9 @@ bun run build
 
 ## Quickstart
 
-### 1. From ASCII Grid to Validated Texture
+### From a Text Grid to a Validated Texture
 
-Create a 16×16 sprite using human-readable text syntax:
+Draw a 16×16 gem as a character grid, one character per pixel:
 
 ```sh
 mkdir -p /tmp/mc-asset-demo
@@ -145,7 +161,7 @@ mc-asset render /tmp/mc-asset-demo/gem.grid \
 # ok render profile=generic applied=0 output=/tmp/mc-asset-demo/gem.png source=/tmp/mc-asset-demo/gem.mcpx
 ```
 
-Analyze color metrics and alpha distribution:
+Check its colors and alpha:
 
 ```sh
 mc-asset analyze /tmp/mc-asset-demo/gem.png
@@ -159,7 +175,7 @@ mc-asset analyze /tmp/mc-asset-demo/gem.png
 # recommended: quantize.colors=8 cleanup=none resize=nearest
 ```
 
-Validate the asset for Minecraft resource pack compliance:
+Validate it as a Minecraft item texture:
 
 ```sh
 mc-asset validate /tmp/mc-asset-demo/gem.png --profile minecraft:item
@@ -176,7 +192,7 @@ mc-asset validate /tmp/mc-asset-demo/gem.png --profile minecraft:item
 
 ### Recipe 1: Downsampling Reference Art (`pixelize`)
 
-Convert high-resolution reference art into pixel art with deterministic color reduction and edge alignment:
+Turn a high-resolution reference image into a 16×16 item texture. The same image and preset always give the same pixels:
 
 ```sh
 mc-asset pixelize reference.png \
@@ -186,26 +202,25 @@ mc-asset pixelize reference.png \
   --output item_texture.png
 ```
 
-- `--preset item`: Applies 16-color target palette, item-specific boundary preservation, and noise elimination.
-- Supported presets: `item`, `block`, `gui`, `particle`, `generic`.
+- `--preset item` sets a 16-color budget and turns on the crop, background, subject, edge, and cluster stages.
+- The other presets are `block`, `gui`, `particle`, and `generic`.
 
 ### Recipe 2: Procedural Textures & Seam Tiling (`generate` & `tile`)
 
-Generate a procedural stone texture and check its tiling seamlessness:
+Generate a stone texture from a fixed seed, then check whether it tiles:
 
 ```sh
-# Generate 16x16 procedural noise texture using built-in stone palette
 mc-asset generate noise \
   --size 16 \
   --palette stone \
   --seed 42 \
   --output stone.png
 
-# Evaluate horizontal, vertical, and corner seam discontinuity
+# Seam scores: horizontal, vertical, corner (lower is smoother)
 mc-asset tile stone.png
 # ok tile profile=generic seam=h:0.065196 v:0.096051 c:0.003604 repeat=0.908038
 
-# Automatically repair seams and preview 4x4 repeat
+# Match the opposite edges and preview a 4x4 repeat
 mc-asset tile stone.png \
   --edge-match both \
   --preview 4x4 \
@@ -214,22 +229,22 @@ mc-asset tile stone.png \
 
 ### Recipe 3: Palette Quantization & Artifact Cleanup (`quantize` & `cleanup`)
 
-Clean up stray semi-transparent pixels from third-party tools:
+Cut a sprite down to 8 colors, then remove the stray pixels left behind:
 
 ```sh
-# Quantize to 8 colors
 mc-asset quantize sprite.png --colors 8 --output quantized.png
 
-# Remove isolated noise and stray pixels
 mc-asset cleanup quantized.png \
   --fix isolated,noise \
   --allow-render-pass-change \
   --output clean.png
 ```
 
+These fix classes can change alpha, and with it the render pass the texture needs, so `cleanup` refuses them without `--allow-render-pass-change`.
+
 ### Recipe 4: Material Variants (`variant` & `recolor`)
 
-Fan out a single source asset into multiple material tiers:
+Fan one source out into several material tiers, or recolor it to a single material:
 
 ```sh
 mc-asset variant sword.mcpx \
@@ -237,11 +252,13 @@ mc-asset variant sword.mcpx \
   --output-dir ./dist_variants \
   --mkdir
 # Writes sword_iron.png, sword_iron.mcpx, sword_copper.png, etc.
+
+mc-asset recolor sword.mcpx --material gold --output sword_gold.png
 ```
 
 ### Recipe 5: Animated Sprite Sheets (`animate`)
 
-Pack individual frames into an animated vertical sprite sheet:
+Pack a folder of frames into a vertical sheet, then check it against its `.mcmeta`:
 
 ```sh
 mc-asset animate pack \
@@ -249,13 +266,12 @@ mc-asset animate pack \
   --layout vertical \
   --output ./textures/fire.png
 
-# Validate animation sheet against companion .mcmeta
 mc-asset validate ./textures/fire.png --mcmeta ./textures/fire.png.mcmeta
 ```
 
 ### Recipe 6: Full Resource Pack Validation (`validate-pack`)
 
-Scan an entire resource pack directory for missing texture dependencies, invalid namespaces, unreferenced files, and broken model JSON references:
+Scan a whole resource pack for missing textures, bad namespaces, orphaned textures, broken model references, and reference cycles. `--minecraft-version` picks the pack format to check against:
 
 ```sh
 mc-asset validate-pack ./MyResourcePack \
@@ -263,13 +279,63 @@ mc-asset validate-pack ./MyResourcePack \
   --json
 ```
 
+### Recipe 7: Batch Edits with Visual Feedback (`build` & `apply_asset_operations`)
+
+Edit the Quickstart gem in one batch: a 4×4 gold square framed by a 6×6 black outline. The CLI applies the batch and writes a PNG:
+
+```sh
+cat << 'EOF' > /tmp/mc-asset-demo/ops.json
+[
+  { "type": "fillRect", "rect": { "x": 6, "y": 6, "width": 4, "height": 4 }, "color": "#FFD700FF" },
+  { "type": "drawRect", "rect": { "x": 5, "y": 5, "width": 6, "height": 6 }, "color": "#000000FF" }
+]
+EOF
+
+mc-asset build /tmp/mc-asset-demo/gem.mcpx \
+  --operations /tmp/mc-asset-demo/ops.json \
+  --output /tmp/mc-asset-demo/gem_modified.png
+# ok build profile=generic applied=2 output=/tmp/mc-asset-demo/gem_modified.png
+```
+
+Over MCP, `apply_asset_operations` runs the same batch and can send back a picture of what changed:
+
+```json
+{
+  "sourcePath": "/tmp/mc-asset-demo/gem.mcpx",
+  "operations": [
+    { "type": "fillRect", "rect": { "x": 6, "y": 6, "width": 4, "height": 4 }, "color": "#FFD700FF" },
+    { "type": "drawRect", "rect": { "x": 5, "y": 5, "width": 6, "height": 6 }, "color": "#000000FF" }
+  ],
+  "outputPngPath": "/tmp/mc-asset-demo/gem_feedback.png",
+  "feedback": { "image": "changed", "scale": 8, "diff": "summary" }
+}
+```
+
+With `feedback`, the result keeps its usual fields and adds a PNG image block cropped to the changed area and upscaled by `scale` (1–16), plus a `diff` summary (`raw`, `composited`, `structural`, `outsideSelectionUnchanged`). An edit with no visible change returns `noVisibleChange` instead of an image. The agent sees its edit without pulling the whole canvas. The output path differs from the CLI run because MCP tools never overwrite an existing file.
+
+### Recipe 8: Nine-Slice GUI Scaling (`gui-scale`)
+
+Resize a GUI frame without smearing its border. With `nine_slice`, the corners copy 1:1 and the edges and center tile (or stretch, with `stretch_inner: true`). The 16×16 `dialog.png` declares a 4px border in `dialog.png.mcmeta`:
+
+```json
+{ "gui": { "scaling": { "type": "nine_slice", "width": 16, "height": 16, "border": 4 } } }
+```
+
+```sh
+mc-asset gui-scale ./textures/gui/dialog.png \
+  --mcmeta ./textures/gui/dialog.png.mcmeta \
+  --size 48x32 \
+  --output ./textures/gui/dialog_large.png
+# ok gui-scale profile=generic size=48x32 scaling=nine_slice output=./textures/gui/dialog_large.png
+```
+
+`gui-scale` never picks up a sibling `.mcmeta` on its own; without `--mcmeta` it stretches the whole sprite.
+
 ---
 
-## MCP Server Integration (For AI Agents)
+## MCP Server
 
-`mc-asset` includes a native stdio Model Context Protocol server. Agents interact with the pixel engine directly through structured function calls without subprocess overhead.
-
-The running server exposes 21 tools. `scale_gui_asset` and all authoring additions (`inspect_asset`, `apply_asset_operations.feedback`, `ellipse`/`polygonFill`/`strokeMask`) shipped with `v0.3.2`; the latest published release is `v0.3.2` (2026-09-23).
+`mc-asset mcp` starts a stdio MCP server on the same core as the CLI, so a tool call and the matching command return the same result. It exposes 21 tools.
 
 ### Exposed MCP Tools
 
@@ -297,15 +363,36 @@ The running server exposes 21 tools. `scale_gui_asset` and all authoring additio
 | `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, version targeting. |
 | `inspect_asset` | Read-only `structure` (layers, regions, color usage, overlaps) or `view` (composited PNG image block plus metadata); takes `inputPath`. |
 
-`inspect_asset` has two modes. `structure` reports layers (bounds, area, visibility, raw RGBA color usage), regions (identity, bounds, area only), and overlaps. `view` returns the composited PNG as a standard image block plus six-key metadata, with optional `crop` and `scale` (integer 1–16, default 1). Outputs wider than 1024px are refused with `RESOURCE_LIMIT_EXCEEDED` and a crop hint; the small-image auto-scale applies to apply feedback only, never to inspect view. Image bytes travel as `type: "image"` and are not duplicated in the text block.
-
-`apply_asset_operations` accepts an optional `feedback` object (`image`: `none` / `full` / `changed`; `scale` 1–16; `crop` selection expression; `diff` `none` / `summary`). Omitting it keeps the legacy output byte-for-byte.
+`inspect_asset` has two modes: `structure` reports layers, regions, color usage, and overlaps; `view` returns the composited canvas as a PNG image block, with optional `crop` and `scale` (1–16). A view wider than 1024px is refused with a crop hint instead of being downscaled. `apply_asset_operations` takes an optional `feedback` object ([Recipe 7](#recipe-7-batch-edits-with-visual-feedback-build--apply_asset_operations)); without it the result is unchanged. [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md) has one captured call per tool.
 
 ### Configuration
+
+Every client runs the same stdio command, `npx -y mc-asset mcp`. Config file locations change between client versions, so check the client's own docs if one below has moved.
+
+#### Claude Code
+
+```sh
+claude mcp add mc-asset -- npx -y mc-asset mcp
+```
 
 #### Claude Desktop
 
 Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "mc-asset": {
+      "command": "npx",
+      "args": ["-y", "mc-asset", "mcp"]
+    }
+  }
+}
+```
+
+#### Cursor
+
+Add to `.cursor/mcp.json`:
 
 ```json
 {
@@ -329,21 +416,6 @@ Add to `opencode.json` or `opencode.jsonc`:
       "type": "local",
       "command": ["npx", "-y", "mc-asset", "mcp"],
       "enabled": true
-    }
-  }
-}
-```
-
-#### Cursor
-
-Add to your MCP configuration:
-
-```json
-{
-  "mcpServers": {
-    "mc-asset": {
-      "command": "npx",
-      "args": ["-y", "mc-asset", "mcp"]
     }
   }
 }
@@ -401,8 +473,8 @@ The `import`, `render`, and `build` commands support batch pixel edits via `--op
 
 - **Atomicity**: Execution is all-or-nothing. If an operation fails (e.g. out of bounds), all preceding operations in the batch roll back.
 - **Color Values**: Accepts `transparent`, `#RRGGBB`, or `#RRGGBBAA`.
-- **Vocabulary**: 25 typed variants, including 9 pixel operations (`setPixel`, `clearPixel`, `drawLine`, `drawRect`, `fillRect`, `floodFill`, `ellipse`, `polygonFill`, `strokeMask`) plus layer, region, `stampRect`, and `regionFromSelection` operations. The full per-type table lives in `docs/cli-surface.md`.
-- **Compact shapes**: `ellipse` takes `rect` plus `color` plus `mode` (`fill` / `outline`); `polygonFill` takes integer `[x, y]` `points` plus `color`, at most 4096 points with no self-intersection and no holes; `strokeMask` takes `layerId` plus a `source` selection plus `color`, with an optional `selection` clip. A 4097-point polygon fails with `RESOURCE_LIMIT_EXCEEDED` before point mapping; a self-intersecting ring fails with `SELF_INTERSECTING_POLYGON`.
+- **Vocabulary**: 25 typed variants, including 9 pixel operations (`setPixel`, `clearPixel`, `drawLine`, `drawRect`, `fillRect`, `floodFill`, `ellipse`, `polygonFill`, `strokeMask`) plus layer, region, `stampRect`, and `regionFromSelection` operations. The full per-type table lives in [`docs/cli-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.md).
+- **Shapes**: `ellipse` fills or outlines the ellipse inside a `rect`; `polygonFill` takes up to 4096 integer `[x, y]` points (more is `RESOURCE_LIMIT_EXCEEDED`; a self-intersecting ring is `SELF_INTERSECTING_POLYGON`; no holes); `strokeMask` outlines a `source` selection on one layer.
 - **Selection**: Pixel operations accept an optional `selection` expression; an empty match refuses the write with `EMPTY_SELECTION` and rolls the batch back.
 
 ---
@@ -445,8 +517,8 @@ The `import`, `render`, and `build` commands support batch pixel edits via `--op
 | **1** | Internal Error | Unhandled engine failure (`INTERNAL_ERROR`). |
 | **2** | Invalid Invocation | Syntax error, conflicting options, missing parameters (`INVALID_ARGUMENT`). |
 | **3** | Validation Failure | Engine succeeded, but asset or pack failed validation (`VALIDATION_FAILED`). |
-| **4** | Filesystem Error | File exists without `--force`, missing directory without `--mkdir`. |
-| **5** | Unsupported Format | Unsupported file type or resource limit exceeded. |
+| **4** | Filesystem Error | Output exists without `--force`, missing directory without `--mkdir`, or an unreadable input. |
+| **5** | Unsupported / Limit | Unsupported file type, or a size or resource limit exceeded. |
 
 ---
 
@@ -467,6 +539,9 @@ bun run build
 
 # Verify cross-runtime byte parity (Bun vs Node)
 node scripts/compare-runtime.mjs
+
+# Check doc links, anchors, and stray release versions
+bun run check:docs
 ```
 
 ---

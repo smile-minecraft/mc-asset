@@ -2,11 +2,31 @@
 
 [English](cli-surface.md) | [繁體中文](cli-surface.zh-TW.md) | [简体中文](cli-surface.zh-CN.md)
 
+## Contents
+
+- [Global Flags](#global-flags)
+- [Common File Flags (File-Producing Commands)](#common-file-flags-file-producing-commands)
+  - [Safety & Filesystem Guarantees](#safety--filesystem-guarantees)
+- [Command Reference](#command-reference)
+  - [1. Intake, Authoring & Source Build](#1-intake-authoring--source-build)
+  - [2. Spatial & Geometric Transformations](#2-spatial--geometric-transformations)
+  - [3. Palette, Quantization & Cleanup](#3-palette-quantization--cleanup)
+  - [4. Pixel Art Pipeline](#4-pixel-art-pipeline)
+  - [5. Procedural Generation, Tiles & Previews](#5-procedural-generation-tiles--previews)
+  - [6. Animation & Sprite Sheets](#6-animation--sprite-sheets)
+  - [7. Inspection, Validation & Pack Verification](#7-inspection-validation--pack-verification)
+  - [8. Model Context Protocol (MCP) Server](#8-model-context-protocol-mcp-server)
+- [Batch Operations Specification (`--operations`)](#batch-operations-specification---operations)
+- [Exit Code Registry](#exit-code-registry)
+- [Troubleshooting & Common Pitfalls](#troubleshooting--common-pitfalls)
+
+---
+
 Entry point: `mc-asset` (or `bun src/cli/index.ts` during local development).
 
 Global behavior follows deterministic standards (channels, `OUTPUT_EXISTS`/`--force`/`--mkdir`, atomic writes, `--force`/`--in-place` mutual exclusion) and standardized exit codes via the `src/core/errors.ts` registry.
 
-The latest published release is `v0.3.2` (2026-09-23). It adds CLI coverage on top of `v0.3.1` — the top-level `inspect` command (`structure`/`view`), the `gui-scale` command, the JSON AST selection form, the `ellipse` / `polygonFill` / `strokeMask` / `stampRect` / `regionFromSelection` batch operations, and the `feedback` notes.
+Release history, including when each command and operation arrived, lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
 ---
 
@@ -62,6 +82,7 @@ build  [source] [--stdin] [--output <png>] [--source <mcpx>] [--stdout] [--opera
 - `--source <path>` saves the editable `.mcpx` text source.
 - `--in-place` rewrites the input file in-place (implies force for that target).
 - `build --stdin` together with `--operations -` is `ARGUMENT_CONFLICT`.
+- For the editable `.mcpx` v1 and `.grid` grammar, canonical section order, compact/token grid rules, and error codes, see [`docs/mcpx-format.md`](mcpx-format.md).
 
 ---
 
@@ -79,7 +100,7 @@ transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
 ```
 
 - Exactly **one** geometry flag allowed per invocation; combining multiple flags raises `ARGUMENT_CONFLICT`.
-- `--selection` scopes operations to a selection expression: `all`, `rect:x,y,w,h`, `region:id`, `alpha[:layer]`, `color[:layer]:r,g,b,a`, `connected[:layer]:x,y`, or a JSON expression object `{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}` (a leading `{` enters the JSON path; anything else parses as an atom). The JSON expression form was added in `v0.3.2`. Geometry operations combined with `--selection` raise `ARGUMENT_CONFLICT`.
+- `--selection` scopes operations to a selection expression: `all`, `rect:x,y,w,h`, `region:id`, `alpha[:layer]`, `color[:layer]:r,g,b,a`, `connected[:layer]:x,y`, or a JSON expression object `{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}` (a leading `{` enters the JSON path; anything else parses as an atom). Geometry operations combined with `--selection` raise `ARGUMENT_CONFLICT`.
 
 ---
 
@@ -130,7 +151,7 @@ pixelize <image> --size <N|WxH> [--preset <item|block|gui|particle|generic>] <fi
 | `tile <input>` | PNG, JPEG, WebP, `.mcpx` | Report only, or PNG | Seam analysis, edge repetition analysis, or tile fix/preview. |
 | `generate <pattern>` | None | PNG and/or `.mcpx` | Deterministic procedural texture generator. |
 | `preview <input>` | PNG, JPEG, WebP, `.mcpx` | Report only, or PNG | ASCII preview, palette map, 9-slice guide, or nearest upscale. |
-| `gui-scale <input>` | PNG, JPEG, WebP, `.mcpx` | PNG | Scales a GUI sprite to an explicit target size with the mcmeta stretch/tile/nine_slice mapping (new in `v0.3.2`). |
+| `gui-scale <input>` | PNG, JPEG, WebP, `.mcpx` | PNG | Scales a GUI sprite to an explicit target size with the mcmeta stretch/tile/nine_slice mapping. |
 
 ```text
 tile     <input> [--preview <2x2|4x4|8x8>] [--edge-match <axis>] [--brightness-match <axis>]
@@ -150,7 +171,7 @@ gui-scale <input> --size <N|WxH> [--mcmeta <path>]
   - `--palette-map`: Emits JSON palette indexing.
   - `--scale <N>`: Nearest-neighbor upscale PNG output.
   - `--nine-slice`: Evaluates GUI 9-slice borders from `.mcmeta` with visual guides.
-- `gui-scale` (new in `v0.3.2`) maps a GUI sprite to an explicit target size with the `.mcmeta` `gui.scaling` stretch/tile/nine_slice rules:
+- `gui-scale` maps a GUI sprite to an explicit target size with the `.mcmeta` `gui.scaling` stretch/tile/nine_slice rules:
   - `--mcmeta` is an explicit path and is never derived from a same-named sibling; omitting it means `stretch`.
   - Output is PNG only.
   - Illegal nine_slice borders are `INVALID_MCMETA` (exit 2).
@@ -190,7 +211,7 @@ animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--colum
 | Command | Input | Output | Description |
 |---|---|---|---|
 | `analyze <image>` | PNG, JPEG, WebP | Report only | Structural and color metrics (predicted classification). |
-| `inspect <input>` | PNG, JPEG, WebP, `.mcpx` | Report only (plus PNG bytes in `--json` view) | Frozen structure report or composited view (read-only; new in `v0.3.2`). |
+| `inspect <input>` | PNG, JPEG, WebP, `.mcpx` | Report only (plus PNG bytes in `--json` view) | Frozen structure report or composited view (read-only). |
 | `validate <asset>` | Asset file (PNG) | Report only (exit 3 on defect) | Validates single asset texture and optional `.mcmeta`. |
 | `validate-pack <path>` | Resource Pack root directory | Report only (exit 3 on defect) | Full scan of resource pack integrity, namespaces, models, textures, and atlases. |
 
@@ -210,7 +231,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
 - `--vanilla`: caller-provided vanilla resource tree (pack-root shape, including `assets/`). Once provided, `minecraft`-namespace references are confirmed against that tree; without it they report a `PACK_UNRESOLVED_EXTERNAL` warning and a coverage entry instead of a missing-asset error.
 - `--dependency`: dependency pack roots, repeatable; the first occurrence has the highest priority.
 - Coverage: `validate` and `validate-pack` reports carry `coverage: {status, skipped}`; `partial` means some checks were skipped (for example `vanilla-not-provided`, `unsupported-source-type`, `unsupported-regex`, `unknown-node-type`, `renderer-fields-not-interpreted`, `version-undetermined`, `model-documents-not-loaded`), each skip with `kind` / `reason` / `target`. Coverage never changes the exit code (pass stays 0, fail stays 3). Texture-variable resolution reads the current pack's model documents only; a variable that leaves them is reported as `model-documents-not-loaded` coverage instead of being resolved across dependency or vanilla packs.
-- `inspect` was added in `v0.3.2` and is read-only, and takes no file flags (`INVALID_ARGUMENT`): `--mode structure` (default) reports layers (id, name, index, raw-alpha bounds, area, visibility, opacity, blend mode, raw RGBA color usage with hidden alpha-zero colors and stable top-16 truncation), regions (id, name, index, bounds, area only), and overlaps (layer box intersections plus real region-mask intersections); `--mode view` renders the composited pixels with `--crop <scope>` (a selection expression; an empty match is `EMPTY_SELECTION`) and `--scale <N>` (integer 1–16, nearest; default 1), returning the six-key metadata (`mode`, `sourceDimensions`, `crop`, `scale`, `outputDimensions`, `colorFormat`) plus `pngBase64` under `--json`. The long-edge auto-scale (a pre-scale long edge below 128 scales up toward 128, capped at 16) applies to the `apply_asset_operations` `feedback` images (added in `v0.3.2`) only, never to `inspect view`. Outputs beyond the 1024px edge are `RESOURCE_LIMIT_EXCEEDED` with a crop hint instead of a silent downscale. Do not confuse top-level `inspect` with `palette inspect` (palette characteristics).
+- `inspect` is read-only and takes no file flags (`INVALID_ARGUMENT`): `--mode structure` (default) reports layers (id, name, index, raw-alpha bounds, area, visibility, opacity, blend mode, raw RGBA color usage with hidden alpha-zero colors and stable top-16 truncation), regions (id, name, index, bounds, area only), and overlaps (layer box intersections plus real region-mask intersections); `--mode view` renders the composited pixels with `--crop <scope>` (a selection expression; an empty match is `EMPTY_SELECTION`) and `--scale <N>` (integer 1–16, nearest; default 1), returning the six-key metadata (`mode`, `sourceDimensions`, `crop`, `scale`, `outputDimensions`, `colorFormat`) plus `pngBase64` under `--json`. The long-edge auto-scale (a pre-scale long edge below 128 scales up toward 128, capped at 16) applies to the `apply_asset_operations` `feedback` images only, never to `inspect view`. Outputs beyond the 1024px edge are `RESOURCE_LIMIT_EXCEEDED` with a crop hint instead of a silent downscale. Do not confuse top-level `inspect` with `palette inspect` (palette characteristics).
 
 ---
 
@@ -266,9 +287,9 @@ Format is JSON array of operations:
 
 The same JSON shape is accepted by `apply_asset_operations` on the MCP surface: a bare array or an `{"operations": [...]}` envelope; an empty array is a valid no-op. Every operation accepts an optional string `id` (unique within one batch). `layerId` defaults to the sole layer on single-layer canvases; set it explicitly when the canvas has more than one layer (`regionFromSelection`, `mergeLayer`, and the region operations take no `layerId`). Colors are `transparent`, `#RRGGBB`, or `#RRGGBBAA`; coordinates are integers, never rounded.
 
-The nine pixel operations accept an optional `selection` (a selection-expression atom string or object, same grammar as `--selection`). Only selected pixels are written; every unselected raw byte is restored verbatim, including hidden RGB under alpha 0. `fillRect` may omit `rect` when `selection` is present (the fill covers the selection bounds, clipped by the selection). New shapes follow the frozen integer geometry and selection clipping (all three shapes added in `v0.3.2`): `ellipse` fills or outlines the ellipse inscribed in `rect` (`mode` is required, `fill` or `outline`); `polygonFill` fills the polygon named by `points`; `strokeMask` outlines the `source` selection read scope on `layerId` without painting the scope itself. A selection that matches no pixels refuses the write with `EMPTY_SELECTION` and rolls the batch back; the `quantize` / `cleanup` / `recolor` `--selection` paths keep their existing restore behavior instead.
+The nine pixel operations accept an optional `selection` (a selection-expression atom string or object, same grammar as `--selection`). Only selected pixels are written; every unselected raw byte is restored verbatim, including hidden RGB under alpha 0. `fillRect` may omit `rect` when `selection` is present (the fill covers the selection bounds, clipped by the selection). The three shapes follow the frozen integer geometry and selection clipping: `ellipse` fills or outlines the ellipse inscribed in `rect` (`mode` is required, `fill` or `outline`); `polygonFill` fills the polygon named by `points`; `strokeMask` outlines the `source` selection read scope on `layerId` without painting the scope itself. A selection that matches no pixels refuses the write with `EMPTY_SELECTION` and rolls the batch back; the `quantize` / `cleanup` / `recolor` `--selection` paths keep their existing restore behavior instead.
 
-Selection expressions name atoms (`all`, `rect:x,y,w,h`, `region:id`, `alpha[:layer]`, `color[:layer]:r,g,b,a`, `connected[:layer]:x,y`) or a JSON AST object (`{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}`), capped at depth 32 and 1024 nodes. The JSON AST object form was added in `v0.3.2`.
+Selection expressions name atoms (`all`, `rect:x,y,w,h`, `region:id`, `alpha[:layer]`, `color[:layer]:r,g,b,a`, `connected[:layer]:x,y`) or a JSON AST object (`{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}`), capped at depth 32 and 1024 nodes.
 
 | `type` | Required keys | Optional keys | Example |
 |---|---|---|---|
@@ -278,9 +299,9 @@ Selection expressions name atoms (`all`, `rect:x,y,w,h`, `region:id`, `alpha[:la
 | `drawRect` | `rect`, `color` | `layerId`, `selection`, `id` | `{"type": "drawRect", "rect": {"x": 2, "y": 2, "width": 4, "height": 4}, "color": "#0000FFFF"}` |
 | `fillRect` | `color` (`rect` required unless `selection` is present) | `layerId`, `rect`, `selection`, `id` | `{"type": "fillRect", "rect": {"x": 8, "y": 8, "width": 4, "height": 4}, "color": "#FFFF00FF"}` |
 | `floodFill` | `x`, `y`, `color` | `layerId`, `selection`, `id` | `{"type": "floodFill", "x": 3, "y": 3, "color": "#FF00FFFF"}` |
-| `ellipse` (new in `v0.3.2`) | `rect`, `color`, `mode` (`fill` / `outline`) | `layerId`, `selection`, `id` | `{"type": "ellipse", "rect": {"x": 1, "y": 1, "width": 6, "height": 4}, "color": "#FF0000FF", "mode": "fill"}` |
-| `polygonFill` (new in `v0.3.2`) | `points` (array of `[x, y]` integer pairs), `color` | `layerId`, `selection`, `id` | `{"type": "polygonFill", "points": [[0, 0], [4, 0], [2, 3]], "color": "#00FF00FF"}` |
-| `strokeMask` (new in `v0.3.2`) | `layerId`, `source` (selection expression), `color` | `selection`, `id` | `{"type": "strokeMask", "layerId": "base", "source": "alpha:base", "color": "#FFFFFFFF"}` |
+| `ellipse` | `rect`, `color`, `mode` (`fill` / `outline`) | `layerId`, `selection`, `id` | `{"type": "ellipse", "rect": {"x": 1, "y": 1, "width": 6, "height": 4}, "color": "#FF0000FF", "mode": "fill"}` |
+| `polygonFill` | `points` (array of `[x, y]` integer pairs), `color` | `layerId`, `selection`, `id` | `{"type": "polygonFill", "points": [[0, 0], [4, 0], [2, 3]], "color": "#00FF00FF"}` |
+| `strokeMask` | `layerId`, `source` (selection expression), `color` | `selection`, `id` | `{"type": "strokeMask", "layerId": "base", "source": "alpha:base", "color": "#FFFFFFFF"}` |
 | `createLayer` | (none) | `layerId` (new id), `name`, `id` | `{"type": "createLayer", "layerId": "shade"}` |
 | `removeLayer` | `layerId` | `id` | `{"type": "removeLayer", "layerId": "shade"}` |
 | `renameLayer` | `layerId`, `name` | `id` | `{"type": "renameLayer", "layerId": "shade", "name": "shadow"}` |
@@ -295,10 +316,10 @@ Selection expressions name atoms (`all`, `rect:x,y,w,h`, `region:id`, `alpha[:la
 | `renameRegion` | `regionId`, `name` | `id` | `{"type": "renameRegion", "regionId": "mask", "name": "cutout"}` |
 | `reorderRegion` | `regionId`, `toIndex` | `id` | `{"type": "reorderRegion", "regionId": "mask", "toIndex": 0}` |
 | `setRegionPixel` | `regionId`, `x`, `y`, `value` | `id` | `{"type": "setRegionPixel", "regionId": "mask", "x": 1, "y": 2, "value": 1}` |
-| `stampRect` (new in `v0.3.2`) | `layerId`, `source`, one of `to` / `offset` | `transform` (`flip`: `h` / `v`; `rotate`: `0` / `90` / `180` / `270`), `merge` (`replace` default / `source-over`), `carryRegions` (default false), `selection`, `id` | `{"type": "stampRect", "layerId": "base", "source": "rect:8,8,8,8", "offset": {"dx": 0, "dy": 8}}` |
-| `regionFromSelection` (new in `v0.3.2`) | `selection`, `mode` (`create` / `update`) | `regionId`, `name`, `id` | `{"type": "regionFromSelection", "selection": "alpha:base", "mode": "create", "regionId": "body"}` |
+| `stampRect` | `layerId`, `source`, one of `to` / `offset` | `transform` (`flip`: `h` / `v`; `rotate`: `0` / `90` / `180` / `270`), `merge` (`replace` default / `source-over`), `carryRegions` (default false), `selection`, `id` | `{"type": "stampRect", "layerId": "base", "source": "rect:8,8,8,8", "offset": {"dx": 0, "dy": 8}}` |
+| `regionFromSelection` | `selection`, `mode` (`create` / `update`) | `regionId`, `name`, `id` | `{"type": "regionFromSelection", "selection": "alpha:base", "mode": "create", "regionId": "body"}` |
 
-`from`/`to` are `[x, y]` integer pairs; `rect` is `{x, y, width, height}` with width and height at least 1; `toIndex` is 0 or a positive integer; `value` is `0` (outside) or `1` (inside). `polygonFill` takes at most 4096 points (`RESOURCE_LIMIT_EXCEEDED` beyond that); a self-intersecting ring is `SELF_INTERSECTING_POLYGON`, and holes are unsupported (nested rings read as separate outlines). `stampRect` copies the `source` read scope without clearing it (`source` decides what is read, `selection` only clips the write; `to` pins the transformed output's top-left, `offset` shifts it relative to the source bounds, and passing both is `ARGUMENT_CONFLICT`). Unknown `type` values are `INVALID_ARGUMENT`; duplicate `id` values are `DUPLICATE_OPERATION_ID`.
+In `drawLine`, `from` and `to` are `[x, y]` integer pairs; in `stampRect`, `to` is `{x, y}` and `offset` is `{dx, dy}`. `rect` is always `{x, y, width, height}` with width and height at least 1; `toIndex` is 0 or a positive integer; `value` is `0` (outside) or `1` (inside). `polygonFill` takes at most 4096 points (`RESOURCE_LIMIT_EXCEEDED` beyond that); a self-intersecting ring is `SELF_INTERSECTING_POLYGON`, and holes are unsupported (nested rings read as separate outlines). `stampRect` copies the `source` read scope without clearing it (`source` decides what is read, `selection` only clips the write; `to` pins the transformed output's top-left, `offset` shifts it relative to the source bounds, and passing both is `ARGUMENT_CONFLICT`). Unknown `type` values are `INVALID_ARGUMENT`; duplicate `id` values are `DUPLICATE_OPERATION_ID`.
 
 Batch execution is atomic: the first invalid operation rolls back all changes. (`apply_asset_operations` on the MCP surface additionally accepts `atomic: false`, which runs every operation and reports per-operation applied/failed statuses instead of rolling back.)
 
@@ -314,3 +335,20 @@ Batch execution is atomic: the first invalid operation rolls back all changes. (
 | **3** | Asset Validation Failure | Engine executed properly, but the asset or pack failed validation. | `VALIDATION_FAILED`, broken textures, bad `.mcmeta`. |
 | **4** | Filesystem Refusal | File exists without `--force`, missing directories without `--mkdir`. | `OUTPUT_EXISTS`, `FILESYSTEM_ERROR`. |
 | **5** | Unsupported / Resource Limit | Input format not supported, canvas limits exceeded. | Corrupt image header, `UNSUPPORTED_IMAGE_FORMAT`. |
+
+---
+
+## Troubleshooting & Common Pitfalls
+
+| Error Code | Exit | Root Cause | Remediation |
+|---|---|---|---|
+| `EMPTY_SELECTION` | 2 | A batch operation's `selection` or the `inspect --mode view` `--crop` matched no pixels. | Check layer and region bounds with `inspect --mode structure`, then widen the expression. |
+| `ARGUMENT_CONFLICT` | 2 | Mutually exclusive options supplied together (`--force` + `--in-place`, more than one geometry flag, `--selection` with a geometry flag, both `to` and `offset` in `stampRect`). | Drop one of the conflicting options. |
+| `OUTPUT_EXISTS` | 4 | Destination file already exists and `--force` was omitted. | Provide `--force` to confirm overwrite, or specify a new `--output` target. |
+| `FILESYSTEM_ERROR` | 4 | An input cannot be read, or the output's parent directory does not exist and `--mkdir` was omitted. | Check the input path, or pass `--mkdir` to create missing directories. |
+| `PACK_UNRESOLVED_EXTERNAL` | 0 (warning) | A `minecraft`-namespace reference (model parent, texture, or model) cannot be resolved without the vanilla tree. Reported as a warning plus a `vanilla-not-provided` coverage entry; it never fails the scan by itself. | Supply `--vanilla <path>` pointing to an extracted vanilla asset root to verify external references. |
+| `PACK_REFERENCE_CYCLE` | 3 | A model `parent` chain or a texture variable refers back to itself. | Break the loop in the model JSON (`parent` or `textures`). |
+| `INVALID_MCMETA` | 2 | A malformed `.mcmeta`; for `gui-scale`, also nine-slice borders that leave no middle band (`left + right >= width` or `top + bottom >= height`). | Keep `left + right < width` and `top + bottom < height`. |
+| `PACK_GUI_SCALING_BORDER` | 3 | `validate-pack` found a GUI sprite whose nine-slice borders leave no middle band (same test as `INVALID_MCMETA`). | Shrink the borders in that sprite's `.mcmeta`. |
+| `RESOURCE_LIMIT_EXCEEDED` | 5 | A hard limit was crossed: more than 4096 polygon points, a selection AST deeper than 32 or larger than 1024 nodes, an `inspect view` output edge over 1024px, or the canvas size and memory limits. | Use fewer points or a smaller selection expression; view a large canvas in pieces with `--crop`. |
+| `UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT` | 5 | A `minecraft:*` profile with an output path that does not end in `.png`. | Write Minecraft textures as `.png`. |
