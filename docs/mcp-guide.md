@@ -2,16 +2,21 @@
 
 [English](mcp-guide.md) | [繁體中文](mcp-guide.zh-TW.md) | [简体中文](mcp-guide.zh-CN.md)
 
+## Contents
+
+- [Installing and registering the server](#installing-and-registering-the-server)
+- [The twenty-one tools](#the-twenty-one-tools)
+- [How failures come back](#how-failures-come-back)
+- [Limits and gaps](#limits-and-gaps)
+
+---
+
 `mc-asset mcp` starts a stdio MCP server: stdout carries only MCP JSON-RPC,
 diagnostics go to stderr, and the process ends when stdin closes. The frozen
 surface — twenty-one tool names, their inputs, and the read/write contract — lives
 in `docs/mcp-surface.md`; the input fields are frozen in `src/mcp/schema.ts`.
 This guide covers registration, one capture per tool (image bytes are
 abbreviated where noted, never verbatim), the error model, and the limits.
-The latest published release is `v0.3.2` (2026-09-23); `scale_gui_asset` and the authoring additions in the
-source tree (`inspect_asset`, the `apply_asset_operations` feedback object,
-and the `ellipse` / `polygonFill` / `strokeMask` operations) shipped with
-`v0.3.2`. A server built from the current source exposes all twenty-one tools.
 
 The server hangs directly off Core, so every tool runs the same engine the CLI
 commands use. Pixel-granularity authorship travels through the ASCII Grid
@@ -113,6 +118,16 @@ original captures come from the installed build and the later additions from
 the local source server — the same server code runs either way.
 
 ## The twenty-one tools
+
+| Tool Index | | |
+|---|---|---|
+| [`analyze_asset`](#analyze_asset) | [`pixelize_asset`](#pixelize_asset) | [`render_pixel_asset`](#render_pixel_asset) |
+| [`apply_asset_operations`](#apply_asset_operations) | [`recolor_asset`](#recolor_asset) | [`create_variants`](#create_variants) |
+| [`validate_asset`](#validate_asset) | [`import_asset`](#import_asset) | [`build_asset`](#build_asset) |
+| [`transform_asset`](#transform_asset) | [`quantize_asset`](#quantize_asset) | [`cleanup_asset`](#cleanup_asset) |
+| [`palette_asset`](#palette_asset) | [`material_asset`](#material_asset) | [`tile_asset`](#tile_asset) |
+| [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
+| [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
 
 ### analyze_asset
 

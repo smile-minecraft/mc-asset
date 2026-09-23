@@ -11,6 +11,7 @@ bun install --frozen-lockfile   # install dependencies from the lockfile
 bun test                        # run the test suite
 bun run test:typecheck          # tsc --noEmit
 bun run lint                    # biome check .
+bun run check:docs              # doc links, anchors, no stray release versions
 bun run build                   # node scripts/build.mjs
 ```
 
@@ -51,7 +52,7 @@ must run under plain Node as well as under Bun.
   `handlers.ts`, `tools.ts`, `server.ts`.
 - `tests/` — Bun and Node dual-entry suites plus fixtures.
 - `docs/` — the public CLI/MCP surfaces and the MCP guide.
-- `scripts/` — build, release staging, and cross-runtime comparison.
+- `scripts/` — build, release staging, cross-runtime comparison, and the docs check.
 - `homebrew/` — the Homebrew tap formula source.
 
 ## Tests

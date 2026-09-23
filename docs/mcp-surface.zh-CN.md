@@ -6,7 +6,7 @@
 
 工具名称已冻结。早期草稿把批处理编辑工具称为 `edit_asset`，冻结后的名称是 `apply_asset_operations`。
 
-最新发布版本为 `v0.3.2`（2026-09-23），把 Minecraft 版本支持扩大到 `1.19.3`–`26.3`。十二个工具（`import_asset` 到 `validate_pack_asset`；`palette_asset`、`material_asset`、`preview_asset`、`animate_asset` 把 CLI 子命令合并为 `mode` 字段）是在 `v0.3.0` 为了与 CLI 完全对等而新增的，名称与输入形状在此冻结。当前源码树额外带有 `scale_gui_asset`，以及 authoring 新增的 `inspect_asset`、`apply_asset_operations` 的 `feedback`、三个新批处理形状（`ellipse`、`polygonFill`、`strokeMask`）和选择范围 JSON AST 写法——均在 `v0.3.2` 中加入。由当前源码构建的服务器提供全部二十一个工具。
+Minecraft 目标版本涵盖 `1.19.3` 到 `26.3`。二十一个工具中，有十二个（`import_asset` 到 `validate_pack_asset`）是为了与 CLI 完全对等而设。各版本的变更记录在 [`CHANGELOG.md`](../CHANGELOG.md)。
 
 能力基础：与 CLI 完全对等——素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证。
 
