@@ -55,6 +55,7 @@ export type ErrorCode =
 	| "PACK_COVERAGE_SKIPPED"
 	| "PACK_REFERENCE_CYCLE"
 	| "EMPTY_SELECTION"
+	| "SELF_INTERSECTING_POLYGON"
 	| "TRANSACTION_FAILED";
 
 export type FixedErrorCode = Exclude<ErrorCode, "TRANSACTION_FAILED">;
@@ -122,6 +123,8 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	PACK_REFERENCE_CYCLE: 3,
 	// A selection-scoped write whose read scope matched no pixels.
 	EMPTY_SELECTION: 2,
+	// A polygon whose nonadjacent edges touch or cross (holes unsupported).
+	SELF_INTERSECTING_POLYGON: 2,
 };
 
 export function isErrorCode(value: unknown): value is ErrorCode {

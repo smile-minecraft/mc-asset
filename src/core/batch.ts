@@ -22,7 +22,16 @@ import {
 	reorderLayer,
 	reorderRegion,
 } from "./layers.ts";
-import { clearPixel, drawLine, drawRect, fillRect, floodFill } from "./ops.ts";
+import {
+	clearPixel,
+	drawEllipse,
+	drawLine,
+	drawRect,
+	fillPolygon,
+	fillRect,
+	floodFill,
+	strokeMask,
+} from "./ops.ts";
 import { evaluateSelectionExpr, type SelectionExpr } from "./selection.ts";
 import type {
 	PixelCanvas,
@@ -38,7 +47,8 @@ import { validateCoordinate } from "./validate.ts";
  * transaction semantics (§30) and per-operation reporting (§103).
  *
  * The operation vocabulary mirrors the primitive signatures: setPixel,
- * clearPixel, drawLine, drawRect, fillRect, floodFill, plus the layer and
+ * clearPixel, drawLine, drawRect, fillRect, floodFill, ellipse,
+ * polygonFill, strokeMask, plus the layer and
  * region vocabulary (create/remove/rename/reorder/duplicate/merge/clear/
  * fill/move layers, create/remove/rename/reorder regions, setRegionPixel).
  * Geometry operations (resize, crop, pad, translate, flip, rotate) are
@@ -109,6 +119,39 @@ export interface FloodFillOperation extends OperationBase, PixelWriteScope {
 	x: number;
 	y: number;
 	color: RGBA;
+}
+
+export interface EllipseOperation extends OperationBase, PixelWriteScope {
+	type: "ellipse";
+	layerId: string;
+	rect: Rect;
+	color: RGBA;
+	mode: "fill" | "outline";
+}
+
+export interface PolygonPoint {
+	x: number;
+	y: number;
+}
+
+export interface PolygonFillOperation extends OperationBase, PixelWriteScope {
+	type: "polygonFill";
+	layerId: string;
+	points: PolygonPoint[];
+	color: RGBA;
+}
+
+/**
+ * Outline a selection read scope without painting the scope itself.
+ * `source` decides which mask is outlined (it may read another layer);
+ * the optional `selection` only clips the destination write.
+ */
+export interface StrokeMaskOperation extends OperationBase {
+	type: "strokeMask";
+	layerId: string;
+	source: SelectionExpr;
+	color: RGBA;
+	selection?: SelectionExpr;
 }
 
 export interface StampTransform {
@@ -235,6 +278,9 @@ export type BatchOperation =
 	| DrawRectOperation
 	| FillRectOperation
 	| FloodFillOperation
+	| EllipseOperation
+	| PolygonFillOperation
+	| StrokeMaskOperation
 	| CreateLayerOperation
 	| RemoveLayerOperation
 	| RenameLayerOperation
@@ -727,6 +773,34 @@ function dispatch(canvas: PixelCanvas, op: BatchOperation): void {
 			const mask = resolveWriteMask(canvas, op.selection, "selection");
 			withWriteScope(canvas, op.layerId, mask, () => {
 				floodFill(canvas, op.layerId, op.x, op.y, op.color);
+			});
+			return;
+		}
+		case "ellipse": {
+			assertLayerId(op.layerId);
+			const mask = resolveWriteMask(canvas, op.selection, "selection");
+			withWriteScope(canvas, op.layerId, mask, () => {
+				drawEllipse(canvas, op.layerId, op.rect, op.color, op.mode);
+			});
+			return;
+		}
+		case "polygonFill": {
+			assertLayerId(op.layerId);
+			const mask = resolveWriteMask(canvas, op.selection, "selection");
+			withWriteScope(canvas, op.layerId, mask, () => {
+				fillPolygon(canvas, op.layerId, op.points, op.color);
+			});
+			return;
+		}
+		case "strokeMask": {
+			assertLayerId(op.layerId);
+			const read = evaluateSelectionExpr(canvas, op.source, "source");
+			if (read.count === 0) {
+				throw emptySelectionError("source");
+			}
+			const clip = resolveWriteMask(canvas, op.selection, "selection");
+			withWriteScope(canvas, op.layerId, clip, () => {
+				strokeMask(canvas, op.layerId, read.mask, op.color);
 			});
 			return;
 		}

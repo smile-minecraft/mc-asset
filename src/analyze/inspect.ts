@@ -1,6 +1,7 @@
 import { applyOperations, type BatchOperation } from "../core/batch.ts";
 import { addLayer, createCanvas, replaceLayerPixels } from "../core/canvas.ts";
 import { McAssetError } from "../core/errors.ts";
+import { strokeOutlineCells } from "../core/ops.ts";
 import {
 	evaluateSelectionExpr,
 	parseSelectionExprValue,
@@ -675,7 +676,9 @@ interface WriteScopes {
  * contents. Pixel ops contribute their selection mask (or the whole layer
  * when unscoped, which makes that layer's outside vacuously empty);
  * stampRect contributes its transformed destination footprint clipped by
- * its write selection while its source stays read-only; whole-layer
+ * its write selection while its source stays read-only; strokeMask
+ * contributes its outside 1px outline clipped by its write selection
+ * while its source stays read-only; whole-layer
  * writers (fill, clear, move, merge target) contribute the whole layer.
  * Region and layer membership ops write no pixels. Replay reuses the
  * real batch entry, so its states match execution by determinism. A failed
@@ -723,7 +726,9 @@ function computeWriteScopes(
 				case "drawLine":
 				case "drawRect":
 				case "fillRect":
-				case "floodFill": {
+				case "floodFill":
+				case "ellipse":
+				case "polygonFill": {
 					if (op.selection === undefined) {
 						unionInto(scopes, op.layerId, fullMask(width, height));
 						break;
@@ -734,6 +739,27 @@ function computeWriteScopes(
 						op.layerId,
 						evaluateSelectionExpr(replay, op.selection, "selection").mask,
 					);
+					break;
+				}
+				case "strokeMask": {
+					hasDeclaredScopes = true;
+					const read = evaluateSelectionExpr(replay, op.source, "source");
+					if (read.count > 0) {
+						const outline = strokeOutlineCells(read.mask, width, height);
+						if (op.selection !== undefined) {
+							const clip = evaluateSelectionExpr(
+								replay,
+								op.selection,
+								"selection",
+							).mask;
+							for (let i = 0; i < outline.length; i += 1) {
+								if (clip[i] !== 1) {
+									outline[i] = 0;
+								}
+							}
+						}
+						unionInto(scopes, op.layerId, outline);
+					}
 					break;
 				}
 				case "stampRect": {

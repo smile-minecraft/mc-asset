@@ -1,3 +1,8 @@
+import {
+	buildFeedback,
+	diffCanvases,
+	snapshotCanvas,
+} from "../../src/analyze/inspect.ts";
 import { applyOperations, type BatchOperation } from "../../src/core/batch.ts";
 import {
 	addLayer,
@@ -64,6 +69,61 @@ function caughtDetails(error: unknown): Record<string, unknown> {
 		throw new Error("expected McAssetError details to be an object");
 	}
 	return details as Record<string, unknown>;
+}
+
+function expectCode(check: CaseCheck, fn: () => unknown, code: string): void {
+	try {
+		fn();
+	} catch (error) {
+		if (error instanceof McAssetError && error.code === code) {
+			return;
+		}
+		check.fail(
+			`expected McAssetError(${code}) but got ${error instanceof McAssetError ? `${error.code} ${error.message}` : String(error)}`,
+		);
+	}
+	check.fail(`expected McAssetError(${code}) but nothing was thrown`);
+}
+
+/** Painted pixels in row-major order: pins traversal order plus the set. */
+function paintedPoints(
+	canvas: PixelCanvas,
+	layerId: string,
+): Array<[number, number]> {
+	const layer = getLayer(canvas, layerId);
+	const out: Array<[number, number]> = [];
+	for (let y = 0; y < canvas.height; y += 1) {
+		for (let x = 0; x < canvas.width; x += 1) {
+			if (layer.pixels[(y * canvas.width + x) * 4 + 3] !== 0) {
+				out.push([x, y]);
+			}
+		}
+	}
+	return out;
+}
+
+function pixelAt(
+	canvas: PixelCanvas,
+	layerId: string,
+	x: number,
+	y: number,
+): RGBA {
+	const raw = getLayer(canvas, layerId).pixels;
+	const offset = (y * canvas.width + x) * 4;
+	return {
+		r: raw[offset],
+		g: raw[offset + 1],
+		b: raw[offset + 2],
+		a: raw[offset + 3],
+	};
+}
+
+/** Flip one byte on a snapshot canvas to simulate an out-of-scope write. */
+function setPixelForDiff(canvas: PixelCanvas, x: number, y: number): void {
+	const layer = getLayer(canvas, "base");
+	const offset = (y * canvas.width + x) * 4;
+	layer.pixels[offset] = 255;
+	layer.pixels[offset + 3] = 255;
 }
 
 export const BATCH_CASES: BatchCase[] = [
@@ -316,7 +376,7 @@ export const BATCH_CASES: BatchCase[] = [
 			const canvas = fresh(16, 16);
 			const before = snapshotAll(canvas);
 			const ops = [
-				{ id: "mystery", type: "ellipse", layerId: "base", x: 0, y: 0 },
+				{ id: "mystery", type: "wigglePixels", layerId: "base", x: 0, y: 0 },
 			] as unknown as BatchOperation[];
 			try {
 				applyOperations(canvas, ops);
@@ -1496,6 +1556,1039 @@ export const BATCH_CASES: BatchCase[] = [
 		},
 	},
 	{
+		name: "ellipse fill paints the exact odd-size pixel set row-major",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const ops = [
+				{
+					type: "ellipse",
+					layerId: "base",
+					rect: { x: 1, y: 2, width: 5, height: 3 },
+					color: INK,
+					mode: "fill",
+				},
+			] as unknown as BatchOperation[];
+			const report = applyOperations(canvas, ops);
+			check.equal(report.applied, 1, "ellipse applied");
+			// dx=2*lx+1-5 in {-4,-2,0,2,4}, dy=2*ly+1-3 in {-2,0,2};
+			// inside iff dx*dx*9 + dy*dy*25 <= 225.
+			check.deepEqual(
+				paintedPoints(canvas, "base"),
+				[
+					[2, 2],
+					[3, 2],
+					[4, 2],
+					[1, 3],
+					[2, 3],
+					[3, 3],
+					[4, 3],
+					[5, 3],
+					[2, 4],
+					[3, 4],
+					[4, 4],
+				],
+				"exact 5x3 fill set in row-major order",
+			);
+		},
+	},
+	{
+		name: "ellipse outline keeps only the inner 1px edge",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			applyOperations(canvas, [
+				{
+					type: "ellipse",
+					layerId: "base",
+					rect: { x: 1, y: 2, width: 5, height: 3 },
+					color: INK,
+					mode: "outline",
+				},
+			] as unknown as BatchOperation[]);
+			check.deepEqual(
+				paintedPoints(canvas, "base"),
+				[
+					[2, 2],
+					[3, 2],
+					[4, 2],
+					[1, 3],
+					[5, 3],
+					[2, 4],
+					[3, 4],
+					[4, 4],
+				],
+				"middle-row interior dropped, 1px inner edge kept",
+			);
+		},
+	},
+	{
+		name: "ellipse even dimensions stay symmetric",
+		run: (check) => {
+			const filled = fresh(4, 4);
+			applyOperations(filled, [
+				{
+					type: "ellipse",
+					layerId: "base",
+					rect: { x: 0, y: 0, width: 4, height: 4 },
+					color: INK,
+					mode: "fill",
+				},
+			] as unknown as BatchOperation[]);
+			// dx,dy in {-3,-1,1,3}; inside iff dx*dx + dy*dy <= 16.
+			check.deepEqual(
+				paintedPoints(filled, "base"),
+				[
+					[1, 0],
+					[2, 0],
+					[0, 1],
+					[1, 1],
+					[2, 1],
+					[3, 1],
+					[0, 2],
+					[1, 2],
+					[2, 2],
+					[3, 2],
+					[1, 3],
+					[2, 3],
+				],
+				"exact 4x4 fill set",
+			);
+			const outlined = fresh(4, 4);
+			applyOperations(outlined, [
+				{
+					type: "ellipse",
+					layerId: "base",
+					rect: { x: 0, y: 0, width: 4, height: 4 },
+					color: INK,
+					mode: "outline",
+				},
+			] as unknown as BatchOperation[]);
+			check.deepEqual(
+				paintedPoints(outlined, "base"),
+				[
+					[1, 0],
+					[2, 0],
+					[0, 1],
+					[3, 1],
+					[0, 2],
+					[3, 2],
+					[1, 3],
+					[2, 3],
+				],
+				"exact 4x4 outline set",
+			);
+		},
+	},
+	{
+		name: "ellipse rejects degenerate dimensions before bounds",
+		run: (check) => {
+			const canvas = fresh(16, 16);
+			const before = snapshotAll(canvas);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "ellipse",
+							layerId: "base",
+							rect: { x: 0, y: 0, width: 1, height: 5 },
+							color: INK,
+							mode: "fill",
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_DIMENSION",
+			);
+			// Degenerate and out of bounds: dimension wins.
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "ellipse",
+							layerId: "base",
+							rect: { x: 15, y: 15, width: 1, height: 1 },
+							color: INK,
+							mode: "fill",
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_DIMENSION",
+			);
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"degenerate ellipse writes nothing",
+			);
+		},
+	},
+	{
+		name: "ellipse rejects non-integer coordinates first",
+		run: (check) => {
+			const canvas = fresh(16, 16);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "ellipse",
+							layerId: "base",
+							rect: { x: 1.5, y: 0, width: 1, height: 1 },
+							color: INK,
+							mode: "fill",
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_COORDINATE",
+			);
+		},
+	},
+	{
+		name: "ellipse outside the canvas rolls back",
+		run: (check) => {
+			const canvas = fresh(16, 16);
+			const before = snapshotAll(canvas);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "ellipse",
+							layerId: "base",
+							rect: { x: 13, y: 0, width: 4, height: 2 },
+							color: INK,
+							mode: "fill",
+						},
+					] as unknown as BatchOperation[]),
+				"OUT_OF_BOUNDS",
+			);
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"one-pixel overflow refuses without clipping",
+			);
+		},
+	},
+	{
+		name: "ellipse unknown mode is INVALID_ARGUMENT",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const before = snapshotAll(canvas);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "ellipse",
+							layerId: "base",
+							rect: { x: 0, y: 0, width: 4, height: 4 },
+							color: INK,
+							mode: "dashed",
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_ARGUMENT",
+			);
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"bad mode writes nothing",
+			);
+		},
+	},
+	{
+		name: "ellipse respects selection clipping with raw bytes preserved",
+		run: (check) => {
+			const canvas = fresh(6, 6);
+			const layer = getLayer(canvas, "base");
+			const hidden = (5 * 6 + 5) * 4;
+			layer.pixels[hidden] = 17;
+			layer.pixels[hidden + 1] = 34;
+			layer.pixels[hidden + 2] = 51;
+			layer.pixels[hidden + 3] = 0;
+			const before = snapshotAll(canvas);
+			applyOperations(canvas, [
+				{
+					type: "ellipse",
+					layerId: "base",
+					rect: { x: 0, y: 0, width: 4, height: 4 },
+					color: INK,
+					mode: "fill",
+					selection: "rect:0,0,2,2",
+				},
+			] as unknown as BatchOperation[]);
+			const raw = getLayer(canvas, "base").pixels;
+			check.deepEqual(pixelAt(canvas, "base", 1, 0), INK, "clipped cell kept");
+			check.deepEqual(pixelAt(canvas, "base", 0, 1), INK, "clipped cell kept");
+			for (let y = 0; y < 6; y += 1) {
+				for (let x = 0; x < 6; x += 1) {
+					if (
+						(x === 1 && y === 0) ||
+						(x === 0 && y === 1) ||
+						(x === 1 && y === 1)
+					) {
+						continue;
+					}
+					const offset = (y * 6 + x) * 4;
+					check.deepEqual(
+						[raw[offset], raw[offset + 1], raw[offset + 2], raw[offset + 3]],
+						[
+							before[0]?.[offset],
+							before[0]?.[offset + 1],
+							before[0]?.[offset + 2],
+							before[0]?.[offset + 3],
+						],
+						`outside (${x},${y}) byte-identical`,
+					);
+				}
+			}
+		},
+	},
+	{
+		name: "polygonFill paints the exact triangle set with boundary inside",
+		run: (check) => {
+			const canvas = fresh(6, 6);
+			applyOperations(canvas, [
+				{
+					type: "polygonFill",
+					layerId: "base",
+					points: [
+						{ x: 1, y: 1 },
+						{ x: 4, y: 1 },
+						{ x: 1, y: 4 },
+					],
+					color: FILL,
+				},
+			] as unknown as BatchOperation[]);
+			check.deepEqual(
+				paintedPoints(canvas, "base"),
+				[
+					[1, 1],
+					[2, 1],
+					[3, 1],
+					[4, 1],
+					[1, 2],
+					[2, 2],
+					[3, 2],
+					[1, 3],
+					[2, 3],
+					[1, 4],
+				],
+				"hypotenuse and legs count as inside",
+			);
+		},
+	},
+	{
+		name: "polygonFill concave notch excludes the even-odd outside pixel",
+		run: (check) => {
+			const points = [
+				{ x: 0, y: 0 },
+				{ x: 6, y: 0 },
+				{ x: 6, y: 6 },
+				{ x: 4, y: 6 },
+				{ x: 4, y: 2 },
+				{ x: 2, y: 2 },
+				{ x: 2, y: 6 },
+				{ x: 0, y: 6 },
+			];
+			const first = fresh(7, 7);
+			applyOperations(first, [
+				{
+					type: "polygonFill",
+					layerId: "base",
+					points,
+					color: FILL,
+				},
+			] as unknown as BatchOperation[]);
+			const painted = (x: number, y: number): boolean =>
+				pixelAt(first, "base", x, y).a !== 0;
+			check.ok(!painted(3, 4), "(3,4) inside the notch stays outside");
+			check.ok(!painted(3, 5), "(3,5) inside the notch stays outside");
+			check.ok(painted(1, 4), "(1,4) left of the notch is inside");
+			check.ok(painted(5, 4), "(5,4) right of the notch is inside");
+			check.ok(painted(3, 1), "(3,1) below the notch is inside");
+			check.ok(painted(2, 4), "(2,4) on the notch wall counts inside");
+			check.ok(painted(4, 4), "(4,4) on the notch wall counts inside");
+			check.ok(painted(3, 2), "(3,2) on the notch floor counts inside");
+			// Deterministic row-major rerun: byte-identical output.
+			const second = fresh(7, 7);
+			applyOperations(second, [
+				{
+					type: "polygonFill",
+					layerId: "base",
+					points,
+					color: FILL,
+				},
+			] as unknown as BatchOperation[]);
+			expectBuffersEqual(
+				check,
+				snapshotAll(second),
+				snapshotAll(first),
+				"same polygon reruns byte-identical",
+			);
+		},
+	},
+	{
+		name: "polygonFill allows consecutive collinear points",
+		run: (check) => {
+			const canvas = fresh(6, 6);
+			applyOperations(canvas, [
+				{
+					type: "polygonFill",
+					layerId: "base",
+					points: [
+						{ x: 1, y: 1 },
+						{ x: 2, y: 1 },
+						{ x: 4, y: 1 },
+						{ x: 1, y: 4 },
+					],
+					color: FILL,
+				},
+			] as unknown as BatchOperation[]);
+			check.deepEqual(
+				paintedPoints(canvas, "base"),
+				[
+					[1, 1],
+					[2, 1],
+					[3, 1],
+					[4, 1],
+					[1, 2],
+					[2, 2],
+					[3, 2],
+					[1, 3],
+					[2, 3],
+					[1, 4],
+				],
+				"extra collinear vertex changes nothing",
+			);
+		},
+	},
+	{
+		name: "polygonFill rejects adjacent duplicates and closing repeats",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const before = snapshotAll(canvas);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "polygonFill",
+							layerId: "base",
+							points: [
+								{ x: 1, y: 1 },
+								{ x: 1, y: 1 },
+								{ x: 4, y: 1 },
+								{ x: 1, y: 4 },
+							],
+							color: FILL,
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_ARGUMENT",
+			);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "polygonFill",
+							layerId: "base",
+							points: [
+								{ x: 4, y: 4 },
+								{ x: 7, y: 4 },
+								{ x: 4, y: 7 },
+								{ x: 4, y: 4 },
+							],
+							color: FILL,
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_ARGUMENT",
+			);
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"duplicate vertices write nothing",
+			);
+		},
+	},
+	{
+		name: "polygonFill rejects fewer than three distinct points and full collinearity",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "polygonFill",
+							layerId: "base",
+							points: [
+								{ x: 1, y: 1 },
+								{ x: 2, y: 2 },
+								{ x: 1, y: 1 },
+							],
+							color: FILL,
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_ARGUMENT",
+			);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "polygonFill",
+							layerId: "base",
+							points: [
+								{ x: 0, y: 0 },
+								{ x: 2, y: 0 },
+								{ x: 4, y: 0 },
+							],
+							color: FILL,
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_ARGUMENT",
+			);
+		},
+	},
+	{
+		name: "polygonFill rejects self-crossing and self-touching rings",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const before = snapshotAll(canvas);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "polygonFill",
+							layerId: "base",
+							points: [
+								{ x: 0, y: 0 },
+								{ x: 4, y: 4 },
+								{ x: 0, y: 4 },
+								{ x: 4, y: 0 },
+							],
+							color: FILL,
+						},
+					] as unknown as BatchOperation[]),
+				"SELF_INTERSECTING_POLYGON",
+			);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "polygonFill",
+							layerId: "base",
+							points: [
+								{ x: 0, y: 0 },
+								{ x: 4, y: 0 },
+								{ x: 4, y: 4 },
+								{ x: 2, y: 0 },
+								{ x: 0, y: 4 },
+							],
+							color: FILL,
+						},
+					] as unknown as BatchOperation[]),
+				"SELF_INTERSECTING_POLYGON",
+			);
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"self-intersection leaves no partial fill",
+			);
+		},
+	},
+	{
+		name: "polygonFill rejects out-of-bounds points and non-integers",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "polygonFill",
+							layerId: "base",
+							points: [
+								{ x: 0, y: 0 },
+								{ x: 8, y: 0 },
+								{ x: 0, y: 7 },
+							],
+							color: FILL,
+						},
+					] as unknown as BatchOperation[]),
+				"OUT_OF_BOUNDS",
+			);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "polygonFill",
+							layerId: "base",
+							points: [
+								{ x: 0, y: 0 },
+								{ x: 2.5, y: 0 },
+								{ x: 0, y: 7 },
+							],
+							color: FILL,
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_COORDINATE",
+			);
+		},
+	},
+	{
+		name: "polygonFill over 4096 points is RESOURCE_LIMIT_EXCEEDED",
+		run: (check) => {
+			const canvas = fresh(128, 128);
+			const points: Array<{ x: number; y: number }> = [];
+			for (let i = 0; i < 4097; i += 1) {
+				points.push({ x: i % 128, y: (i / 128) | 0 });
+			}
+			const before = snapshotAll(canvas);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "polygonFill",
+							layerId: "base",
+							points,
+							color: FILL,
+						},
+					] as unknown as BatchOperation[]),
+				"RESOURCE_LIMIT_EXCEEDED",
+			);
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"oversized polygon writes nothing",
+			);
+		},
+	},
+	{
+		name: "polygonFill failure rolls the batch back",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const before = snapshotAll(canvas);
+			try {
+				applyOperations(canvas, [
+					{ type: "setPixel", layerId: "base", x: 0, y: 0, color: INK },
+					{
+						type: "polygonFill",
+						layerId: "base",
+						points: [
+							{ x: 0, y: 0 },
+							{ x: 4, y: 4 },
+							{ x: 0, y: 4 },
+							{ x: 4, y: 0 },
+						],
+						color: FILL,
+					},
+				] as unknown as BatchOperation[]);
+				check.fail("expected self-intersection to throw");
+			} catch (error) {
+				check.equal(
+					(error as McAssetError).code,
+					"SELF_INTERSECTING_POLYGON",
+					"original code, not TRANSACTION_FAILED",
+				);
+				check.equal(
+					caughtDetails(error).operationIndex,
+					1,
+					"failing index reported",
+				);
+			}
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"invalid polygon rolls the earlier write back",
+			);
+		},
+	},
+	{
+		name: "polygonFill respects selection clipping",
+		run: (check) => {
+			const canvas = fresh(6, 6);
+			const before = snapshotAll(canvas);
+			applyOperations(canvas, [
+				{
+					type: "polygonFill",
+					layerId: "base",
+					points: [
+						{ x: 1, y: 1 },
+						{ x: 4, y: 1 },
+						{ x: 1, y: 4 },
+					],
+					color: FILL,
+					selection: "rect:1,1,2,2",
+				},
+			] as unknown as BatchOperation[]);
+			const raw = getLayer(canvas, "base").pixels;
+			for (let y = 0; y < 6; y += 1) {
+				for (let x = 0; x < 6; x += 1) {
+					const offset = (y * 6 + x) * 4;
+					const clipped = x >= 1 && x < 3 && y >= 1 && y < 3;
+					if (clipped) {
+						continue;
+					}
+					check.deepEqual(
+						[raw[offset], raw[offset + 1], raw[offset + 2], raw[offset + 3]],
+						[
+							before[0]?.[offset],
+							before[0]?.[offset + 1],
+							before[0]?.[offset + 2],
+							before[0]?.[offset + 3],
+						],
+						`outside (${x},${y}) byte-identical`,
+					);
+				}
+			}
+			check.deepEqual(pixelAt(canvas, "base", 1, 1), FILL, "clipped cell kept");
+			check.deepEqual(
+				pixelAt(canvas, "base", 4, 1),
+				{ r: 0, g: 0, b: 0, a: 0 },
+				"shape cell outside the clip untouched",
+			);
+		},
+	},
+	{
+		name: "strokeMask paints only the outside 1px outline",
+		run: (check) => {
+			const canvas = fresh(6, 6);
+			const report = applyOperations(canvas, [
+				{
+					type: "fillRect",
+					layerId: "base",
+					rect: { x: 2, y: 2, width: 2, height: 2 },
+					color: INK,
+				},
+				{
+					type: "strokeMask",
+					layerId: "base",
+					source: "alpha:base",
+					color: FILL,
+				},
+			] as unknown as BatchOperation[]);
+			check.equal(report.applied, 2, "seed plus stroke applied");
+			check.deepEqual(
+				paintedPoints(canvas, "base"),
+				[
+					[2, 1],
+					[3, 1],
+					[1, 2],
+					[2, 2],
+					[3, 2],
+					[4, 2],
+					[1, 3],
+					[2, 3],
+					[3, 3],
+					[4, 3],
+					[2, 4],
+					[3, 4],
+				],
+				"mask cells plus their outside 1px ring",
+			);
+			check.deepEqual(
+				pixelAt(canvas, "base", 2, 2),
+				INK,
+				"mask kept, not overpainted",
+			);
+			check.deepEqual(pixelAt(canvas, "base", 2, 1), FILL, "ring painted");
+		},
+	},
+	{
+		name: "strokeMask reads another layer and never mutates the source mask",
+		run: (check) => {
+			const canvas = createCanvas(6, 6);
+			addLayer(canvas, { id: "base" });
+			addLayer(canvas, { id: "overlay" });
+			addRegion(canvas, { id: "badge" });
+			setRegionValue(canvas, "badge", 2, 2, 1);
+			setRegionValue(canvas, "badge", 3, 2, 1);
+			setRegionValue(canvas, "badge", 2, 3, 1);
+			setRegionValue(canvas, "badge", 3, 3, 1);
+			const maskBefore = canvas.regions[0]?.mask.slice();
+			applyOperations(canvas, [
+				{
+					type: "strokeMask",
+					layerId: "overlay",
+					source: "region:badge",
+					color: FILL,
+				},
+			] as unknown as BatchOperation[]);
+			check.deepEqual(
+				paintedPoints(canvas, "overlay"),
+				[
+					[2, 1],
+					[3, 1],
+					[1, 2],
+					[4, 2],
+					[1, 3],
+					[4, 3],
+					[2, 4],
+					[3, 4],
+				],
+				"outline lands on the target layer only",
+			);
+			check.deepEqual(
+				paintedPoints(canvas, "base"),
+				[],
+				"other layer untouched",
+			);
+			check.ok(
+				maskBefore !== undefined &&
+					canvas.regions[0] !== undefined &&
+					buffersEqual(canvas.regions[0].mask, maskBefore),
+				"source region mask unchanged",
+			);
+		},
+	},
+	{
+		name: "strokeMask clips to canvas edges without throwing",
+		run: (check) => {
+			const canvas = fresh(4, 4);
+			const report = applyOperations(canvas, [
+				{
+					type: "fillRect",
+					layerId: "base",
+					rect: { x: 0, y: 0, width: 2, height: 2 },
+					color: INK,
+				},
+				{
+					type: "strokeMask",
+					layerId: "base",
+					source: "alpha:base",
+					color: FILL,
+				},
+			] as unknown as BatchOperation[]);
+			check.equal(report.applied, 2, "edge stroke applied");
+			check.deepEqual(
+				paintedPoints(canvas, "base"),
+				[
+					[0, 0],
+					[1, 0],
+					[2, 0],
+					[0, 1],
+					[1, 1],
+					[2, 1],
+					[0, 2],
+					[1, 2],
+				],
+				"only in-canvas ring cells written",
+			);
+		},
+	},
+	{
+		name: "strokeMask destination selection clips the write with raw bytes preserved",
+		run: (check) => {
+			const canvas = fresh(6, 6);
+			const layer = getLayer(canvas, "base");
+			const hidden = (5 * 6 + 0) * 4;
+			layer.pixels[hidden] = 17;
+			layer.pixels[hidden + 1] = 34;
+			layer.pixels[hidden + 2] = 51;
+			layer.pixels[hidden + 3] = 0;
+			const before = snapshotAll(canvas);
+			applyOperations(canvas, [
+				{
+					type: "fillRect",
+					layerId: "base",
+					rect: { x: 2, y: 2, width: 2, height: 2 },
+					color: INK,
+				},
+				{
+					type: "strokeMask",
+					layerId: "base",
+					source: "alpha:base",
+					color: FILL,
+					selection: "rect:0,0,3,6",
+				},
+			] as unknown as BatchOperation[]);
+			check.deepEqual(pixelAt(canvas, "base", 2, 1), FILL, "clipped ring kept");
+			check.deepEqual(pixelAt(canvas, "base", 1, 2), FILL, "clipped ring kept");
+			check.deepEqual(
+				pixelAt(canvas, "base", 4, 2),
+				{ r: 0, g: 0, b: 0, a: 0 },
+				"ring cell outside the destination clip untouched",
+			);
+			const raw = getLayer(canvas, "base").pixels;
+			const offset = hidden;
+			check.deepEqual(
+				[raw[offset], raw[offset + 1], raw[offset + 2], raw[offset + 3]],
+				[
+					before[0]?.[offset],
+					before[0]?.[offset + 1],
+					before[0]?.[offset + 2],
+					before[0]?.[offset + 3],
+				],
+				"hidden RGB outside the clip byte-identical",
+			);
+		},
+	},
+	{
+		name: "strokeMask empty source is EMPTY_SELECTION with rollback",
+		run: (check) => {
+			const canvas = fresh(4, 4);
+			const before = snapshotAll(canvas);
+			try {
+				applyOperations(canvas, [
+					{ type: "setPixel", layerId: "base", x: 0, y: 0, color: INK },
+					{
+						type: "strokeMask",
+						layerId: "base",
+						source: "color:base:1,2,3,4",
+						color: FILL,
+					},
+				] as unknown as BatchOperation[]);
+				check.fail("expected empty source to throw");
+			} catch (error) {
+				check.equal(
+					(error as McAssetError).code,
+					"EMPTY_SELECTION",
+					"empty source code",
+				);
+				check.equal(
+					caughtDetails(error).operationIndex,
+					1,
+					"failing index reported",
+				);
+			}
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"empty source rolls the earlier write back",
+			);
+		},
+	},
+	{
+		name: "diffCanvases tracks the ellipse selection scope",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const before = snapshotCanvas(canvas);
+			const ops = [
+				{
+					type: "ellipse",
+					layerId: "base",
+					rect: { x: 1, y: 2, width: 5, height: 3 },
+					color: INK,
+					mode: "fill",
+					selection: "rect:0,0,7,8",
+				},
+			] as unknown as BatchOperation[];
+			applyOperations(canvas, ops);
+			const summary = diffCanvases(before, canvas, ops);
+			check.ok(summary.raw.changedPixels > 0, "ellipse diff is non-empty");
+			check.equal(
+				summary.outsideSelectionUnchanged,
+				true,
+				"scoped ellipse keeps the outside invariant",
+			);
+			// Tampering outside the declared scope must read as a failure.
+			const tampered = snapshotCanvas(canvas);
+			setPixelForDiff(tampered, 7, 0);
+			const tamperedSummary = diffCanvases(before, tampered, ops);
+			check.equal(
+				tamperedSummary.outsideSelectionUnchanged,
+				false,
+				"outside tampering reads as an invariant failure",
+			);
+		},
+	},
+	{
+		name: "diffCanvases tracks polygonFill and strokeMask scopes",
+		run: (check) => {
+			const canvas = fresh(6, 6);
+			const before = snapshotCanvas(canvas);
+			const ops = [
+				{
+					type: "polygonFill",
+					layerId: "base",
+					points: [
+						{ x: 1, y: 1 },
+						{ x: 4, y: 1 },
+						{ x: 1, y: 4 },
+					],
+					color: FILL,
+					selection: "rect:0,0,5,5",
+				},
+				{
+					type: "strokeMask",
+					layerId: "base",
+					source: "alpha:base",
+					color: INK,
+				},
+			] as unknown as BatchOperation[];
+			applyOperations(canvas, ops);
+			const summary = diffCanvases(before, canvas, ops);
+			check.ok(summary.raw.changedPixels > 0, "shape diff is non-empty");
+			check.equal(
+				summary.outsideSelectionUnchanged,
+				true,
+				"polygon plus stroke keep the outside invariant",
+			);
+			const tampered = snapshotCanvas(canvas);
+			setPixelForDiff(tampered, 5, 5);
+			const tamperedSummary = diffCanvases(before, tampered, ops);
+			check.equal(
+				tamperedSummary.outsideSelectionUnchanged,
+				false,
+				"stroke outline scope flags outside writes",
+			);
+		},
+	},
+	{
+		name: "buildFeedback summary reports new shape ops",
+		run: (check) => {
+			const canvas = fresh(8, 8);
+			const before = snapshotCanvas(canvas);
+			const ops = [
+				{
+					type: "ellipse",
+					layerId: "base",
+					rect: { x: 1, y: 1, width: 5, height: 5 },
+					color: INK,
+					mode: "outline",
+					selection: "rect:1,1,5,5",
+				},
+				{
+					type: "polygonFill",
+					layerId: "base",
+					points: [
+						{ x: 1, y: 5 },
+						{ x: 6, y: 5 },
+						{ x: 6, y: 7 },
+					],
+					color: FILL,
+					selection: "rect:1,5,6,3",
+				},
+			] as unknown as BatchOperation[];
+			applyOperations(canvas, ops);
+			const result = buildFeedback(before, canvas, ops, {
+				image: "none",
+				diff: "summary",
+			});
+			const diff = result.feedback.diff;
+			check.ok(diff !== undefined, "summary present");
+			check.ok(
+				(diff as { raw: { changedPixels: number } }).raw.changedPixels > 0,
+				"raw diff counts the shape writes",
+			);
+			check.equal(
+				(diff as { outsideSelectionUnchanged: boolean })
+					.outsideSelectionUnchanged,
+				true,
+				"feedback tracks the new shape write scopes",
+			);
+		},
+	},
+	{
 		name: "geometry vocabulary stays out of the typed core",
 		run: (check) => {
 			const canvas = fresh(8, 8);
@@ -1518,6 +2611,184 @@ export const BATCH_CASES: BatchCase[] = [
 				snapshotAll(canvas),
 				before,
 				"geometry refusal writes nothing",
+			);
+		},
+	},
+	{
+		name: "ellipse fractional width or height is INVALID_DIMENSION",
+		run: (check) => {
+			const canvas = fresh(16, 16);
+			const before = snapshotAll(canvas);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "ellipse",
+							layerId: "base",
+							rect: { x: 0, y: 0, width: 4.5, height: 4 },
+							color: INK,
+							mode: "fill",
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_DIMENSION",
+			);
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "ellipse",
+							layerId: "base",
+							rect: { x: 0, y: 0, width: 4, height: 2.5 },
+							color: INK,
+							mode: "fill",
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_DIMENSION",
+			);
+			// Fractional x/y stay coordinate errors even with a bad width.
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "ellipse",
+							layerId: "base",
+							rect: { x: 0, y: 0.5, width: 4.5, height: 4 },
+							color: INK,
+							mode: "fill",
+						},
+					] as unknown as BatchOperation[]),
+				"INVALID_COORDINATE",
+			);
+			// Integer rect outside bounds stays OUT_OF_BOUNDS.
+			expectCode(
+				check,
+				() =>
+					applyOperations(canvas, [
+						{
+							type: "ellipse",
+							layerId: "base",
+							rect: { x: -1, y: 0, width: 4, height: 4 },
+							color: INK,
+							mode: "fill",
+						},
+					] as unknown as BatchOperation[]),
+				"OUT_OF_BOUNDS",
+			);
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				before,
+				"dimension failures write nothing",
+			);
+		},
+	},
+	{
+		name: "polygonFill 512-square with a thousand collinear vertices fills exactly",
+		run: (check) => {
+			const canvas = fresh(512, 512);
+			const points: Array<{ x: number; y: number }> = [];
+			for (let x = 0; x <= 510; x += 2) {
+				points.push({ x, y: 0 });
+			}
+			points.push({ x: 511, y: 0 });
+			for (let y = 2; y <= 510; y += 2) {
+				points.push({ x: 511, y });
+			}
+			points.push({ x: 511, y: 511 });
+			for (let x = 510; x >= 0; x -= 2) {
+				points.push({ x, y: 511 });
+			}
+			for (let y = 510; y >= 2; y -= 2) {
+				points.push({ x: 0, y });
+			}
+			check.equal(points.length, 1024, "about a thousand vertices");
+			const report = applyOperations(canvas, [
+				{
+					type: "polygonFill",
+					layerId: "base",
+					points,
+					color: FILL,
+				},
+			] as unknown as BatchOperation[]);
+			check.equal(report.applied, 1, "large polygon applied");
+			const raw = getLayer(canvas, "base").pixels;
+			let count = 0;
+			for (let i = 3; i < raw.length; i += 4) {
+				if (raw[i] !== 0) {
+					count += 1;
+				}
+			}
+			check.equal(count, 512 * 512, "exact full-square fill count");
+			const filled = fresh(512, 512);
+			applyOperations(filled, [
+				{
+					type: "fillRect",
+					layerId: "base",
+					rect: { x: 0, y: 0, width: 512, height: 512 },
+					color: FILL,
+				},
+			]);
+			expectBuffersEqual(
+				check,
+				snapshotAll(canvas),
+				snapshotAll(filled),
+				"rect polygon matches fillRect byte for byte",
+			);
+		},
+	},
+	{
+		name: "polygonFill triangle with noninteger scanline crossings fills exactly",
+		run: (check) => {
+			const canvas = fresh(6, 6);
+			const report = applyOperations(canvas, [
+				{
+					type: "polygonFill",
+					layerId: "base",
+					points: [
+						{ x: 0, y: 0 },
+						{ x: 5, y: 2 },
+						{ x: 0, y: 4 },
+					],
+					color: FILL,
+				},
+			] as unknown as BatchOperation[]);
+			check.equal(report.applied, 1, "triangle applied");
+			// Rows y=1 and y=3 cross the slanted edges at x=2.5, pinning
+			// the integer ceil/floor span ends: x=2 inside, x=3 outside.
+			const painted = paintedPoints(canvas, "base");
+			check.deepEqual(
+				painted,
+				[
+					[0, 0],
+					[0, 1],
+					[1, 1],
+					[2, 1],
+					[0, 2],
+					[1, 2],
+					[2, 2],
+					[3, 2],
+					[4, 2],
+					[5, 2],
+					[0, 3],
+					[1, 3],
+					[2, 3],
+					[0, 4],
+				],
+				"exact row-major fill set with fractional crossings",
+			);
+			check.equal(painted.length, 14, "exact fill count");
+			check.deepEqual(
+				pixelAt(canvas, "base", 2, 1),
+				FILL,
+				"floor side of the crossing painted",
+			);
+			check.deepEqual(
+				pixelAt(canvas, "base", 3, 1),
+				{ r: 0, g: 0, b: 0, a: 0 },
+				"ceil side of the crossing left clear",
 			);
 		},
 	},

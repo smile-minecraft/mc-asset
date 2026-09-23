@@ -80,6 +80,7 @@ import {
 	paintNineSliceGuides,
 	parseMcmetaText,
 } from "../core/mcmeta.ts";
+import { POLYGON_MAX_POINTS } from "../core/ops.ts";
 import { extractPalette, inspectPalette } from "../core/palette.ts";
 import {
 	describePixelizePreset,
@@ -469,6 +470,38 @@ export async function handleRenderPixelAsset(
 }
 
 /**
+ * Input-size preflight for the batch entry: an oversized polygonFill
+ * refuses before the whole batch is serialized and per-point objects are
+ * mapped. Only the frozen length cap is checked here; shape and field
+ * errors stay with the CLI parser and the core.
+ */
+function assertBatchPointBudgets(operations: unknown): void {
+	if (!Array.isArray(operations)) {
+		return;
+	}
+	for (let index = 0; index < operations.length; index += 1) {
+		const entry = operations[index] as { type?: unknown; points?: unknown };
+		if (
+			typeof entry === "object" &&
+			entry !== null &&
+			entry.type === "polygonFill" &&
+			Array.isArray(entry.points) &&
+			entry.points.length > POLYGON_MAX_POINTS
+		) {
+			throw new McAssetError(
+				"RESOURCE_LIMIT_EXCEEDED",
+				`Polygon needs at most ${POLYGON_MAX_POINTS} points; split the shape instead.`,
+				{
+					path: `operations[${index}].points`,
+					count: entry.points.length,
+					limit: POLYGON_MAX_POINTS,
+				},
+			);
+		}
+	}
+}
+
+/**
  * Single-call batch edit over an `.mcpx` source. Atomic by default: the
  * first failure rolls the canvas back and the whole call fails with the
  * original error code plus the batch position in details.
@@ -488,6 +521,7 @@ export async function handleApplyAssetOperations(
 			await readInputText(args.sourcePath, "mcpx source"),
 		);
 		const before = snapshotCanvas(canvas);
+		assertBatchPointBudgets(args.operations);
 		const typed = parseOperationsJson(
 			JSON.stringify({ operations: args.operations }),
 			defaultLayerFor(canvas),

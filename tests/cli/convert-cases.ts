@@ -319,6 +319,244 @@ export const CONVERT_CASES: ConvertCase[] = [
 		},
 	},
 	{
+		name: "ellipse parses rect color mode and selection",
+		run: (check) => {
+			const ops = parseOperationsJson(
+				'[{"id": "ring", "type": "ellipse", "layerId": "base", "rect": {"x": 8, "y": 8, "width": 16, "height": 12}, "color": "#C8C8C8", "mode": "outline", "selection": "rect:0,0,16,32"}]',
+				"base",
+			);
+			check.deepEqual(
+				ops,
+				[
+					{
+						id: "ring",
+						type: "ellipse",
+						layerId: "base",
+						rect: { x: 8, y: 8, width: 16, height: 12 },
+						color: { r: 200, g: 200, b: 200, a: 255 },
+						mode: "outline",
+						selection: "rect:0,0,16,32",
+					},
+				],
+				"typed ellipse",
+			);
+		},
+	},
+	{
+		name: "ellipse rejects an unknown mode with path",
+		run: (check) => {
+			expectCode(
+				check,
+				() =>
+					parseOperationsJson(
+						'[{"type": "ellipse", "rect": {"x": 0, "y": 0, "width": 4, "height": 4}, "color": "#FFFFFFFF", "mode": "dashed"}]',
+						"base",
+					),
+				"INVALID_ARGUMENT",
+				"operations[0].mode",
+			);
+		},
+	},
+	{
+		name: "ellipse without a rect is INVALID_ARGUMENT with path",
+		run: (check) => {
+			expectCode(
+				check,
+				() =>
+					parseOperationsJson(
+						'[{"type": "ellipse", "color": "#FFFFFFFF", "mode": "fill"}]',
+						"base",
+					),
+				"INVALID_ARGUMENT",
+				"operations[0].rect",
+			);
+		},
+	},
+	{
+		name: "polygonFill parses points and color",
+		run: (check) => {
+			const ops = parseOperationsJson(
+				'[{"type": "polygonFill", "layerId": "base", "points": [[4, 4], [28, 4], [16, 28]], "color": "#787878"}]',
+				"base",
+			);
+			check.deepEqual(
+				ops,
+				[
+					{
+						type: "polygonFill",
+						layerId: "base",
+						points: [
+							{ x: 4, y: 4 },
+							{ x: 28, y: 4 },
+							{ x: 16, y: 28 },
+						],
+						color: { r: 120, g: 120, b: 120, a: 255 },
+					},
+				],
+				"typed polygonFill",
+			);
+		},
+	},
+	{
+		name: "polygonFill rejects malformed points with path",
+		run: (check) => {
+			expectCode(
+				check,
+				() =>
+					parseOperationsJson(
+						'[{"type": "polygonFill", "color": "#787878"}]',
+						"base",
+					),
+				"INVALID_ARGUMENT",
+				"operations[0].points",
+			);
+			expectCode(
+				check,
+				() =>
+					parseOperationsJson(
+						'[{"type": "polygonFill", "points": [[4, 4], [28]], "color": "#787878"}]',
+						"base",
+					),
+				"INVALID_ARGUMENT",
+				"operations[0].points[1]",
+			);
+		},
+	},
+	{
+		name: "polygonFill over 4096 points fails before point normalization",
+		run: (check) => {
+			const pairs: Array<[number, number]> = [];
+			for (let i = 0; i < 4097; i += 1) {
+				pairs.push([i % 64, (i / 64) | 0]);
+			}
+			const text = JSON.stringify({
+				operations: [
+					{
+						type: "polygonFill",
+						layerId: "base",
+						points: pairs,
+						color: "#787878",
+					},
+				],
+			});
+			try {
+				parseOperationsJson(text, "base");
+				check.fail("expected the oversized polygon to throw");
+			} catch (error) {
+				if (!(error instanceof McAssetError)) {
+					check.fail(`expected McAssetError but got ${String(error)}`);
+				}
+				const err = error as McAssetError;
+				check.equal(
+					err.code,
+					"RESOURCE_LIMIT_EXCEEDED",
+					"oversized polygon code",
+				);
+				const details = err.details as
+					| { path?: unknown; count?: unknown; limit?: unknown }
+					| undefined;
+				check.equal(
+					details?.path,
+					"operations[0].points",
+					"actionable operations path",
+				);
+				check.equal(details?.count, 4097, "actual point count");
+				check.equal(details?.limit, 4096, "frozen point limit");
+			}
+		},
+	},
+	{
+		name: "strokeMask parses source color and selection",
+		run: (check) => {
+			const ops = parseOperationsJson(
+				'[{"type": "strokeMask", "layerId": "base", "source": "region:badge", "color": "#000000"}]',
+				"base",
+			);
+			check.deepEqual(
+				ops,
+				[
+					{
+						type: "strokeMask",
+						layerId: "base",
+						source: "region:badge",
+						color: { r: 0, g: 0, b: 0, a: 255 },
+					},
+				],
+				"typed strokeMask",
+			);
+			const scoped = parseOperationsJson(
+				'[{"type": "strokeMask", "layerId": "base", "source": "alpha:overlay", "color": "#000000", "selection": "rect:0,0,16,32"}]',
+				"base",
+			);
+			check.deepEqual(
+				(scoped[0] as { selection?: unknown }).selection,
+				"rect:0,0,16,32",
+				"destination clip kept",
+			);
+		},
+	},
+	{
+		name: "strokeMask needs a source with path",
+		run: (check) => {
+			expectCode(
+				check,
+				() =>
+					parseOperationsJson(
+						'[{"type": "strokeMask", "color": "#000000"}]',
+						"base",
+					),
+				"INVALID_ARGUMENT",
+				"operations[0].source",
+			);
+		},
+	},
+	{
+		name: "ellipse with fractional dimensions parses for the core to classify",
+		run: (check) => {
+			const ops = parseOperationsJson(
+				'[{"type": "ellipse", "rect": {"x": 0, "y": 0, "width": 4.5, "height": 4}, "color": "#FFFFFFFF", "mode": "fill"}]',
+				"base",
+			);
+			check.deepEqual(
+				(ops[0] as { rect: unknown }).rect,
+				{ x: 0, y: 0, width: 4.5, height: 4 },
+				"fraction preserved for the typed validator",
+			);
+			const canvas = createCanvas(16, 16);
+			addLayer(canvas, { id: "base" });
+			expectCode(
+				check,
+				() => applyOperations(canvas, ops),
+				"INVALID_DIMENSION",
+			);
+		},
+	},
+	{
+		name: "ellipse rejects non-number rect fields with path",
+		run: (check) => {
+			expectCode(
+				check,
+				() =>
+					parseOperationsJson(
+						'[{"type": "ellipse", "rect": {"x": 0, "y": 0, "width": "wide", "height": 4}, "color": "#FFFFFFFF", "mode": "fill"}]',
+						"base",
+					),
+				"INVALID_ARGUMENT",
+				"operations[0].rect.width",
+			);
+			expectCode(
+				check,
+				() =>
+					parseOperationsJson(
+						'[{"type": "ellipse", "rect": {"x": 0, "y": 0, "height": 4}, "color": "#FFFFFFFF", "mode": "fill"}]',
+						"base",
+					),
+				"INVALID_ARGUMENT",
+				"operations[0].rect.width",
+			);
+		},
+	},
+	{
 		name: "unknown operation kind is INVALID_ARGUMENT with path",
 		run: (check) => {
 			expectCode(

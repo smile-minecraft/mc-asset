@@ -1,5 +1,6 @@
 import type { BatchOperation } from "../core/batch.ts";
 import { McAssetError } from "../core/errors.ts";
+import { POLYGON_MAX_POINTS } from "../core/ops.ts";
 import type { SelectionExpr } from "../core/selection.ts";
 import type { Rect, RGBA } from "../core/types.ts";
 
@@ -22,6 +23,9 @@ const KNOWN_TYPES: ReadonlySet<string> = new Set([
 	"drawRect",
 	"fillRect",
 	"floodFill",
+	"ellipse",
+	"polygonFill",
+	"strokeMask",
 	"createLayer",
 	"removeLayer",
 	"renameLayer",
@@ -139,6 +143,74 @@ function takeRect(value: unknown, path: string): Rect {
 		throw invalid(path, "Rect width and height must be at least 1.", value);
 	}
 	return rect;
+}
+
+function takeEllipseNumber(value: unknown, path: string, what: string): number {
+	// Fractions pass through: the typed ellipse validator owns the frozen
+	// x/y versus width/height error codes. Only non-numbers (missing,
+	// strings, NaN) fail here with a field path.
+	if (typeof value !== "number" || Number.isNaN(value)) {
+		throw invalid(path, `${what} must be a number, without rounding.`, value);
+	}
+	return value;
+}
+
+function takeEllipseRect(value: unknown, path: string): Rect {
+	if (!isRecord(value)) {
+		throw invalid(
+			path,
+			"Rect must be an object with x, y, width, and height.",
+			value,
+		);
+	}
+	// Shape only; degenerate or fractional dimensions stay for the typed
+	// core so they report INVALID_DIMENSION instead of a seam shape error.
+	return {
+		x: takeEllipseNumber(value.x, `${path}.x`, "Rect x"),
+		y: takeEllipseNumber(value.y, `${path}.y`, "Rect y"),
+		width: takeEllipseNumber(value.width, `${path}.width`, "Rect width"),
+		height: takeEllipseNumber(value.height, `${path}.height`, "Rect height"),
+	};
+}
+
+function takeEllipseMode(
+	op: Record<string, unknown>,
+	path: string,
+): "fill" | "outline" {
+	if (op.mode !== "fill" && op.mode !== "outline") {
+		throw invalid(
+			`${path}.mode`,
+			'Ellipse mode must be "fill" or "outline".',
+			op.mode,
+		);
+	}
+	return op.mode;
+}
+
+function takePolygonPoints(
+	value: unknown,
+	path: string,
+): Array<{ x: number; y: number }> {
+	if (!Array.isArray(value)) {
+		throw invalid(
+			path,
+			"Polygon points must be an array of [x, y] integer pairs.",
+			value,
+		);
+	}
+	// Length preflight before per-point mapping: an oversized polygon
+	// refuses here instead of materializing thousands of point objects
+	// first and failing later in the core.
+	if (value.length > POLYGON_MAX_POINTS) {
+		throw new McAssetError(
+			"RESOURCE_LIMIT_EXCEEDED",
+			`Polygon needs at most ${POLYGON_MAX_POINTS} points; split the shape instead.`,
+			{ path, count: value.length, limit: POLYGON_MAX_POINTS },
+		);
+	}
+	return value.map((entry, index) =>
+		takePoint(entry, `${path}[${index}]`, "Polygon point"),
+	);
 }
 
 function takeLayerId(
@@ -464,7 +536,7 @@ function parseOneOperation(
 	if (typeof rawType !== "string" || !KNOWN_TYPES.has(rawType)) {
 		throw invalid(
 			`${path}.type`,
-			`Unknown operation type: ${String(rawType)}. Pixel ops are setPixel, clearPixel, drawLine, drawRect, fillRect, floodFill; layer ops are createLayer, removeLayer, renameLayer, reorderLayer, duplicateLayer, mergeLayer, clearLayer, fillLayer, moveLayer; region ops are createRegion, removeRegion, renameRegion, reorderRegion, setRegionPixel; local-edit ops are stampRect, regionFromSelection. Geometry never enters the batch; use the transform command.`,
+			`Unknown operation type: ${String(rawType)}. Pixel ops are setPixel, clearPixel, drawLine, drawRect, fillRect, floodFill, ellipse, polygonFill, strokeMask; layer ops are createLayer, removeLayer, renameLayer, reorderLayer, duplicateLayer, mergeLayer, clearLayer, fillLayer, moveLayer; region ops are createRegion, removeRegion, renameRegion, reorderRegion, setRegionPixel; local-edit ops are stampRect, regionFromSelection. Geometry never enters the batch; use the transform command.`,
 			rawType,
 		);
 	}
@@ -579,6 +651,57 @@ function parseOneOperation(
 					layerId,
 					x: takeInt(item.x, `${path}.x`, "Pixel x"),
 					y: takeInt(item.y, `${path}.y`, "Pixel y"),
+					color: takeColor(item.color, `${path}.color`),
+					...(selection !== undefined ? { selection } : {}),
+				},
+				id,
+			);
+		}
+		case "ellipse": {
+			const layerId = needLayerId();
+			const selection = takeOptionalSelection(item, path);
+			if (item.rect === undefined) {
+				throw invalid(
+					`${path}.rect`,
+					"Rect must be an object with x, y, width, and height.",
+					item.rect,
+				);
+			}
+			return attachId(
+				{
+					type: "ellipse" as const,
+					layerId,
+					rect: takeEllipseRect(item.rect, `${path}.rect`),
+					color: takeColor(item.color, `${path}.color`),
+					mode: takeEllipseMode(item, path),
+					...(selection !== undefined ? { selection } : {}),
+				},
+				id,
+			);
+		}
+		case "polygonFill": {
+			const layerId = needLayerId();
+			const selection = takeOptionalSelection(item, path);
+			return attachId(
+				{
+					type: "polygonFill" as const,
+					layerId,
+					points: takePolygonPoints(item.points, `${path}.points`),
+					color: takeColor(item.color, `${path}.color`),
+					...(selection !== undefined ? { selection } : {}),
+				},
+				id,
+			);
+		}
+		case "strokeMask": {
+			const layerId = needLayerId();
+			const source = takeRequiredSelection(item, path, "source");
+			const selection = takeOptionalSelection(item, path);
+			return attachId(
+				{
+					type: "strokeMask" as const,
+					layerId,
+					source,
 					color: takeColor(item.color, `${path}.color`),
 					...(selection !== undefined ? { selection } : {}),
 				},
