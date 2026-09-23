@@ -63,7 +63,7 @@ Install the CLI globally to get the `mc-asset` command on your PATH:
 ```sh
 npm install -g mc-asset
 mc-asset --version
-# 0.3.1
+# 0.3.2
 ```
 
 ### Via Homebrew (macOS / Linux)
@@ -72,7 +72,7 @@ mc-asset --version
 brew tap smile-minecraft/tap
 brew install smile-minecraft/tap/mc-asset
 mc-asset --version
-# 0.3.1
+# 0.3.2
 ```
 
 ### Via Bun or Node.js (From Source)
@@ -83,7 +83,7 @@ cd mc-asset
 bun install --frozen-lockfile
 bun run build
 ./bin/mc-asset.js --version
-# 0.3.1
+# 0.3.2
 ```
 
 *Prerequisites*: tested with [Node.js](https://nodejs.org) 22 and [Bun](https://bun.sh) 1.3. `bun run build` needs Bun and `./bin/mc-asset.js` needs Node.js; with Bun alone, run `bun ./bin/mc-asset.js`.
@@ -269,7 +269,7 @@ mc-asset validate-pack ./MyResourcePack \
 
 `mc-asset` includes a native stdio Model Context Protocol server. Agents interact with the pixel engine directly through structured function calls without subprocess overhead.
 
-The running server exposes 21 tools. `scale_gui_asset` plus all authoring additions (`inspect_asset`, `apply_asset_operations.feedback`, `ellipse`/`polygonFill`/`strokeMask`) are unreleased source-tree additions under `[Unreleased]`; the latest published release is still v0.3.1.
+The running server exposes 21 tools. `scale_gui_asset` and all authoring additions (`inspect_asset`, `apply_asset_operations.feedback`, `ellipse`/`polygonFill`/`strokeMask`) shipped with `v0.3.2`; the latest published release is `v0.3.2` (2026-09-23).
 
 ### Exposed MCP Tools
 

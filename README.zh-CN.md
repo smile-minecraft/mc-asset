@@ -63,7 +63,7 @@ npx -y mc-asset mcp
 ```sh
 npm install -g mc-asset
 mc-asset --version
-# 0.3.1
+# 0.3.2
 ```
 
 ### 通过 Homebrew 安装（macOS / Linux）
@@ -72,7 +72,7 @@ mc-asset --version
 brew tap smile-minecraft/tap
 brew install smile-minecraft/tap/mc-asset
 mc-asset --version
-# 0.3.1
+# 0.3.2
 ```
 
 ### 通过源码安装（Bun 或 Node.js）
@@ -83,7 +83,7 @@ cd mc-asset
 bun install --frozen-lockfile
 bun run build
 ./bin/mc-asset.js --version
-# 0.3.1
+# 0.3.2
 ```
 
 *系统环境需求*：已在 [Node.js](https://nodejs.org) 22 与 [Bun](https://bun.sh) 1.3 上测试。`bun run build` 需要 Bun，`./bin/mc-asset.js` 需要 Node.js；只有 Bun 时，改为运行 `bun ./bin/mc-asset.js`。
@@ -269,7 +269,7 @@ mc-asset validate-pack ./MyResourcePack \
 
 `mc-asset` 内置以标准输入输出（stdio）运行的 Model Context Protocol 服务器。AI 代理可直接调用结构化工具操作核心引擎，无需通过子进程解析 CLI 输出。
 
-运行中的服务器提供 21 个工具。`scale_gui_asset` 及所有 authoring 新增项（`inspect_asset`、`apply_asset_operations.feedback`、`ellipse`／`polygonFill`／`strokeMask`）均为 `[Unreleased]` 的 source-tree 新增功能；最新发布版本仍是 v0.3.1。
+运行中的服务器提供 21 个工具。`scale_gui_asset` 及所有 authoring 新增项（`inspect_asset`、`apply_asset_operations.feedback`、`ellipse`／`polygonFill`／`strokeMask`）均随 `v0.3.2` 发布；最新发布版本为 v0.3.2（2026-09-23）。
 
 ### 提供的 MCP 工具
 
