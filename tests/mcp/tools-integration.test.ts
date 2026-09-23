@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { TOOL_INPUT_SCHEMAS } from "../../src/mcp/schema.ts";
 
 /**
  * MCP seven-tool stdio integration: every tool travels through a real
@@ -604,4 +605,37 @@ describe("mcp inspect and feedback over stdio", () => {
 		expect(typeof result.json?.mcpxText).toBe("string");
 		expect("feedback" in (result.json ?? {})).toBe(false);
 	}, 30_000);
+});
+
+describe("mcp selection descriptions expose the frozen grammar", () => {
+	test("transform/quantize/cleanup selection text lists atoms and JSON AST", () => {
+		const names = [
+			"transform_asset",
+			"quantize_asset",
+			"cleanup_asset",
+		] as const;
+		const atoms = [
+			"all",
+			"rect:x,y,w,h",
+			"region:id",
+			"alpha[:layer]",
+			"color[:layer]:r,g,b,a",
+			"connected[:layer]:x,y",
+		];
+		const astOps = ["union", "intersect", "subtract", "invert"];
+		for (const name of names) {
+			const description = TOOL_INPUT_SCHEMAS[name].selection.description ?? "";
+			for (const atom of atoms) {
+				expect(description).toContain(atom);
+			}
+			for (const op of astOps) {
+				expect(description).toContain(op);
+			}
+			expect(description).toContain("operands");
+		}
+		const transformDescription =
+			TOOL_INPUT_SCHEMAS.transform_asset.selection.description ?? "";
+		expect(transformDescription).toContain("ARGUMENT_CONFLICT");
+		expect(transformDescription.toLowerCase()).toContain("geometry");
+	});
 });

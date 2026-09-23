@@ -304,7 +304,7 @@ export const TOOL_INPUT_SCHEMAS = {
 			.min(1)
 			.optional()
 			.describe(
-				"Scope operations to rect:x,y,w,h or region:id; cannot be combined with geometry operations (ARGUMENT_CONFLICT).",
+				"Scope operations to a selection expression: all, rect:x,y,w,h, region:id, alpha[:layer], color[:layer]:r,g,b,a, connected[:layer]:x,y, or a JSON expression object with op union|intersect|subtract|invert and operands [...]; cannot be combined with geometry operations (ARGUMENT_CONFLICT).",
 			),
 		profile: profileField,
 		outputPngPath: outputPngField,
@@ -320,7 +320,9 @@ export const TOOL_INPUT_SCHEMAS = {
 			.string()
 			.min(1)
 			.optional()
-			.describe("Scope operations to rect:x,y,w,h or region:id."),
+			.describe(
+				"Scope operations to a selection expression: all, rect:x,y,w,h, region:id, alpha[:layer], color[:layer]:r,g,b,a, connected[:layer]:x,y, or a JSON expression object with op union|intersect|subtract|invert and operands [...].",
+			),
 		profile: profileField,
 		outputPngPath: outputPngField,
 		outputMcpxPath: outputMcpxField,
@@ -345,7 +347,9 @@ export const TOOL_INPUT_SCHEMAS = {
 			.string()
 			.min(1)
 			.optional()
-			.describe("Scope operations to rect:x,y,w,h or region:id."),
+			.describe(
+				"Scope operations to a selection expression: all, rect:x,y,w,h, region:id, alpha[:layer], color[:layer]:r,g,b,a, connected[:layer]:x,y, or a JSON expression object with op union|intersect|subtract|invert and operands [...].",
+			),
 		profile: profileField,
 		outputPngPath: outputPngField,
 		outputMcpxPath: outputMcpxField,
