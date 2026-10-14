@@ -141,4 +141,15 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 			"Inspect an editable .mcpx source or raster image without writing: structure reports layers, regions, color usage, and overlaps; view returns the composited PNG plus metadata. Raster inputs read as a single base layer.",
 		inputSchema: TOOL_INPUT_SCHEMAS.inspect_asset,
 	},
+	{
+		name: "optimize_asset",
+		description:
+			"Losslessly optimize explicit PNG inputs without rewriting sources.",
+		inputSchema: TOOL_INPUT_SCHEMAS.optimize_asset,
+	},
+	{
+		name: "model_asset",
+		description: "Inspect, validate, create, apply, or export Java models.",
+		inputSchema: TOOL_INPUT_SCHEMAS.model_asset,
+	},
 ];

@@ -13,6 +13,8 @@ import {
 	handleImportAsset,
 	handleInspectAsset,
 	handleMaterialAsset,
+	handleModelAsset,
+	handleOptimizeAsset,
 	handlePaletteAsset,
 	handlePixelizeAsset,
 	handlePreviewAsset,
@@ -213,6 +215,22 @@ export function createMcpServer(): McpServer {
 			inputSchema: TOOL_INPUT_SCHEMAS.inspect_asset,
 		},
 		handleInspectAsset,
+	);
+	server.registerTool(
+		"optimize_asset",
+		{
+			description: toolDescription("optimize_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.optimize_asset,
+		},
+		handleOptimizeAsset,
+	);
+	server.registerTool(
+		"model_asset",
+		{
+			description: toolDescription("model_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.model_asset,
+		},
+		handleModelAsset,
 	);
 	return server;
 }

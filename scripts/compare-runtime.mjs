@@ -21,6 +21,11 @@
 //   - V0.5: validate-pack clean + defect JSON canonical bytes (fixed pack
 //   - V0.5: fixtures, explicit --resource-pack-version 75, result.path
 //   - V0.5: normalized to a fixed token so temp dirs never leak in)
+//   - optimize: every docs/assets PNG (--output-dir), the fixture PNG and each
+//   - runtime's own render.png (auto, forced rgba, ancillary strip), plus the
+//   - dry-run report in canonical JSON
+//   - model: create, apply and export text outputs, and the inspect and
+//   - validate reports in canonical JSON (fixed spec, operations, binding)
 // Any difference exits non-zero so CI fails. stderr, timing, and absolute
 // paths never enter the comparison. Temp dirs are always cleaned up.
 import { spawnSync } from "node:child_process";
@@ -229,6 +234,160 @@ function comparePackJson(label, bunStdout, nodeStdout) {
 	process.stdout.write(
 		`ok ${label} sha256=${sha256Hex(bunCanon)} bytes=${Buffer.byteLength(bunCanon)}\n`,
 	);
+}
+
+const DOCS_ASSETS = join(ROOT, "docs", "assets");
+
+/** Every PNG under a directory, in a stable order, as repo-relative paths. */
+function listPngs(dir) {
+	const found = [];
+	for (const entry of readdirSync(dir).sort()) {
+		const full = join(dir, entry);
+		if (statSync(full).isDirectory()) {
+			found.push(...listPngs(full));
+		} else if (entry.endsWith(".png")) {
+			found.push(full);
+		}
+	}
+	return found;
+}
+
+/** optimize outputs by bytes; the dry-run report by canonical JSON. */
+function compareOptimize(bunDir, nodeDir) {
+	const docs = listPngs(DOCS_ASSETS);
+	const names = docs.map((path) => path.slice(path.lastIndexOf("/") + 1));
+	if (new Set(names).size !== names.length) {
+		fail("docs/assets PNG basenames must be unique for --output-dir");
+	}
+	const dirArgs = (dir) => [
+		"optimize",
+		...docs,
+		"--output-dir",
+		join(dir, "optimize-docs"),
+		"--mkdir",
+	];
+	runBun(dirArgs(bunDir), "optimize-docs");
+	runNode(dirArgs(nodeDir), "optimize-docs");
+	for (const name of names) {
+		compareFile(
+			`optimize-docs/${name}`,
+			join(bunDir, "optimize-docs", name),
+			join(nodeDir, "optimize-docs", name),
+		);
+	}
+	const cases = [
+		["optimize-fixture", PX_PNG_FIXTURE, []],
+		["optimize-fixture-rgba", PX_PNG_FIXTURE, ["--mode", "rgba"]],
+		["optimize-fixture-strip", PX_PNG_FIXTURE, ["--ancillary", "strip"]],
+	];
+	for (const [label, input, extra] of cases) {
+		const args = (dir) => [
+			"optimize",
+			input,
+			...extra,
+			"--output",
+			join(dir, `${label}.png`),
+		];
+		runBun(args(bunDir), label);
+		runNode(args(nodeDir), label);
+		compareFile(`${label}.png`, join(bunDir, `${label}.png`), join(nodeDir, `${label}.png`));
+	}
+	// Each runtime's own render.png (an unoptimized encodePng result).
+	const ownArgs = (dir) => [
+		"optimize",
+		join(dir, "render.png"),
+		"--output",
+		join(dir, "optimize-render.png"),
+	];
+	runBun(ownArgs(bunDir), "optimize-render");
+	runNode(ownArgs(nodeDir), "optimize-render");
+	compareFile(
+		"optimize-render.png",
+		join(bunDir, "optimize-render.png"),
+		join(nodeDir, "optimize-render.png"),
+	);
+	const bunDry = runBun(["optimize", PX_PNG_FIXTURE, "--dry-run", "--json"], "optimize-dry-run");
+	const nodeDry = runNode(["optimize", PX_PNG_FIXTURE, "--dry-run", "--json"], "optimize-dry-run");
+	compareCanonicalJson("optimize-dry-run.json", bunDry.stdout, nodeDry.stdout);
+}
+
+const MODEL_SPEC = {
+	textures: { all: "mypack:block/placeholder" },
+	elements: [
+		{
+			from: [0, 0, 0],
+			to: [16, 16, 16],
+			faces: {
+				down: { texture: "#all" },
+				up: { texture: "#all" },
+				north: { texture: "#all", uv: [0, 0, 16, 16] },
+				south: { texture: "#all" },
+				west: { texture: "#all" },
+				east: { texture: "#all" },
+			},
+		},
+	],
+};
+const MODEL_OPERATIONS = [
+	{ op: "set_texture", name: "all", value: "mypack:block/ruby" },
+	{ op: "update_face", element: 0, face: "up", changes: { rotation: 90 } },
+];
+const MODEL_BINDING = {
+	item: { itemId: "mypack:ruby", modelId: "mypack:block/ruby" },
+	blockstate: {
+		blockId: "mypack:ruby",
+		variants: { "": { model: "mypack:block/ruby" } },
+	},
+};
+
+/** model create, apply and export text by bytes; inspect and validate by canonical JSON. */
+function compareModel(bunDir, nodeDir, workdir) {
+	const specPath = join(workdir, "model-spec.json");
+	const operationsPath = join(workdir, "model-operations.json");
+	const bindingPath = join(workdir, "model-binding.json");
+	writeFileSync(specPath, JSON.stringify(MODEL_SPEC));
+	writeFileSync(operationsPath, JSON.stringify(MODEL_OPERATIONS));
+	writeFileSync(bindingPath, JSON.stringify(MODEL_BINDING));
+	const version = ["--resource-pack-version", "75"];
+	const modelRel = join("pack", "assets", "mypack", "models", "block", "ruby.json");
+	const itemRel = join("pack", "assets", "mypack", "items", "ruby.json");
+	const stateRel = join("pack", "assets", "mypack", "blockstates", "ruby.json");
+	const steps = (dir) => [
+		["model-create", ["model", "create", "--spec", specPath, "--output", join(dir, "model-created.json"), ...version]],
+		["model-apply", ["model", "apply", join(dir, "model-created.json"), "--operations", operationsPath, "--output", join(dir, modelRel), "--mkdir", ...version]],
+		["model-export", ["model", "export", join(dir, modelRel), "--binding", bindingPath, "--pack", join(dir, "pack"), "--item-output", join(dir, itemRel), "--blockstate-output", join(dir, stateRel), "--mkdir", ...version]],
+	];
+	const bunSteps = steps(bunDir);
+	const nodeSteps = steps(nodeDir);
+	bunSteps.forEach(([label, args], index) => {
+		runBun(args, label);
+		runNode(nodeSteps[index][1], label);
+	});
+	for (const dir of [bunDir, nodeDir]) {
+		const textureDir = join(dir, "pack", "assets", "mypack", "textures", "block");
+		mkdirSync(textureDir, { recursive: true });
+		copyFileSync(PX_PNG_FIXTURE, join(textureDir, "ruby.png"));
+	}
+	for (const [label, rel] of [
+		["model-created.json", "model-created.json"],
+		["model-applied.json", modelRel],
+		["model-item.json", itemRel],
+		["model-blockstate.json", stateRel],
+	]) {
+		compareFile(label, join(bunDir, rel), join(nodeDir, rel));
+	}
+	for (const mode of ["inspect", "validate"]) {
+		const args = (dir) => ["model", mode, join(dir, modelRel), "--pack", join(dir, "pack"), ...version, "--json"];
+		const bun = runBun(args(bunDir), `model-${mode}`);
+		const node = runNode(args(nodeDir), `model-${mode}`);
+		const normalize = (stdout, dir) =>
+			String(stdout).split(dir).join("<dir>");
+		compareCanonicalJson(
+			`model-${mode}.json`,
+			normalize(bun.stdout, bunDir),
+			normalize(node.stdout, nodeDir),
+		);
+	}
 }
 
 function main() {
@@ -673,6 +832,8 @@ function main() {
 			bunPackDefect.stdout,
 			nodePackDefect.stdout,
 		);
+		compareOptimize(bunDir, nodeDir, workdir);
+		compareModel(bunDir, nodeDir, workdir);
 		process.stdout.write("compare-runtime: all outputs identical\n");
 	} finally {
 		rmSync(workdir, { recursive: true, force: true });

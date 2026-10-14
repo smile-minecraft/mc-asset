@@ -37,7 +37,7 @@ afterEach(async () => {
 });
 
 describe("mcp handshake", () => {
-	test("initialize succeeds and tools/list exposes the frozen twenty-one tools", async () => {
+	test("initialize succeeds and tools/list exposes the twenty-three tools preserving the original prefix", async () => {
 		const transport = new StdioClientTransport({
 			command: "bun",
 			args: ["src/cli/index.ts", "mcp"],
@@ -46,8 +46,13 @@ describe("mcp handshake", () => {
 		await client.connect(transport);
 		const listed = await client.listTools();
 		const names = listed.tools.map((tool) => tool.name).sort();
-		expect(names).toEqual([...EXPECTED_TOOLS].sort());
-		expect(listed.tools).toHaveLength(21);
+		expect(listed.tools.map((tool) => tool.name).slice(0, 21)).toEqual([
+			...EXPECTED_TOOLS,
+		]);
+		expect(names).toEqual(
+			[...EXPECTED_TOOLS, "optimize_asset", "model_asset"].sort(),
+		);
+		expect(listed.tools).toHaveLength(23);
 		for (const tool of listed.tools) {
 			expect(typeof tool.description).toBe("string");
 			expect(tool.description ?? "").not.toBe("");

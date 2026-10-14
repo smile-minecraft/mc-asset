@@ -34,6 +34,8 @@ export const MCP_TOOL_NAMES = [
 	"validate_pack_asset",
 	"scale_gui_asset",
 	"inspect_asset",
+	"optimize_asset",
+	"model_asset",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -125,7 +127,395 @@ const feedbackField = z
 		"Optional visual feedback for the batch; absent keeps the output fields and bytes exactly as before.",
 	);
 
+export const OPTIMIZE_MODES = [
+	"auto",
+	"rgba",
+	"rgb",
+	"grayscale",
+	"grayscale-alpha",
+	"indexed",
+] as const;
+
+export const optimizeAssetInput = {
+	inputPaths: z
+		.array(z.string().min(1))
+		.min(1)
+		.max(256)
+		.describe(
+			"PNG files to optimize (1 to 256 explicit paths; no globs, no directories). Never written.",
+		),
+	mode: z
+		.enum(OPTIMIZE_MODES)
+		.optional()
+		.describe(
+			"auto (default) keeps the smallest exact encoding or the source; a named mode forces that encoding and fails with OPTIMIZE_MODE_NOT_EXACT when it cannot hold the pixels exactly.",
+		),
+	ancillary: z
+		.enum(["preserve", "strip"])
+		.optional()
+		.describe(
+			"preserve (default) copies metadata chunks and refuses sources whose chunks depend on the color layout; strip drops every ancillary chunk and lists them.",
+		),
+	dryRun: z
+		.boolean()
+		.optional()
+		.describe("Compute the full report and write nothing."),
+	outputPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe("Explicit .png output path; only with exactly one input."),
+	outputDir: z
+		.string()
+		.min(1)
+		.optional()
+		.describe("Existing directory receiving <input basename> for every input."),
+};
+
+const direction = z.enum(["down", "up", "north", "south", "west", "east"]);
+const displayPosition = z.enum([
+	"thirdperson_righthand",
+	"thirdperson_lefthand",
+	"firstperson_righthand",
+	"firstperson_lefthand",
+	"gui",
+	"head",
+	"ground",
+	"fixed",
+	"on_shelf",
+]);
+const vec3 = z.tuple([z.number(), z.number(), z.number()]);
+const uv4 = z.tuple([z.number(), z.number(), z.number(), z.number()]);
+const faceRotation = z.union([
+	z.literal(0),
+	z.literal(90),
+	z.literal(180),
+	z.literal(270),
+]);
+
+const textureEntry = z.union([
+	z.string().min(1),
+	z
+		.object({
+			sprite: z.string().min(1),
+			forceTranslucent: z.boolean().optional(),
+		})
+		.strict(),
+]);
+
+const faceSpec = z
+	.object({
+		texture: z.string().min(1),
+		uv: uv4.optional(),
+		rotation: faceRotation.optional(),
+		cullface: direction.optional(),
+		tintindex: z.number().int().optional(),
+	})
+	.strict();
+
+const elementRotation = z.union([
+	z
+		.object({
+			origin: vec3,
+			axis: z.enum(["x", "y", "z"]),
+			angle: z.number(),
+			rescale: z.boolean().optional(),
+		})
+		.strict(),
+	z
+		.object({
+			origin: vec3,
+			x: z.number().optional(),
+			y: z.number().optional(),
+			z: z.number().optional(),
+			rescale: z.boolean().optional(),
+		})
+		.strict(),
+]);
+
+const elementSpec = z
+	.object({
+		name: z.string().optional(),
+		from: vec3,
+		to: vec3,
+		rotation: elementRotation.optional(),
+		shade: z.boolean().optional(),
+		shadeDirectionOverride: direction.optional(),
+		lightEmission: z.number().int().min(0).max(15).optional(),
+		faces: z
+			.object({
+				down: faceSpec.optional(),
+				up: faceSpec.optional(),
+				north: faceSpec.optional(),
+				south: faceSpec.optional(),
+				west: faceSpec.optional(),
+				east: faceSpec.optional(),
+			})
+			.strict(),
+	})
+	.strict();
+
+const displayTransform = z
+	.object({
+		rotation: vec3.optional(),
+		translation: vec3.optional(),
+		scale: vec3.optional(),
+	})
+	.strict();
+
+export const modelSpecSchema = z
+	.object({
+		parent: z.string().min(1).optional(),
+		ambientocclusion: z.boolean().optional(),
+		guiLight: z.enum(["front", "side"]).optional(),
+		textures: z.record(z.string().min(1), textureEntry).optional(),
+		elements: z.array(elementSpec).max(4096).optional(),
+		display: z
+			.object({
+				thirdperson_righthand: displayTransform.optional(),
+				thirdperson_lefthand: displayTransform.optional(),
+				firstperson_righthand: displayTransform.optional(),
+				firstperson_lefthand: displayTransform.optional(),
+				gui: displayTransform.optional(),
+				head: displayTransform.optional(),
+				ground: displayTransform.optional(),
+				fixed: displayTransform.optional(),
+				on_shelf: displayTransform.optional(),
+			})
+			.strict()
+			.optional(),
+	})
+	.strict();
+
+const index = z.number().int().min(0);
+
+export const modelOperationSchema = z.discriminatedUnion("op", [
+	z
+		.object({
+			op: z.literal("set_parent"),
+			parent: z.string().min(1).nullable(),
+		})
+		.strict(),
+	z
+		.object({
+			op: z.literal("set_property"),
+			ambientocclusion: z.boolean().nullable().optional(),
+			guiLight: z.enum(["front", "side"]).nullable().optional(),
+		})
+		.strict(),
+	z
+		.object({
+			op: z.literal("set_texture"),
+			name: z.string().min(1),
+			value: textureEntry,
+		})
+		.strict(),
+	z
+		.object({ op: z.literal("remove_texture"), name: z.string().min(1) })
+		.strict(),
+	z
+		.object({
+			op: z.literal("add_element"),
+			element: elementSpec,
+			index: index.optional(),
+		})
+		.strict(),
+	z
+		.object({
+			op: z.literal("update_element"),
+			index,
+			changes: z
+				.object({
+					name: z.string().nullable().optional(),
+					from: vec3.optional(),
+					to: vec3.optional(),
+					rotation: elementRotation.nullable().optional(),
+					shade: z.boolean().nullable().optional(),
+					shadeDirectionOverride: direction.nullable().optional(),
+					lightEmission: z.number().int().min(0).max(15).nullable().optional(),
+				})
+				.strict(),
+		})
+		.strict(),
+	z.object({ op: z.literal("remove_element"), index }).strict(),
+	z
+		.object({
+			op: z.literal("add_face"),
+			element: index,
+			face: direction,
+			value: faceSpec,
+		})
+		.strict(),
+	z
+		.object({
+			op: z.literal("update_face"),
+			element: index,
+			face: direction,
+			changes: z
+				.object({
+					texture: z.string().min(1).optional(),
+					uv: uv4.nullable().optional(),
+					rotation: faceRotation.nullable().optional(),
+					cullface: direction.nullable().optional(),
+					tintindex: z.number().int().nullable().optional(),
+				})
+				.strict(),
+		})
+		.strict(),
+	z
+		.object({ op: z.literal("remove_face"), element: index, face: direction })
+		.strict(),
+	z
+		.object({
+			op: z.literal("set_display"),
+			position: displayPosition,
+			value: displayTransform,
+		})
+		.strict(),
+	z
+		.object({ op: z.literal("remove_display"), position: displayPosition })
+		.strict(),
+]);
+
+const blockstateEntry = z
+	.object({
+		model: z.string().min(1),
+		x: faceRotation.optional(),
+		y: faceRotation.optional(),
+		z: faceRotation.optional(),
+		uvlock: z.boolean().optional(),
+		weight: z.number().int().min(1).optional(),
+	})
+	.strict();
+
+export const modelBindingSchema = z
+	.object({
+		item: z
+			.object({
+				itemId: z.string().min(1),
+				modelId: z.string().min(1),
+				handAnimationOnSwap: z.boolean().optional(),
+				oversizedInGui: z.boolean().optional(),
+				swapAnimationScale: z.number().optional(),
+			})
+			.strict()
+			.optional(),
+		blockstate: z
+			.object({
+				blockId: z.string().min(1),
+				variants: z
+					.record(
+						z.string(),
+						z.union([blockstateEntry, z.array(blockstateEntry).min(1)]),
+					)
+					.optional(),
+				multipart: z
+					.array(
+						z
+							.object({
+								when: z
+									.record(z.string(), z.union([z.string(), z.boolean()]))
+									.optional(),
+								apply: z.union([
+									blockstateEntry,
+									z.array(blockstateEntry).min(1),
+								]),
+							})
+							.strict(),
+					)
+					.max(64)
+					.optional(),
+			})
+			.strict()
+			.optional(),
+	})
+	.strict();
+
+export const MODEL_MODES = [
+	"inspect",
+	"validate",
+	"create",
+	"apply",
+	"export",
+] as const;
+
+export const modelAssetInput = {
+	mode: z
+		.enum(MODEL_MODES)
+		.describe(
+			"inspect and validate are read-only; create and apply produce a model document; export places a model and optional bindings.",
+		),
+	inputPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe("Model JSON file for inspect, validate, apply, export."),
+	spec: modelSpecSchema
+		.optional()
+		.describe("create: explicit model description."),
+	operations: z
+		.array(modelOperationSchema)
+		.min(1)
+		.max(1000)
+		.optional()
+		.describe(
+			"apply: ordered typed operations; all validated before any result exists.",
+		),
+	binding: modelBindingSchema
+		.optional()
+		.describe(
+			"export: item definition and/or blockstate to generate next to the model.",
+		),
+	packPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"Resource pack root: the current layer; also fixes the model id of inputPath.",
+		),
+	vanillaPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe("Vanilla assets directory used to resolve minecraft references."),
+	dependencyPaths: z
+		.array(z.string().min(1))
+		.optional()
+		.describe(
+			"Dependency pack roots; the first entry has the highest priority.",
+		),
+	minecraftVersion: minecraftVersionField,
+	resourcePackVersion: resourcePackVersionField,
+	outputPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe("Explicit .json path for the model (create, apply, export)."),
+	itemOutputPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"export: explicit .json path for the item definition (needs binding.item).",
+		),
+	blockstateOutputPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"export: explicit .json path for the blockstate (needs binding.blockstate).",
+		),
+};
+
+export const NEW_MCP_TOOL_NAMES = ["optimize_asset", "model_asset"] as const;
+export type OptimizeAssetInput = z.infer<
+	z.ZodObject<typeof optimizeAssetInput>
+>;
+export type ModelAssetInput = z.infer<z.ZodObject<typeof modelAssetInput>>;
+
 export const TOOL_INPUT_SCHEMAS = {
+	optimize_asset: optimizeAssetInput,
+	model_asset: modelAssetInput,
 	analyze_asset: {
 		path: z.string().min(1).describe("Raster image path (PNG, JPEG, WebP)."),
 		profile: profileField,

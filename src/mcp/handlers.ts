@@ -2521,3 +2521,8 @@ export async function handleScaleGuiAsset(
 		return errorResult(error);
 	}
 }
+
+export {
+	handleModelAsset,
+	handleOptimizeAsset,
+} from "./handlers-model-optimize.ts";

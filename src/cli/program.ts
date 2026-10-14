@@ -19,6 +19,8 @@ import { type ImportOptions, runImport } from "./cmd-import.ts";
 import { type InspectOptions, runInspect } from "./cmd-inspect.ts";
 import { type MaterialOptions, runMaterial } from "./cmd-material.ts";
 import { runMcp } from "./cmd-mcp.ts";
+import { type ModelCliOptions, type ModelMode, runModel } from "./cmd-model.ts";
+import { runOptimize } from "./cmd-optimize.ts";
 import { type PaletteOptions, runPalette } from "./cmd-palette.ts";
 import {
 	type PixelizeCommandOptions,
@@ -70,7 +72,7 @@ function singleUseOption(flag: string): (value: string) => string {
 	};
 }
 
-function realStreams(): OutputStreams {
+export function realStreams(): OutputStreams {
 	return { stdout: process.stdout, stderr: process.stderr };
 }
 
@@ -165,7 +167,71 @@ export async function runStub(
 }
 
 /** Program skeleton: global --json plus the write commands and analyze. */
-export function buildProgram(): Command {
+/**
+ * Process-independent entry: build the program, parse one argv, and map a
+ * thrown error to the same envelope, log line, and exit code the CLI entry
+ * uses. Tests inject memory streams so both runtimes exercise one path.
+ */
+export async function runCli(
+	argv: readonly string[],
+	streams: OutputStreams,
+): Promise<number> {
+	const program = buildProgram(streams);
+	const wantsJson = argv.includes("--json");
+	const route = routeStreams({ json: wantsJson, stdoutArtifact: false });
+	try {
+		await program.parseAsync([...argv]);
+	} catch (error) {
+		if (
+			typeof error === "object" &&
+			error !== null &&
+			((error as { code?: unknown }).code === "commander.helpDisplayed" ||
+				(error as { code?: unknown }).code === "commander.version")
+		) {
+			return 0;
+		}
+		if (error instanceof McAssetError) {
+			const message = error.message.replace(/^\[[A-Z_]+\] /, "");
+			if (wantsJson) {
+				emitEnvelope(
+					errorEnvelope(error.code, message, error.details),
+					streams,
+					route,
+				);
+			} else {
+				emitLog(error.message, streams, route);
+			}
+			return exitCodeForMcAssetError(error);
+		}
+		const asError = error instanceof Error ? error : new Error(String(error));
+		const code = (error as { code?: unknown }).code;
+		const exitCode =
+			code === "commander.unknownOption" ||
+			code === "commander.missingArgument" ||
+			code === "commander.missingMandatoryOptionValue" ||
+			code === "commander.excessArguments" ||
+			code === "commander.invalidArgument"
+				? 2
+				: 1;
+		if (wantsJson) {
+			emitEnvelope(
+				errorEnvelope(
+					exitCode === 2 ? "INVALID_ARGUMENT" : "INTERNAL_ERROR",
+					asError.message,
+				),
+				streams,
+				route,
+			);
+		} else {
+			emitLog(asError.message, streams, route);
+		}
+		return exitCode;
+	}
+	const code = typeof process.exitCode === "number" ? process.exitCode : 0;
+	return code;
+}
+
+export function buildProgram(streams: OutputStreams = realStreams()): Command {
 	const program = new Command();
 	program
 		.name("mc-asset")
@@ -1146,6 +1212,77 @@ export function buildProgram(): Command {
 			const code = await runMcp();
 			process.exitCode = code;
 		});
+
+	program
+		.command("optimize <input...>")
+		.option("--output <path>")
+		.option("--output-dir <dir>")
+		.option("--stdout")
+		.option("--dry-run")
+		.option("--mode <mode>", "Exact encoding mode", "auto")
+		.option("--ancillary <policy>", "Metadata policy", "preserve")
+		.option("--force")
+		.option("--mkdir")
+		.action(async (input, options, command) => {
+			process.exitCode = await runOptimize(
+				input,
+				options,
+				command.optsWithGlobals().json === true,
+				streams,
+			);
+		});
+	const model = program.command("model");
+	for (const mode of [
+		"inspect",
+		"validate",
+		"create",
+		"apply",
+		"export",
+	] as const) {
+		const command = model.command(mode + (mode === "create" ? "" : " <file>"));
+		command
+			.option(
+				"--minecraft-version <v>",
+				"Minecraft version",
+				singleUseOption("--minecraft-version"),
+			)
+			.option(
+				"--resource-pack-version <v>",
+				"Pack version",
+				singleUseOption("--resource-pack-version"),
+			);
+		if (mode === "inspect" || mode === "validate" || mode === "export")
+			command.option("--pack <dir>");
+		if (mode === "inspect" || mode === "validate")
+			command
+				.option("--vanilla <dir>")
+				.option(
+					"--dependency <dir>",
+					"Dependency root",
+					(value: string, previous: string[]) => [...previous, value],
+					[],
+				);
+		if (mode === "create") command.requiredOption("--spec <file>");
+		if (mode === "apply") command.requiredOption("--operations <file>");
+		if (mode === "export")
+			command
+				.option("--binding <file>")
+				.option("--item-output <file>")
+				.option("--blockstate-output <file>");
+		if (mode === "create" || mode === "apply" || mode === "export")
+			command.option("--output <file>").option("--force").option("--mkdir");
+		if (mode === "create" || mode === "apply") command.option("--stdout");
+		command.action(async (...args: unknown[]) => {
+			const current = args[args.length - 1] as Command;
+			process.exitCode = await runModel(
+				mode as ModelMode,
+				mode === "create" ? undefined : (args[0] as string),
+				current.opts() as ModelCliOptions,
+				current.optsWithGlobals().json === true,
+				streams,
+			);
+		});
+	}
 
 	return program;
 }
