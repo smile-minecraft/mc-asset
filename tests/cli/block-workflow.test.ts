@@ -27,12 +27,15 @@ const STONE_PALETTE = "stone";
 const STONE_SIZE = "16";
 const STONE_SEED = "1234";
 
-/** Locked after a human-checked deterministic run; placeholder first (Red). */
+// File hashes use standard compression; pixel hashes preserve the old output.
 const GOLDEN_GENERATE_SHA256 =
-	"cdbbbb1c997e1f2b9d5f0216f7b0e0ea1bf51fb3910fcb50aef22873b9fa7405";
-/** Locked after a human-checked deterministic run; placeholder first (Red). */
+	"a759a29c3c971fb2e86b0babbbd0b73f861c8fc282a3943bdda971167ed3e37b";
+const GOLDEN_GENERATE_PIXELS_SHA256 =
+	"ca993c20268e40ff351a9bf6705fb5fe5068c58cd30e67119b9abf931fd36e72";
 const GOLDEN_FIXED_SHA256 =
-	"98b69c8ac75e986554c6ebd07d5a9e3794c3cb2e246be81738060fa3cf468d6c";
+	"a27325574ed36575b2e8704718f08571a6657233ec5fe2fe8321535de14457b8";
+const GOLDEN_FIXED_PIXELS_SHA256 =
+	"428b60eda26ee276ec1ce380f147e7866a0c83293319ebd9adc33f1011cd974a";
 
 interface SpawnResult {
 	code: number;
@@ -100,9 +103,11 @@ describe("block texture workflow via spawn", () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-blockwf-"));
 		try {
 			const base = await generateStoneBase(dir);
-			expect(sha256(new Uint8Array(await readFile(base)))).toBe(
-				GOLDEN_GENERATE_SHA256,
+			const bytes = new Uint8Array(await readFile(base));
+			expect(sha256(decodePng(bytes).canvas.layers[0].pixels)).toBe(
+				GOLDEN_GENERATE_PIXELS_SHA256,
 			);
+			expect(sha256(bytes)).toBe(GOLDEN_GENERATE_SHA256);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}
@@ -171,9 +176,11 @@ describe("block texture workflow via spawn", () => {
 			};
 			expect(corrected.seam.horizontal.raw).toBe(0);
 			expect(corrected.seam.vertical.raw).toBe(0);
-			expect(sha256(new Uint8Array(await readFile(fixed)))).toBe(
-				GOLDEN_FIXED_SHA256,
+			const bytes = new Uint8Array(await readFile(fixed));
+			expect(sha256(decodePng(bytes).canvas.layers[0].pixels)).toBe(
+				GOLDEN_FIXED_PIXELS_SHA256,
 			);
+			expect(sha256(bytes)).toBe(GOLDEN_FIXED_SHA256);
 			const rerun = join(dir, "fixed-rerun.png");
 			expect(
 				(

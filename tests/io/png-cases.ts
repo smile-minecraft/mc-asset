@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { deflateSync } from "node:zlib";
 import {
 	addLayer,
 	createCanvas,
@@ -19,6 +20,8 @@ export interface CaseCheck {
 
 export interface PngCase {
 	name: string;
+	/** Overrides the framework's default timeout for cases that are slow by design. */
+	timeoutMs?: number;
 	run(check: CaseCheck): void;
 }
 
@@ -114,7 +117,125 @@ function seedCanvas(
 	return canvas;
 }
 
+// Independent source writer: no production PNG assembly or filters are used.
+function graySource(
+	bitDepth: 1 | 2 | 4 | 8 | 16,
+	interlaced: boolean,
+	colorKey = false,
+): { bytes: Uint8Array; expected: Uint8Array } {
+	const width = 19;
+	const height = 9;
+	const maxSample = (1 << bitDepth) - 1;
+	const samples = Array.from({ length: width * height }, (_, i) =>
+		bitDepth === 16
+			? ((i % width) * 0x1237 + Math.floor(i / width) * 0x2341) & maxSample
+			: ((i % width) + Math.floor(i / width) * 3) & maxSample,
+	);
+	const key = samples[1] as number;
+	const expected = new Uint8Array(width * height * 4);
+	for (let i = 0; i < samples.length; i += 1) {
+		const sample = samples[i] as number;
+		const gray = bitDepth === 16 ? sample >>> 8 : (sample * 255) / maxSample;
+		const transparent = colorKey && sample === key;
+		expected.set(transparent ? [0, 0, 0, 0] : [gray, gray, gray, 255], i * 4);
+	}
+	const rows: number[] = [];
+	const passes = interlaced
+		? [
+				[0, 0, 8, 8],
+				[4, 0, 8, 8],
+				[0, 4, 4, 8],
+				[2, 0, 4, 4],
+				[0, 2, 2, 4],
+				[1, 0, 2, 2],
+				[0, 1, 1, 2],
+			]
+		: [[0, 0, 1, 1]];
+	for (const [xs, ys, dx, dy] of passes) {
+		for (let y = ys; y < height; y += dy) {
+			rows.push(0);
+			const packed = new Uint8Array(
+				Math.ceil((Math.ceil((width - xs) / dx) * bitDepth) / 8),
+			);
+			let index = 0;
+			for (let x = xs; x < width; x += dx) {
+				const sample = samples[y * width + x] as number;
+				if (bitDepth === 16) {
+					rows.push(sample >>> 8, sample & 255);
+				} else {
+					packed[(index * bitDepth) >>> 3] |=
+						sample << (8 - bitDepth - ((index * bitDepth) & 7));
+				}
+				index += 1;
+			}
+			if (bitDepth !== 16) rows.push(...packed);
+		}
+	}
+	function chunk(type: string, payload: Uint8Array): Buffer {
+		const result = Buffer.alloc(payload.length + 12);
+		result.writeUInt32BE(payload.length, 0);
+		result.write(type, 4, "ascii");
+		result.set(payload, 8);
+		let crc = 0xffffffff;
+		for (const byte of result.subarray(4, 8 + payload.length)) {
+			crc ^= byte;
+			for (let bit = 0; bit < 8; bit += 1) {
+				crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+			}
+		}
+		result.writeUInt32BE((crc ^ 0xffffffff) >>> 0, 8 + payload.length);
+		return result;
+	}
+	const ihdr = Buffer.alloc(13);
+	ihdr.writeUInt32BE(width, 0);
+	ihdr.writeUInt32BE(height, 4);
+	ihdr[8] = bitDepth;
+	ihdr[12] = interlaced ? 1 : 0;
+	const chunks = [chunk("IHDR", ihdr)];
+	if (colorKey) {
+		const trns = Buffer.alloc(2);
+		trns.writeUInt16BE(key);
+		chunks.push(chunk("tRNS", trns));
+	}
+	chunks.push(
+		chunk("IDAT", deflateSync(Uint8Array.from(rows))),
+		chunk("IEND", new Uint8Array()),
+	);
+	return {
+		bytes: Buffer.concat([
+			Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+			...chunks,
+		]),
+		expected,
+	};
+}
+
+const GRAY_CASES: PngCase[] = ([1, 2, 4, 8, 16] as const).flatMap((bitDepth) =>
+	[false, true].flatMap((interlaced) =>
+		[false, true].map((colorKey) => ({
+			name: `grayscale ${bitDepth}-bit ${interlaced ? "Adam7" : "plain"}${colorKey ? " color key stays cleared" : " scales to RGBA8"}`,
+			run: (check: CaseCheck) => {
+				const source = graySource(bitDepth, interlaced, colorKey);
+				const before = source.bytes.slice();
+				const decoded = decodePng(source.bytes);
+				check.deepEqual(
+					decoded.canvas.layers[0]?.pixels,
+					source.expected,
+					"gray samples and alpha normalize to 8 bits",
+				);
+				check.deepEqual(source.bytes, before, "source bytes remain untouched");
+				check.deepEqual(
+					decoded.warnings,
+					[],
+					"plain grayscale has no warnings",
+				);
+			},
+		})),
+	),
+);
+
 export const PNG_CASES: PngCase[] = [
+	...GRAY_CASES,
 	{
 		name: "codec proof: A=0 pattern survives decode, encode, decode",
 		run: (check) => {

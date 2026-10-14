@@ -11,18 +11,12 @@ import {
 	validateDimension,
 	validateLayerPixelsSize,
 } from "../core/validate.ts";
+import { assemblePng, compressScanlines, encodeIhdr } from "./png-chunks.ts";
 
 /** Fixed output parameters (§101.3): every encode of the same canvas is byte-identical. */
 const OUTPUT_BIT_DEPTH = 8;
 const OUTPUT_COLOR_TYPE = 6;
-const OUTPUT_FILTER_TYPE = 0;
-// Stored (uncompressed) deflate: compressed levels emit different bytes in
-// Bun vs Node zlib builds for identical input, which would break the
-// cross-runtime byte-identical guarantee (§100.4). Level 0 framing is
-// canonical and encodes identically on both runtimes; size is traded for
-// determinism. Strategy stays fixed (a no-op at level 0) to pin the set.
-const OUTPUT_DEFLATE_LEVEL = 0;
-const OUTPUT_DEFLATE_STRATEGY = 3;
+const OUTPUT_BYTES_PER_PIXEL = 4;
 
 /** decodePng always produces a single-layer canvas under this id. */
 const DECODE_LAYER_ID = "base";
@@ -73,6 +67,8 @@ function readAscii(input: Uint8Array, offset: number): string {
 interface PngScan {
 	width: number;
 	height: number;
+	bitDepth: number;
+	colorType: number;
 	hasGamma: boolean;
 	hasIccp: boolean;
 }
@@ -123,7 +119,14 @@ function scanPng(input: Uint8Array): PngScan {
 		}
 		offset += 12 + length;
 	}
-	return { width, height, hasGamma, hasIccp };
+	return {
+		width,
+		height,
+		bitDepth: input[24] as number,
+		colorType: input[25] as number,
+		hasGamma,
+		hasIccp,
+	};
 }
 
 /**
@@ -170,6 +173,13 @@ export function decodePng(input: Uint8Array): DecodePngResult {
 		}
 	} else {
 		pixels = new Uint8Array(image.data);
+		if (scan.colorType === 0 && scan.bitDepth < 8) {
+			// skipRescale also leaves opaque alpha at the raw sample maximum.
+			const scale = 255 / ((1 << scan.bitDepth) - 1);
+			for (let i = 0; i < pixels.length; i += 1) {
+				pixels[i] = (pixels[i] as number) * scale;
+			}
+		}
 	}
 	validateLayerPixelsSize(width, height, pixels);
 	if (width !== scan.width || height !== scan.height) {
@@ -254,27 +264,40 @@ export function flattenCanvas(canvas: PixelCanvas): Uint8Array {
 }
 
 /**
- * Flatten the canvas and encode RGBA8 with fixed parameters (bit depth 8,
- * color type 6, no interlace, fixed compression and filter, no variable
- * chunks), so the same canvas always encodes to identical bytes (§101.3).
+ * Flatten the canvas and encode RGBA8 (bit depth 8, color type 6, no
+ * interlace or ancillary chunks), so the same canvas always encodes to
+ * identical bytes.
  */
 export function encodePng(canvas: PixelCanvas): Uint8Array {
 	assertValidCanvas(canvas);
 	const flat = flattenCanvas(canvas);
 	try {
-		const encoded = PNG.sync.write(
-			{ width: canvas.width, height: canvas.height, data: Buffer.from(flat) },
-			{
-				colorType: OUTPUT_COLOR_TYPE,
-				bitDepth: OUTPUT_BIT_DEPTH,
-				inputColorType: OUTPUT_COLOR_TYPE,
-				filterType: OUTPUT_FILTER_TYPE,
-				deflateLevel: OUTPUT_DEFLATE_LEVEL,
-				deflateStrategy: OUTPUT_DEFLATE_STRATEGY,
-			},
+		const compressed = compressScanlines(
+			flat,
+			canvas.width * OUTPUT_BYTES_PER_PIXEL,
+			canvas.height,
+			OUTPUT_BYTES_PER_PIXEL,
+			OUTPUT_BIT_DEPTH,
+			OUTPUT_COLOR_TYPE,
+			"standard",
 		);
-		return new Uint8Array(encoded);
+		return assemblePng([
+			{
+				type: "IHDR",
+				data: encodeIhdr(
+					canvas.width,
+					canvas.height,
+					OUTPUT_BIT_DEPTH,
+					OUTPUT_COLOR_TYPE,
+				),
+			},
+			{ type: "IDAT", data: compressed.idat },
+			{ type: "IEND", data: new Uint8Array(0) },
+		]);
 	} catch (error) {
+		if (error instanceof McAssetError) {
+			throw error;
+		}
 		throw new McAssetError("INTERNAL_ERROR", "PNG encoding failed.", {
 			reason: error instanceof Error ? error.message : String(error),
 		});

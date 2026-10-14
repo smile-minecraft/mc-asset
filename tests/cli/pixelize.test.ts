@@ -364,16 +364,24 @@ describe("pixelize wiring via spawn", () => {
 	test("non-item presets keep byte-identical outputs", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-px-"));
 		try {
-			// Goldens captured before the five-stage rollout: only the item
-			// preset may change bytes, every other preset stays bit-identical.
+			// Compressed file hashes change; the old pixel hashes stay fixed.
 			const goldens: Record<string, string> = {
 				generic:
-					"43feead1281b7b7d0b03b777ff1d1b3b2a172431ab069fa1b77a25eee03da801",
+					"6239952829adca8f339a3bf0797436d5759dca495198d8db23974cac042fb02c",
 				block:
-					"ee1db6211f9cd6b1a838f32c000e3616480da80461e81a5c0d78a605edc5c13c",
-				gui: "d4f5137957a73e24905e5191d7366db21ed25f5ec8ec432f634ad0db3c688baa",
+					"41e7b44e20cb9253ebf5f51457348c5588d4a8c1654a5bc9958e4133f33c10c5",
+				gui: "543b8574b75247d3a6650056863f114fcd46f25dfafba08d181785e355a9e739",
 				particle:
-					"c4d1425e94bc2b7d0067a99cd90f3ad736993d172d297874c0fc380aa844b306",
+					"5f7676912652fd5ca12e68c0cadd8688314548ca7c9ea882e8cca90e4297c5d6",
+			};
+			const pixelGoldens: Record<string, string> = {
+				generic:
+					"7facba6991dc6a43080ebeee708fda9f27eee255f152ed80b7a4ae9a31379015",
+				block:
+					"52e91710ccb324bbc230669244f747e8cbf92d9d2e403d33b3d830c1dc593246",
+				gui: "dd51a99fb7578c757233f414494443c3a8a2193ee6d8850112ce3f2c1efd23f5",
+				particle:
+					"ebb5cd18dc582b5edbacef40c515e86cbee2d24f1d72358adb5aea6dd3954c11",
 			};
 			for (const [preset, golden] of Object.entries(goldens)) {
 				const out = join(dir, `${preset}.png`);
@@ -388,7 +396,11 @@ describe("pixelize wiring via spawn", () => {
 					out,
 				]);
 				expect(result.code).toBe(0);
-				expect(sha256(new Uint8Array(await readFile(out)))).toBe(golden);
+				const bytes = new Uint8Array(await readFile(out));
+				expect(sha256(decodePng(bytes).canvas.layers[0].pixels)).toBe(
+					pixelGoldens[preset] as string,
+				);
+				expect(sha256(bytes)).toBe(golden);
 			}
 		} finally {
 			await rm(dir, { recursive: true, force: true });
