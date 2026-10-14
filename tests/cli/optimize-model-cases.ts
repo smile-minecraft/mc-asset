@@ -162,7 +162,7 @@ function pngBytes(): Buffer {
 
 add("optimize dry run reports and writes nothing", async (root, surface) => {
 	const input = await sourcePng(root);
-	const before = await readdir(root);
+	const before = (await readdir(root)).sort();
 	const result = await surface.optimize([input], { dryRun: true });
 	if (result.code !== 0)
 		throw new Error(`exit ${result.code}: ${result.stderr}`);
@@ -177,7 +177,7 @@ add("optimize dry run reports and writes nothing", async (root, surface) => {
 		throw new Error("source bytes");
 	}
 	if (num(obj(body, "totals"), "files") !== 1) throw new Error("totals files");
-	const after = await readdir(root);
+	const after = (await readdir(root)).sort();
 	if (after.join() !== before.join()) throw new Error("dry run wrote files");
 });
 
@@ -263,7 +263,7 @@ add("optimize writes one explicit output atomically", async (root, surface) => {
 		throw new Error("reported output path");
 	}
 	if ((await readFile(output)).length === 0) throw new Error("empty output");
-	const after = await readdir(root);
+	const after = (await readdir(root)).sort();
 	if (after.join() !== ["out.png", "source.png"].join()) {
 		throw new Error(`unexpected tree: ${after.join()}`);
 	}
@@ -373,7 +373,7 @@ add(
 		const body = obj(parseEnvelope(result), "result");
 		if (arr(body, "files").length !== 3) throw new Error("files count");
 		if (num(obj(body, "totals"), "files") !== 3) throw new Error("totals");
-		const after = await readdir(dir);
+		const after = (await readdir(dir)).sort();
 		if (after.join() !== ["s0.png", "s1.png", "s2.png"].join()) {
 			throw new Error(`unexpected outputs: ${after.join()}`);
 		}
@@ -382,7 +382,7 @@ add(
 
 add("model inspect and validate are read-only", async (root, surface) => {
 	const file = await modelJson(root);
-	const before = await readdir(root);
+	const before = (await readdir(root)).sort();
 	const inspect = await surface.model("inspect", file, {});
 	if (inspect.code !== 0) throw new Error(`inspect exit ${inspect.code}`);
 	if (str(report(inspect), "command") !== "model")
@@ -393,7 +393,7 @@ add("model inspect and validate are read-only", async (root, surface) => {
 	// minecraft: references without a vanilla source are warnings, not errors.
 	if (arr(report(validate), "findings").some((f) => f.level === "error"))
 		throw new Error("error findings");
-	const after = await readdir(root);
+	const after = (await readdir(root)).sort();
 	if (after.join() !== before.join()) throw new Error("read-only wrote files");
 });
 
