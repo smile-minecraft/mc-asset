@@ -428,7 +428,15 @@ export function resolveTextureVariable(
 		if (doc === undefined) {
 			return { status: "external", chain, exitRel: currentRel };
 		}
-		const raw = doc.textures[currentVar];
+		let raw = doc.textures[currentVar];
+		if (
+			typeof raw === "object" &&
+			raw !== null &&
+			"sprite" in raw &&
+			typeof (raw as { sprite: unknown }).sprite === "string"
+		) {
+			raw = (raw as { sprite: string }).sprite;
+		}
 		if (raw !== undefined) {
 			if (typeof raw !== "string" || raw.trim() === "") {
 				return { status: "not-found", chain };

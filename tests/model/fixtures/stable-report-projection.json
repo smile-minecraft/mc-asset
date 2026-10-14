@@ -1,0 +1,18 @@
+{
+	"path": "assets/demo/models/item/child.json",
+	"modelId": "demo:item/child",
+	"kind": "item",
+	"version": {
+		"packFormat": "84.0",
+		"rules": "verified",
+		"rulesReason": "verified-release"
+	},
+	"verdict": "pass",
+	"findings": [],
+	"coverage": { "status": "complete", "skipped": [] },
+	"properties": { "ambientocclusion": false, "guiLight": "front" },
+	"elementsSource": { "from": "own" },
+	"sizes": [[15.5, 16, 16]],
+	"resolvedTextures": ["demo:stone"],
+	"summary": { "elementCount": 1, "faceCount": 1, "textureCount": 1 }
+}

@@ -8,6 +8,11 @@ import {
 	nineSliceGeometryError,
 } from "../core/mcmeta.ts";
 import { decodePng } from "../io/png.ts";
+import { validateBlockstateStructure } from "../model/blockstate-structure.ts";
+import { type JsonNode, parseJsonDocument } from "../model/json-document.ts";
+import { MODEL_LIMITS } from "../model/limits.ts";
+import { validateModelStructure } from "../model/structure.ts";
+import { type ModelRules, resolveModelRules } from "../model/versions.ts";
 import {
 	ITEM_ATLAS_PLACEMENT_FACT,
 	ITEM_MODEL_DEFINITIONS_FACT,
@@ -133,6 +138,12 @@ const FINDING_ORDER: Readonly<Record<string, number>> = {
 	PACK_TEXTURE_NOT_IN_ATLAS: 16,
 	PACK_UNRESOLVED_EXTERNAL: 17,
 	PACK_COVERAGE_SKIPPED: 18,
+	MODEL_INVALID_STRUCTURE: 19,
+	MODEL_INVALID_UV: 20,
+	MODEL_INVALID_ROTATION: 21,
+	MODEL_INVALID_DISPLAY: 22,
+	MODEL_VERSION_FEATURE: 23,
+	MODEL_SUSPICIOUS_VALUE: 24,
 };
 
 const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -387,6 +398,9 @@ interface ScanState {
 			firstRel: string;
 		}
 	>;
+	modelTexts: Map<string, string>;
+	blockstateTexts: Map<string, string>;
+	modelSkips: PackCoverageSkip[];
 }
 
 /** Per-file checks that need no cross-file view. Order matches FINDING_ORDER. */
@@ -396,6 +410,7 @@ async function checkSingleFile(
 	state: ScanState,
 ): Promise<void> {
 	const base = basenameOf(rel);
+	const split = splitNamespace(rel);
 	const lowerBase = base.toLowerCase();
 	const isJson = lowerBase.endsWith(".json") || lowerBase.endsWith(".mcmeta");
 	if (isJson) {
@@ -425,11 +440,24 @@ async function checkSingleFile(
 			);
 			state.errorFiles.add(rel);
 		}
+		const lowRel = rel.toLowerCase();
+		if (
+			rel.startsWith("assets/") &&
+			lowRel.endsWith(".json") &&
+			lowRel.includes("/models/")
+		) {
+			state.modelTexts.set(rel, text);
+		}
+		if (
+			split?.rest.toLowerCase().startsWith("blockstates/") &&
+			lowRel.endsWith(".json")
+		) {
+			state.blockstateTexts.set(rel, text);
+		}
 		await checkDiskName(rel, state);
 		return;
 	}
 	await checkDiskName(rel, state);
-	const split = splitNamespace(rel);
 	if (split === undefined) {
 		return;
 	}
@@ -637,16 +665,32 @@ function checkGuiScalingBorder(rel: string, state: ScanState): void {
 }
 
 /** Known model docs for variable and cycle analysis (current pack only). */
-function modelDocViews(state: ScanState): Map<string, ModelDocView> {
+function modelDocViews(
+	state: ScanState,
+	rules?: ModelRules,
+): Map<string, ModelDocView> {
 	const views = new Map<string, ModelDocView>();
+	const hasObjectForm = rules?.has("texturesObjectForm");
 	for (const rel of state.modelRels) {
 		const doc = state.docs.get(rel);
 		if (doc === undefined || !isRecord(doc)) {
 			continue;
 		}
-		const textures = isRecord(doc.textures)
+		let textures = isRecord(doc.textures)
 			? (doc.textures as Record<string, unknown>)
 			: {};
+		if (isRecord(doc.textures)) {
+			textures = { ...textures };
+			for (const [k, v] of Object.entries(textures)) {
+				if (
+					isRecord(v) &&
+					typeof v.sprite === "string" &&
+					(hasObjectForm === true || hasObjectForm === undefined)
+				) {
+					textures[k] = v.sprite;
+				}
+			}
+		}
 		views.set(rel, { textures, parent: doc.parent });
 	}
 	return views;
@@ -701,6 +745,7 @@ function checkModelReferences(
 	context: ResourceContext,
 	state: ScanState,
 	views: Map<string, ModelDocView>,
+	rules?: ModelRules,
 ): void {
 	const doc = state.docs.get(rel);
 	if (doc === undefined || !isRecord(doc)) {
@@ -734,6 +779,7 @@ function checkModelReferences(
 			context,
 			state,
 			views,
+			rules,
 		);
 	}
 }
@@ -835,7 +881,24 @@ function checkTextureReference(
 	context: ResourceContext,
 	state: ScanState,
 	views: Map<string, ModelDocView>,
+	rules?: ModelRules,
 ): void {
+	const hasObjectForm = rules?.has("texturesObjectForm");
+	if (
+		isRecord(value) &&
+		typeof value.sprite === "string" &&
+		(hasObjectForm === true || hasObjectForm === undefined)
+	) {
+		if (hasObjectForm === undefined) {
+			state.itemSkips.push({
+				kind: "model-version-rules",
+				reason: "feature-version-unknown",
+				target: `${rel}#/${field.replace(/\./g, "/")}`,
+				detail: "texturesObjectForm",
+			});
+		}
+		value = value.sprite;
+	}
 	if (typeof value !== "string" || value.trim() === "") {
 		push(
 			state.findings,
@@ -1477,6 +1540,9 @@ export async function scanPack(
 		itemEntries: [],
 		atlasRefs: [],
 		unresolved: new Map(),
+		modelTexts: new Map(),
+		blockstateTexts: new Map(),
+		modelSkips: [],
 	};
 	for (const rel of rels) {
 		if (rel === "pack.mcmeta") {
@@ -1542,13 +1608,159 @@ export async function scanPack(
 		checkAnimationSheet(rel, state);
 		checkGuiScalingBorder(rel, state);
 	}
-	const views = modelDocViews(state);
+	let effectiveTarget = options?.target ?? "default (engine defaults)";
+	let effectivePackFormat = options?.packFormat;
+	if (effectivePackFormat === undefined) {
+		const fromMcmeta = resourcePackFormatFromMcmeta(mcmetaDoc);
+		if (fromMcmeta !== undefined) {
+			effectivePackFormat = fromMcmeta;
+			effectiveTarget = `pack.mcmeta resource-pack ${fromMcmeta}`;
+		} else {
+			push(
+				state.findings,
+				"PACK_VERSION_UNDETERMINED",
+				"warning",
+				VERSION_UNDETERMINED_MESSAGE,
+				undefined,
+			);
+		}
+	}
+	const modelRules = resolveModelRules(effectivePackFormat);
+
+	const views = modelDocViews(state, modelRules);
 	const parentOf = parentOfModels(state);
 	emitParentCycles(parentOf, state);
 	for (const rel of state.modelRels) {
-		checkModelReferences(rel, context, state, views);
+		checkModelReferences(rel, context, state, views, modelRules);
+	}
+	for (const rel of state.modelRels) {
+		const doc = state.docs.get(rel);
+		if (!isRecord(doc)) {
+			continue;
+		}
+		const rawText = state.modelTexts.get(rel);
+		if (rawText === undefined) {
+			continue;
+		}
+		const rawBytes = encoder.encode(rawText).length;
+		if (rawBytes > MODEL_LIMITS.maxFileBytes) {
+			state.modelSkips.push({
+				kind: "model-limits",
+				reason: "file-size-limit",
+				target: rel,
+			});
+			continue;
+		}
+		let jsonDoc: JsonNode;
+		try {
+			jsonDoc = parseJsonDocument(rawText);
+		} catch (err) {
+			if (
+				err instanceof McAssetError &&
+				err.code === "RESOURCE_LIMIT_EXCEEDED"
+			) {
+				state.modelSkips.push({
+					kind: "model-limits",
+					reason: "resource-limit-exceeded",
+					target: rel,
+				});
+				continue;
+			}
+			push(
+				state.findings,
+				"MODEL_SUSPICIOUS_VALUE",
+				"warning",
+				`"${rel}" failed strict JSON parsing: ${err instanceof Error ? err.message : String(err)}.`,
+				rel,
+			);
+			state.modelSkips.push({
+				kind: "model-structure",
+				reason: "strict-parse-failed",
+				target: rel,
+			});
+			continue;
+		}
+
+		try {
+			const structResult = validateModelStructure(jsonDoc, modelRules, rel);
+			for (const finding of structResult.findings) {
+				const { code, level, message } = finding;
+
+				const pointerSuffix =
+					finding.pointer !== "" ? ` (at ${finding.pointer})` : "";
+				push(state.findings, code, level, `${message}${pointerSuffix}`, rel);
+				if (level === "error") {
+					state.errorFiles.add(rel);
+				}
+			}
+			for (const skip of structResult.skipped) {
+				state.modelSkips.push({
+					kind: skip.kind,
+					reason: skip.reason,
+					target: skip.target,
+					...(skip.detail === undefined ? {} : { detail: skip.detail }),
+				});
+			}
+		} catch (err) {
+			if (
+				err instanceof McAssetError &&
+				err.code === "RESOURCE_LIMIT_EXCEEDED"
+			) {
+				state.modelSkips.push({
+					kind: "model-limits",
+					reason: "resource-limit-exceeded",
+					target: rel,
+				});
+			} else {
+				throw err;
+			}
+		}
 	}
 	checkBlockstateReferences(state, context);
+	for (const rel of state.blockstateRels) {
+		const doc = state.docs.get(rel);
+		if (!isRecord(doc)) {
+			continue;
+		}
+		const rawText = state.blockstateTexts.get(rel);
+		if (rawText === undefined) {
+			continue;
+		}
+		let jsonDoc: JsonNode;
+		try {
+			jsonDoc = parseJsonDocument(rawText);
+		} catch {
+			state.modelSkips.push({
+				kind: "model-structure",
+				reason: "strict-parse-failed",
+				target: rel,
+			});
+			continue;
+		}
+		const bsResult = validateBlockstateStructure(jsonDoc, modelRules, rel);
+		for (const finding of bsResult.findings) {
+			const pointerSuffix =
+				finding.pointer !== "" ? ` (at ${finding.pointer})` : "";
+			push(
+				state.findings,
+				finding.code,
+				finding.level,
+				`${finding.message}${pointerSuffix}`,
+				rel,
+			);
+			if (finding.level === "error") {
+				state.errorFiles.add(rel);
+			}
+		}
+		for (const skip of bsResult.skipped) {
+			state.modelSkips.push({
+				kind: skip.kind,
+				reason: skip.reason,
+				target: skip.target,
+				...(skip.detail === undefined ? {} : { detail: skip.detail }),
+			});
+		}
+	}
 	checkItemModelDefinitions(state, context, options, mcmetaDoc);
 	const reachability = computeReachability(parentOf, state);
 	const atlasSkips = await checkAtlasCoverage(
@@ -1586,26 +1798,6 @@ export async function scanPack(
 			rel,
 		);
 	}
-	// Version target: an explicit flag always wins. With no flag the engine
-	// reads the resolved resource-pack format from the root pack.mcmeta
-	// (max_format, then min_format, then legacy pack_format); a missing or
-	// unusable value warns once and skips version-dependent checks with
-	// no default version ever applied.
-	let effectiveTarget = options?.target ?? "default (engine defaults)";
-	if (options?.packFormat === undefined) {
-		const fromMcmeta = resourcePackFormatFromMcmeta(mcmetaDoc);
-		if (fromMcmeta !== undefined) {
-			effectiveTarget = `pack.mcmeta resource-pack ${fromMcmeta}`;
-		} else {
-			push(
-				state.findings,
-				"PACK_VERSION_UNDETERMINED",
-				"warning",
-				VERSION_UNDETERMINED_MESSAGE,
-				undefined,
-			);
-		}
-	}
 	// Unresolved externals: one warning per distinct target, lending the
 	// first referrer's path, plus one coverage skip each. The skip target
 	// is the canonical rel path (the dedup key), never the first
@@ -1617,7 +1809,11 @@ export async function scanPack(
 	const pending = [...state.unresolved.entries()].sort((a, b) =>
 		compareBytes(a[0], b[0]),
 	);
-	const skipped: PackCoverageSkip[] = [...atlasSkips, ...state.itemSkips];
+	const skipped: PackCoverageSkip[] = [
+		...atlasSkips,
+		...state.itemSkips,
+		...state.modelSkips,
+	];
 	for (const [target, entry] of pending) {
 		if (entry.kind === "texture-variable-external") {
 			const cut = target.indexOf(String.fromCharCode(0));

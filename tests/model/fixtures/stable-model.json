@@ -1,0 +1,18 @@
+{
+	"ambientocclusion": false,
+	"gui_light": "front",
+	"textures": {
+		"all": "demo:stone"
+	},
+	"elements": [
+		{
+			"from": [0.25, 0, 0],
+			"to": [15.75, 16, 16],
+			"faces": {
+				"north": {
+					"texture": "#all"
+				}
+			}
+		}
+	]
+}
