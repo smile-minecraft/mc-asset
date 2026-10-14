@@ -96,6 +96,8 @@ Node.js 22 or newer. In a checkout of the mc-asset repository, use
 | Contact sheet of sprites | `animate pack --frames-dir sprites --layout horizontal --output sheet.png` |
 | Nine-slice GUI scaling | `gui-scale panel.png --mcmeta panel.png.mcmeta --size 48x32 --output big.png` |
 | Whole resource pack | `validate-pack ./MyPack --minecraft-version 26.3` |
+| Shrink a PNG losslessly | `optimize in.png --output-dir out --mkdir` (add `--dry-run` to preview) |
+| Validate a Java model | `model validate model.json --pack ./MyPack --minecraft-version 26.3` |
 
 `references/commands.md` explains each one, its MCP twin, and the gotchas.
 

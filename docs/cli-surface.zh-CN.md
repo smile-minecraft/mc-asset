@@ -16,6 +16,7 @@
   - [6. 动画与精灵图集](#6-动画与精灵图集)
   - [7. 检查、验证与资源包核对](#7-检查验证与资源包核对)
   - [8. Model Context Protocol（MCP）服务器](#8-model-context-protocolmcp服务器)
+  - [9. PNG 优化与 Java 模型](#9-png-优化与-java-模型)
 - [批处理操作规范（`--operations`）](#批处理操作规范--operations)
 - [退出状态码注册表](#退出状态码注册表)
 - [常见错误排查指南（Troubleshooting）](#常见错误排查指南troubleshooting)
@@ -241,7 +242,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
 mc-asset mcp
 ```
 
-启动原生 Model Context Protocol（MCP）stdio 服务器，供 LLM Agent 集成，提供 21 个原生工具，无需另起子进程：
+启动原生 Model Context Protocol（MCP）stdio 服务器，供 LLM Agent 集成，提供 23 个原生工具，无需另起子进程：
 - `analyze_asset`
 - `pixelize_asset`
 - `render_pixel_asset`
@@ -263,6 +264,49 @@ mc-asset mcp
 - `validate_pack_asset`
 - `scale_gui_asset`
 - `inspect_asset`
+- `optimize_asset`
+- `model_asset`
+
+---
+
+### 9. PNG 优化与 Java 模型
+
+| 命令 | 输入 | 输出 | 说明 |
+|---|---|---|---|
+| `optimize <input...>` | 1 至 256 个明确的 PNG 文件 | 写到明确新路径的 PNG，或只出报告（`--dry-run`） | 无损重新编码成能精确表示像素的最小编码；没有更小的就保留源字节。 |
+| `model inspect <file>` | Java 方块／物品模型 JSON | 只出报告 | 描述 parent、textures、elements、display 变换与解析后的引用。 |
+| `model validate <file>` | Java 方块／物品模型 JSON | 只出报告（有缺陷时退出码 3） | 检查结构、UV、旋转、display 变换与引用是否有效。 |
+| `model create` | 模型描述（`--spec`） | 模型 JSON | 按明确的描述创建模型文档。 |
+| `model apply <file>` | 模型 JSON 加类型化操作（`--operations`） | 模型 JSON | 全部操作成功才写出新文档，否则一个都不应用。 |
+| `model export <file>` | 模型 JSON，可选 binding（`--binding`） | 模型 JSON、物品定义、blockstate | 把模型放进资源包，并在旁边生成物品定义与 blockstate。 |
+
+```text
+optimize     <input...> (--output <png> | --output-dir <dir> | --stdout | --dry-run)
+                        [--mode <auto|rgba|rgb|grayscale|grayscale-alpha|indexed>]
+                        [--ancillary <preserve|strip>] [--force] [--mkdir] [--json]
+model inspect  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
+                      [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+model validate <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
+                      [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+model create   --spec <file|-> (--output <json> | --stdout) [--force] [--mkdir]
+                      [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+model apply    <file> --operations <file|-> (--output <json> | --stdout) [--force] [--mkdir]
+                      [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+model export   <file> [--output <json>] [--binding <file|->] [--item-output <json>]
+                      [--blockstate-output <json>] [--pack <dir>] [--force] [--mkdir]
+                      [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+```
+
+- `optimize` 的输入：只接受明确的 PNG 路径（不展开通配符、不遍历目录）；格式按签名判断，不是 PNG 的文件会报告 `UNSUPPORTED_IMAGE_FORMAT`。同一个文件出现两次，或两个输入在 `--output-dir` 下文件名相同，会报告 `ARGUMENT_CONFLICT`。
+- `optimize` 的输出：`--output`（单个输入）、`--output-dir`（每个输入写成 `<dir>/<输入文件名>`）、`--stdout`（单个输入）、`--dry-run`（只算报告、不写文件）必须恰好一个。都没给是 `OUTPUT_REQUIRED`，多于一个是 `ARGUMENT_CONFLICT`。没有 `--in-place`：输入文件永远不会被改写。
+- `--mode auto`（默认）选出能精确表示像素的最小编码，或保留源字节；指定模式会强制该编码，若无法精确表示像素则报告 `OPTIMIZE_MODE_NOT_EXACT`（退出码 5）。`--ancillary preserve`（默认）复制元数据块，并拒绝块内容依赖颜色布局的源文件；`strip` 会丢弃所有辅助块并列出被丢弃的项目。
+- `optimize` 分三个阶段：先检查所有输出路径，再在内存里算完所有输入，最后才写文件。任何一个输入计算失败，就整批都不写，错误的 `details` 列出 `processed` 与 `notProcessed`。写文件中途失败时，已写入的文件保留，`details` 列出 `completed`、`failedTarget` 与 `notStarted`。无法缩小的文件（`unchanged`）仍会以源字节写出，`--dry-run` 除外。
+- 人类可读输出每个文件一行：`ok optimize input=<p> output=<p|-> status=<s> source=<bytes> result=<bytes> mode=<mode>`；警告另起一行 `warning [CODE] message`。`--json` 带相同的结果，另含每个文件的 `candidates`、`preservedChunks`、`strippedChunks` 与 `totals`。
+- `model inspect` 与 `model validate` 只读，不接受输出标志。`inspect` 一律退出 0；`validate` 在判定为 `fail` 时退出 3。给了 `--pack` 时，`<file>` 必须位于 `<pack>/assets/<命名空间>/models/` 之下；没给版本标志时，版本按 `pack.mcmeta` 推定（没有可用的值就视为版本不明，不套用默认）。
+- `model create`／`model apply` 从文件或 `-`（stdin；每个命令最多一个 `-`）读 JSON，并且 `--output` 与 `--stdout` 必须恰好一个。它们只检查文档本身，不接受 `--pack`、`--vanilla`、`--dependency`。模型支持范围只含长方体 `elements`。
+- `model export` 至少要有 `--output`、`--item-output`、`--blockstate-output` 之一。`--item-output` 需要 `binding.item`（反过来也一样），`--blockstate-output` 需要 `binding.blockstate`。`binding.item` 需要明确的版本且资源包格式在 46.0 以上，否则报告 `MODEL_UNSUPPORTED_VERSION`（退出码 5）。`--pack` 会加上布局与边界检查。`--force` 不适用于 `--item-output`、`--blockstate-output`，这两个文件永远不会被覆盖。
+- 共用的写入保护（`optimize` 与 `model`）：第一个字节写出之前，所有目标都已检查完毕。与输入或其他输出互为别名、目标是目录、目标是符号链接（含悬空的，带 `--force` 也一样）、直接父目录是符号链接，以及 `model export` 时位于 `--pack` 之外的路径，都会被拒绝。已存在的文件除非 `--force` 适用，否则报告 `OUTPUT_EXISTS`。每个文件仍以原子重命名提交。
+- 报告只验证结构与引用是否有效。没有任何东西在游戏客户端里渲染过模型，所以外观、光照与游戏内行为都未验证。
 
 ---
 
@@ -331,10 +375,10 @@ mc-asset mcp
 |---|---|---|---|
 | **0** | 成功 | 命令顺利完成。 | 验证全部通过、成功渲染。 |
 | **1** | 内部错误 | 未处理的引擎缺陷（`INTERNAL_ERROR`）。 | 引擎发生非预期失败。 |
-| **2** | 无效调用 | 语法错误、标志冲突、缺少必要参数。 | 缺少 `--output`、同时使用 `--force --in-place`。 |
-| **3** | 资产验证失败 | 引擎运行正常，但资产或资源包未通过验证。 | `VALIDATION_FAILED`、贴图损坏、`.mcmeta` 有误。 |
+| **2** | 无效调用 | 语法错误、标志冲突、缺少必要参数。 | 缺少 `--output`、同时使用 `--force --in-place`、`MODEL_INVALID_JSON`、`MODEL_INVALID_OPERATION`。 |
+| **3** | 资产验证失败 | 引擎运行正常，但资产或资源包未通过验证。 | `VALIDATION_FAILED`、贴图损坏、`.mcmeta` 有误、模型发现项（`MODEL_INVALID_STRUCTURE`、`MODEL_INVALID_UV`、`MODEL_INVALID_ROTATION`、`MODEL_INVALID_DISPLAY`、`MODEL_VERSION_FEATURE`、`MODEL_SUSPICIOUS_VALUE`）。 |
 | **4** | 文件系统拒绝 | 文件已存在且未加 `--force`，或缺少目录且未加 `--mkdir`。 | `OUTPUT_EXISTS`、`FILESYSTEM_ERROR`。 |
-| **5** | 不支持／资源上限 | 输入格式不支持，或超出画布上限。 | 图像头损坏、`UNSUPPORTED_IMAGE_FORMAT`。 |
+| **5** | 不支持／资源上限 | 输入格式不支持，或超出画布上限。 | 图像头损坏、`UNSUPPORTED_IMAGE_FORMAT`、`OPTIMIZE_MODE_NOT_EXACT`、`MODEL_UNSUPPORTED_VERSION`。 |
 
 ---
 
@@ -351,4 +395,6 @@ mc-asset mcp
 | `INVALID_MCMETA` | 2 | `.mcmeta` 格式有误；对 `gui-scale` 而言，也包括九宫格边框占满整个中段（`left + right >= width` 或 `top + bottom >= height`）。 | 保持 `left + right < width` 且 `top + bottom < height`。 |
 | `PACK_GUI_SCALING_BORDER` | 3 | `validate-pack` 发现某个 GUI 贴图的九宫格边框没有留下中段（判断方式同 `INVALID_MCMETA`）。 | 缩小该贴图 `.mcmeta` 里的边框。 |
 | `RESOURCE_LIMIT_EXCEEDED` | 5 | 超过硬性上限：多边形超过 4096 点、选择 AST 深度超过 32 或节点超过 1024、`inspect view` 输出边长超过 1024px，或画布尺寸与内存上限。 | 减少顶点或简化选择表达式；大图用 `--crop` 分块查看。 |
+| `OPTIMIZE_MODE_NOT_EXACT` | 5 | `optimize --mode <名称>` 强制的编码无法精确表示像素（例如对带透明度的源文件指定 `rgb`）。 | 改用 `--mode auto`，或选一个能容纳所有像素的模式。 |
+| `MODEL_UNSUPPORTED_VERSION` | 5 | 目标版本无法表示所要求的特性，或 `model export` 使用 `binding.item` 时没有明确的 46.0 以上资源包版本。 | 传入支持该特性的 `--minecraft-version` 或 `--resource-pack-version`。 |
 | `UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT` | 5 | 使用 `minecraft:*` 资产配置，但输出路径不是 `.png`。 | Minecraft 贴图一律输出 `.png`。 |

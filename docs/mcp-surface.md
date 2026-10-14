@@ -10,7 +10,7 @@ reimplements image logic.
 Tool names are frozen. Earlier drafts called the batch-edit tool
 `edit_asset`; the frozen name is `apply_asset_operations`.
 
-Minecraft targets span `1.19.3` through `26.3`. Of the twenty-one tools, twelve (`import_asset` through `validate_pack_asset`) exist for full CLI parity. Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
+Minecraft targets span `1.19.3` through `26.3`. Of the twenty-three tools, twelve (`import_asset` through `validate_pack_asset`) exist for full CLI parity. Release history lives in [`CHANGELOG.md`](../CHANGELOG.md).
 
 Capability base: full CLI parity — intake and source build, spatial
 transforms, palette and quantization, the deterministic pixelize
@@ -47,6 +47,8 @@ is no `set_pixel` tool on purpose.
 | `animate_asset` | Frames directory or sprite sheet, one `mode` (`pack` / `unpack` / `reorder` / `resize` / `validate` / `preview`) | Explicit PNG path (`pack`) or output directory (`unpack`, `reorder`, `resize`) | Sheet PNG, frames, or read-only report |
 | `validate_pack_asset` | Resource pack root, plus optional vanilla tree and dependency roots | Nothing | Read-only verdict with findings and a coverage object |
 | `inspect_asset` | Editable `.mcpx` source or raster image (raster reads as a single base layer), one `mode` (`structure` / `view`), view-only `crop` and `scale` | Nothing | Read-only report (structure), or composited PNG image block plus metadata (view) |
+| `optimize_asset` | PNG files (one to 256 explicit paths, never rewritten) | Optional explicit PNG output path, or an existing output directory | Per-file report (source and result size, mode, candidates, chunks, warnings) plus totals; PNG bytes embedded for one input without an output |
+| `model_asset` | Java block/item model JSON, one `mode` (`inspect` / `validate` / `create` / `apply` / `export`), optional pack, vanilla, and dependency roots | Optional explicit `.json` paths (model, item definition, blockstate) | Read-only report (`inspect`, `validate`), or the model document and generated bindings (`create`, `apply`, `export`) |
 
 ## Input semantics
 
@@ -107,6 +109,20 @@ is no `set_pixel` tool on purpose.
 - `scale_gui_asset` takes `size` (`N` or `WxH`), an optional
   `mcmetaPath` (omitted means `stretch`), and optional version fields;
   output is PNG only.
+- `optimize_asset` takes `inputPaths` (1 to 256 explicit PNG files) plus
+  optional `mode` (`auto` default, `rgba`, `rgb`, `grayscale`,
+  `grayscale-alpha`, `indexed`), `ancillary` (`preserve` default, `strip`),
+  `dryRun`, `outputPath` (exactly one input), and `outputDir` (an existing
+  directory). Several inputs need `outputDir` or `dryRun`; otherwise the tool
+  raises `INVALID_ARGUMENT`. A forced `mode` that cannot hold the pixels
+  exactly is `OPTIMIZE_MODE_NOT_EXACT`.
+- `model_asset` takes `mode` plus the fields that mode needs: `inputPath`
+  (`inspect`, `validate`, `apply`, `export`), `spec` (`create`), `operations`
+  (`apply`, 1 to 1000), `binding` (`export`), `packPath` / `vanillaPath` /
+  `dependencyPaths` (`inspect`, `validate`; `packPath` also `export`),
+  `outputPath`, `itemOutputPath`, and `blockstateOutputPath`. A field the
+  mode does not accept is `INVALID_ARGUMENT` naming the field and the mode.
+  Model support covers cuboid `elements` only.
 - `validate_pack_asset` takes an optional `vanillaPath` and an optional
   ordered `dependencyPaths` (earlier entries win).
 - `transform_asset` / `animate_asset` accept `nearest` / `box` /
@@ -128,3 +144,12 @@ is no `set_pixel` tool on purpose.
 - Producing tools return the applied count, per-operation statuses,
   warnings, and either the explicit paths written or the embedded
   artifacts.
+- `optimize_asset` and `model_asset` never accept `force`, `mkdir`, or
+  in-place targets: an existing output is `OUTPUT_EXISTS`, and a missing parent
+  directory is `FILESYSTEM_ERROR`. Every target is checked before the first
+  byte is written; aliases of an input, symlink targets, and symlinked parent
+  directories are refused. Without an output path the result embeds the
+  artifact (`pngBase64`, `modelText`, `itemText`, `blockstateText`).
+- `optimize_asset` and `model_asset` report pixel equality, structure, and
+  reference validity only. No game client renders the result, so appearance
+  and in-game behavior are not verified.

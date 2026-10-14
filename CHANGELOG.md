@@ -5,6 +5,28 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `optimize` command and `optimize_asset` MCP tool (twenty-one to twenty-two tools): lossless PNG re-encoding into the smallest exact encoding, or the source bytes kept, with a per-file report, `--dry-run`, `--mode`, and `--ancillary`. Inputs are never rewritten.
+- `model` command (`inspect`, `validate`, `create`, `apply`, `export`) and `model_asset` MCP tool (twenty-two to twenty-three tools) for Java block/item model JSON with cuboid `elements`, including item definition and blockstate generation from a binding.
+- Error codes `OPTIMIZE_MODE_NOT_EXACT`, `MODEL_INVALID_JSON`, `MODEL_INVALID_OPERATION`, `MODEL_UNSUPPORTED_VERSION`, and the finding codes `MODEL_INVALID_STRUCTURE`, `MODEL_INVALID_UV`, `MODEL_INVALID_ROTATION`, `MODEL_INVALID_DISPLAY`, `MODEL_VERSION_FEATURE`, `MODEL_SUSPICIOUS_VALUE`.
+- Shared write protection for the new commands and tools: every target is checked before the first byte is written, and aliases of an input, symlink targets, symlinked parent directories, and paths outside `--pack` are refused.
+- Cross-runtime comparison covers optimized PNG output and model create, apply, and export output.
+
+### Changed
+
+- Every PNG the tool writes is now compressed instead of stored. Existing commands produce PNG files with different bytes and hashes, and identical pixels. The 25 showcase images under `docs/assets` went from 2,764,911 to 9,617 bytes through `optimize`, with identical decoded pixels.
+- `validate-pack` now checks model JSON as a whole: wrong element geometry, UV, rotation, and display transforms are reported as findings (errors or warnings) that earlier scans missed.
+- Object-form model textures (`{"sprite": ...}`) on Minecraft 26.1 and later no longer produce false reports.
+- A model with unknown fields or `overrides` makes the report `coverage` `partial` instead of complete.
+
+### Known limits
+
+- Model support covers structure and reference validity only. No Minecraft client renders a model, so appearance, lighting, and in-game behavior are not verified.
+- `optimize` confirms pixel equality by decoding, not how the result looks in a game client.
+
 ## [0.3.2] - 2026-09-23
 
 ### Added

@@ -119,7 +119,7 @@ bun run build
 ## For AI agents
 
 - [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt) — a compact index of the repository for agents.
-- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt) — the same material as a single file: install, the twenty-one MCP tools, batch operations, the error model, and the limits.
+- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt) — the same material as a single file: install, the twenty-three MCP tools, batch operations, the error model, and the limits.
 - [`docs/cli-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.md) — the frozen CLI commands, the batch operations specification, and the exit-code registry.
 - [`docs/mcpx-format.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.md) — the editable multi-layer `.mcpx` and `.grid` grammar and specification.
 - [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md) — registration, one verbatim capture per MCP tool, and the error model.
@@ -218,6 +218,28 @@ mc-asset validate /tmp/mc-asset-demo/gem.png --profile minecraft:item
 # alpha: predicted cutout (opaque=119 transparent=137 partial=0)
 # profile: predicted profile minecraft:item prefers the items atlas without mipmaps.
 ```
+
+### Recipe 9: Lossless PNG Optimization & Java Models (`optimize` & `model`)
+
+`optimize` re-encodes PNGs into the smallest encoding that holds the same pixels exactly, or keeps the source when nothing is smaller. It never rewrites its inputs; pick `--output`, `--output-dir`, `--stdout`, or `--dry-run`.
+
+```sh
+mc-asset optimize ./gem.png --dry-run
+# ok optimize input=./gem.png output=- status=optimized source=184 result=102 mode=rgba
+mc-asset optimize ./gem.png ./sword.png --output-dir ./optimized --mkdir
+```
+
+`model` works on Java block/item model JSON (cuboid `elements` only). Create a model, edit it with typed operations, and validate it against a pack:
+
+```sh
+mc-asset model create --spec ./spec.json \
+  --output ./pack/assets/mypack/models/block/ruby.json --mkdir --resource-pack-version 75
+mc-asset model validate ./pack/assets/mypack/models/block/ruby.json \
+  --pack ./pack --resource-pack-version 75
+mc-asset validate-pack ./pack --resource-pack-version 75
+```
+
+`model apply` takes `--operations` and applies all of them or none; `model export` places the model and, with `--binding`, writes an item definition and a blockstate next to it. The checks cover structure and reference validity. No Minecraft client renders the result, so appearance and in-game behavior are not verified.
 
 ---
 
@@ -378,7 +400,7 @@ All three are shown ×4. With the mcmeta the cut corners and the 2px bevels copy
 
 ## MCP Server
 
-`mc-asset mcp` starts a stdio MCP server on the same core as the CLI, so a tool call and the matching command return the same result. It exposes 21 tools.
+`mc-asset mcp` starts a stdio MCP server on the same core as the CLI, so a tool call and the matching command return the same result. It exposes 23 tools.
 
 ### Exposed MCP Tools
 
@@ -405,6 +427,8 @@ All three are shown ×4. With the mcmeta the cut corners and the 2px bevels copy
 | `animate_asset` | Animation `pack` / `unpack` / `reorder` / `resize` / `validate` / `preview` over frame sets. |
 | `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, version targeting. |
 | `inspect_asset` | Read-only `structure` (layers, regions, color usage, overlaps) or `view` (composited PNG image block plus metadata); takes `inputPath`. |
+| `optimize_asset` | Lossless PNG re-encoding into the smallest exact encoding (or the source kept); per-file report, `dryRun`, explicit `outputPath` / `outputDir`. |
+| `model_asset` | Java block/item model JSON: `inspect`, `validate`, `create`, `apply`, `export` (with item definition and blockstate bindings). Reports structure and references, not rendered appearance. |
 
 `inspect_asset` has two modes: `structure` reports layers, regions, color usage, and overlaps; `view` returns the composited canvas as a PNG image block, with optional `crop` and `scale` (1–16). A view wider than 1024px is refused with a crop hint instead of being downscaled. `apply_asset_operations` takes an optional `feedback` object ([Recipe 7](#recipe-7-batch-edits-with-visual-feedback-build--apply_asset_operations)); without it the result is unchanged. [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md) has one captured call per tool.
 
@@ -496,6 +520,9 @@ Add to `opencode.json` or `opencode.jsonc`:
 | | `inspect <input>` | Read-only structure report or composited view (`--mode structure\|view`, `--crop`, `--scale`). |
 | | `validate <asset>` | Validates single asset texture and optional `.mcmeta`. |
 | | `validate-pack <path>`| Validates entire resource pack root directory. |
+| **Optimization & Models** | `optimize <input...>` | Lossless PNG re-encoding into the smallest exact encoding, or the source bytes kept (`--output`, `--output-dir`, `--stdout`, `--dry-run`, `--mode`, `--ancillary`). |
+| | `model inspect\|validate <file>` | Read-only report on a Java block/item model JSON (structure, UV, rotation, display, references). |
+| | `model create\|apply\|export` | Builds, edits, or places a Java model (cuboid `elements`) and its item definition and blockstate. |
 | **Agent Interface** | `mcp` | Starts the stdio MCP server. |
 
 ---

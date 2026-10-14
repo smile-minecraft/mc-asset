@@ -5,13 +5,13 @@
 ## 目录
 
 - [安装与注册服务器](#安装与注册服务器)
-- [二十一个工具](#二十一个工具)
+- [二十三个工具](#二十三个工具)
 - [失败时如何返回](#失败时如何返回)
 - [限制与缺口](#限制与缺口)
 
 ---
 
-`mc-asset mcp` 会启动 stdio MCP 服务器：stdout 只输出 MCP JSON-RPC，诊断信息走 stderr，stdin 关闭时进程退出。已冻结的接口（二十一个工具名称、各自的输入，以及读写契约）记录在 `docs/mcp-surface.zh-CN.md`，输入字段则冻结在 `src/mcp/schema.ts`。本指南涵盖注册方式、每个工具一份捕获（图片字节在注明处截短显示，不作原样引用）、错误模型与限制。
+`mc-asset mcp` 会启动 stdio MCP 服务器：stdout 只输出 MCP JSON-RPC，诊断信息走 stderr，stdin 关闭时进程退出。已冻结的接口（二十三个工具名称、各自的输入，以及读写契约）记录在 `docs/mcp-surface.zh-CN.md`，输入字段则冻结在 `src/mcp/schema.ts`。本指南涵盖注册方式、每个工具一份捕获（图片字节在注明处截短显示，不作原样引用）、错误模型与限制。
 
 服务器直接挂在 Core 上，所以每个工具都跑与 CLI 命令相同的引擎。像素级的创作，通过 ASCII Grid 文档、批处理操作数组，或内联返回的可编辑 `.mcpx` 源码来完成；刻意不提供 `set_pixel` 工具。
 
@@ -98,7 +98,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 以下捕获通过 MCP 客户端 SDK 在一个演示工作目录中执行，其中所有路径都相对于该目录，只有 `inspect_asset` 的结构捕获直接指向仓库内的 fixture `tests/cli/fixtures/sword.mcpx`。原有七个工具的捕获取自已安装的版本，后续新增的工具则取自本地源码服务器——两者执行的是同一份服务器代码。
 
-## 二十一个工具
+## 二十三个工具
 
 | 工具索引 | | |
 |---|---|---|
@@ -109,6 +109,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | [`palette_asset`](#palette_asset) | [`material_asset`](#material_asset) | [`tile_asset`](#tile_asset) |
 | [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
+| [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | |
 
 ### analyze_asset
 
@@ -479,6 +480,54 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 `structure` 报告图层（范围、面积、可见性、原始 RGBA 用色）、区域（仅含标识、范围、面积）与重叠。`view` 则把合成像素以标准图片块返回，外加六键元数据（`mode`、`sourceDimensions`、`crop`、`scale`、`outputDimensions`、`colorFormat`）——裁剪／缩放／1024px 边长规则与顶层 `inspect` 命令一致，图片字节不会另存一份 `pngBase64`。`view` 的 `scale` 是整数 1–16，默认 1；长边自动放大（缩放前长边不足 128 才向 128 放大）只适用于 `apply_asset_operations` 的附图，不适用于 `view`。`crop` 是与批处理 `selection` 同语法的选择表达式，落空时以 `EMPTY_SELECTION` 拒绝；输出边长超过 1024px 时以 `RESOURCE_LIMIT_EXCEEDED` 加裁剪提示拒绝。
 
+### optimize_asset
+
+无损地把显式指定的 PNG 文件重新编码成能精确表示像素的最小编码；没有更小的编码时保留源字节。它只读输入、绝不改写输入，只写入显式指定的新 `outputPath`（单个输入）或已有的 `outputDir`。`dryRun` 会算出完整报告但不写任何文件。只有一个输入且没给输出字段时，结果会内嵌 `pngBase64`。`mode` 默认 `auto`；指定模式会强制该编码，无法精确表示像素时报告 `OPTIMIZE_MODE_NOT_EXACT`。`ancillary` 默认 `preserve`；`strip` 会丢弃所有元数据块并列出它们。
+
+调用：
+
+```json
+{"inputPaths":["px-8x8.png"],"dryRun":true}
+```
+
+结果（本地 MCP 文本块的实际响应）：
+
+```text
+{"command":"optimize","dryRun":true,"mode":"auto","ancillary":"preserve","engine":"pako@3.0.2 level=9 memLevel=9 windowBits=15 legacyHash=false","files":[{"input":"px-8x8.png","output":null,"status":"optimized","source":{"bytes":184,"width":8,"height":8,"bitDepth":8,"colorType":6,"interlaced":false},"result":{"bytes":102,"mode":"rgba","bitDepth":8,"colorType":6,"paletteSize":0},"savedBytes":82,"savedPermille":445,"candidates":[{"mode":"rgba","applicable":true,"bytes":102,"selected":true},{"mode":"rgb","applicable":false,"unavailableReason":"not-opaque","selected":false},{"mode":"grayscale-alpha","applicable":false,"unavailableReason":"not-gray","selected":false},{"mode":"grayscale","applicable":false,"unavailableReason":"not-opaque","selected":false},{"mode":"indexed","applicable":true,"bytes":296,"selected":false}],"preservedChunks":[],"strippedChunks":[],"interlaceRemoved":false,"warnings":[]}],"totals":{"files":1,"sourceBytes":184,"resultBytes":102,"savedBytes":82,"optimized":1,"unchanged":0,"converted":0}}
+```
+
+`candidates` 列出每一种尝试过的编码，以及其他编码为什么不适用。批量在计算阶段是全有或全无：任何一个输入失败就不写任何文件，错误会列出 `processed` 与 `notProcessed`。
+
+### model_asset
+
+检查、验证、创建、编辑或导出 Java 方块／物品模型 JSON（只支持长方体 `elements`）。`inspect` 与 `validate` 只读；`create`、`apply`、`export` 只写入显式指定的新路径，`export` 还能依 `binding` 生成物品定义与 blockstate。它报告的是结构与引用是否有效，不是渲染后的外观。
+
+调用（create，把模型写进资源包）：
+
+```json
+{"mode":"create","spec":{"textures":{"all":"mypack:block/ruby"},"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"north":{"texture":"#all","uv":[0,0,16,16]},"up":{"texture":"#all"}}}]},"outputPath":"pack/assets/mypack/models/block/ruby.json","resourcePackVersion":"75"}
+```
+
+结果（本地 MCP 文本块的实际响应）：
+
+```text
+{"command":"model","mode":"create","version":{"packFormat":"75.0","rules":"verified","rulesReason":"verified-release"},"changed":true,"warnings":[],"preservedUnknown":[],"output":"pack/assets/mypack/models/block/ruby.json"}
+```
+
+调用（对资源包验证该模型）：
+
+```json
+{"mode":"validate","inputPath":"pack/assets/mypack/models/block/ruby.json","packPath":"pack","resourcePackVersion":"75"}
+```
+
+结果（本地 MCP 文本块的实际响应；资源包内放了被引用的贴图 `pack/assets/mypack/textures/block/ruby.png`）：
+
+```text
+{"command":"model","mode":"validate","path":"assets/mypack/models/block/ruby.json","target":"mypack:block/ruby","version":{"packFormat":"75.0","rules":"verified","rulesReason":"verified-release"},"verdict":"pass","findings":[],"coverage":{"status":"complete","skipped":[]}}
+```
+
+`apply` 接收类型化的 `operations`，全部应用成功或一个都不应用。`export` 使用 `binding.item` 时需要明确的版本，且资源包格式在 46.0 以上（否则报告 `MODEL_UNSUPPORTED_VERSION`）。没有提供原版资源树时，`minecraft` 命名空间的引用会记为跳过的 coverage，而不是被解析。
+
 ## 失败时如何返回
 
 工具失败时会设置 `isError: true`，内容是放在 `content[0].text` 中的 JSON 字符串：
@@ -508,8 +557,10 @@ isError: true
 - **没有逐像素工具。** 不存在 `set_pixel`；像素工作要通过 ASCII Grid、批处理操作数组或内联的 `.mcpx` 文本来做。
 - **只接受显式路径，不覆盖，不建目录。** 目标已存在是 `OUTPUT_EXISTS`，缺少上级目录是 `FILESYSTEM_ERROR`。错误消息仍会提到 `--force`／`--mkdir`，但通过 MCP 无法传入这两个标志，请改用新路径，或自行创建目录。
 - **省略输出路径会内联产物。** 没有输出路径时，结果会带 `pngBase64`（PNG）或 `mcpxText`（`.mcpx`），而不写入文件。这是逐个产物决定的：只给 `outputPngPath` 会写出 PNG，并仍在结果中内联 `.mcpx` 文本。
-- **与 CLI 完全对等。** 二十一个工具覆盖素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证（含依赖／原版解析与 GUI 精灵图缩放）；版本目标设置通过 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 传入。
+- **与 CLI 完全对等。** 二十三个工具覆盖素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证（含依赖／原版解析与 GUI 精灵图缩放）；版本目标设置通过 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 传入。
 - **查看与附图都是图片块，不另存副本。** `inspect_asset` 的 `view` 与 `apply_asset_operations` 的附图都不会再以 `pngBase64` 重复一份 PNG；字节走标准的 `type: "image"`、`mimeType: "image/png"` 块。查看缩放默认 1；长边自动放大（缩放前不足 128 才向 128 放大，上限 16）只适用于附图。超过 1024px 边长一律是 `RESOURCE_LIMIT_EXCEEDED`，不会默默缩图。
+- **模型只检查结构与引用，不检查外观。** `model_asset` 与 `validate_pack_asset` 验证 JSON 结构、UV 与旋转范围、display 变换，以及被引用的模型与贴图是否存在。没有任何 Minecraft 客户端渲染过模型，所以模型在游戏里的外观与行为都未验证。只支持长方体 `elements`。
+- **`optimize_asset` 以像素比对确认无损。** 结果解码后的像素与源文件相同，字节则不同。结果在游戏客户端里的外观未经检查。
 - **`validate_asset` 只检查单个 PNG。** 资源包级与图集感知的验证，请用 `validate_pack_asset`。
 - **确定性只验证过演示输入。** 相同输入加相同参数，对演示用的 `px-8x8.png`／`sword.mcpx`／`v04-anim-frames/` 与一个干净的资源包产生了相同结果。其他输入与选项（WebP、`WxH` 尺寸、`region`、`atomic: false`、`animate` 的 `resize`）也演练过，但没有重跑确认输出是否一致。
 - **运行时。** MCP 路径只使用 `node:` 导入，所以打包后的 `dist` 可在纯 Node 下运行；CI 的 `node` job 使用 Node 22。需要 Node.js 22 或更新，`engines` 字段已声明 `>=22`。

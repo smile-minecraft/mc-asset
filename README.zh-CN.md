@@ -119,7 +119,7 @@ bun run build
 ## 面向 AI Agent
 
 - [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt)：给 Agent 的项目精简索引。
-- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份信息的单文件版本，涵盖安装、二十一个 MCP 工具、批处理操作、错误模型与限制。
+- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份信息的单文件版本，涵盖安装、二十三个 MCP 工具、批处理操作、错误模型与限制。
 - [`docs/cli-surface.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.zh-CN.md)：已冻结的 CLI 命令、批处理操作规范与状态码注册表。
 - [`docs/mcpx-format.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.zh-CN.md)：可编辑的多图层 `.mcpx` 与 `.grid` 格式语法与规范。
 - [`docs/mcp-guide.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.zh-CN.md)：注册方式、每个 MCP 工具一份原样捕获，以及错误模型。
@@ -374,11 +374,33 @@ mc-asset gui-scale ./textures/gui/dialog.png \
 
 三张均为 ×4 显示。有 mcmeta 时，切角和 2px 斜面 1:1 复制，宽度不变；直接拉伸会让斜面粗细不一，切角也会糊掉。
 
+### 实践 9：无损 PNG 优化与 Java 模型（`optimize` 与 `model`）
+
+`optimize` 把 PNG 重新编码成能精确表示相同像素的最小编码；没有更小的就保留源文件。它不会改写输入文件，输出方式从 `--output`、`--output-dir`、`--stdout`、`--dry-run` 择一。
+
+```sh
+mc-asset optimize ./gem.png --dry-run
+# ok optimize input=./gem.png output=- status=optimized source=184 result=102 mode=rgba
+mc-asset optimize ./gem.png ./sword.png --output-dir ./optimized --mkdir
+```
+
+`model` 处理 Java 方块／物品模型 JSON（只支持长方体 `elements`）。创建模型、用类型化操作编辑，再对资源包验证：
+
+```sh
+mc-asset model create --spec ./spec.json \
+  --output ./pack/assets/mypack/models/block/ruby.json --mkdir --resource-pack-version 75
+mc-asset model validate ./pack/assets/mypack/models/block/ruby.json \
+  --pack ./pack --resource-pack-version 75
+mc-asset validate-pack ./pack --resource-pack-version 75
+```
+
+`model apply` 接收 `--operations`，全部应用成功或一个都不应用；`model export` 会放置模型，加上 `--binding` 时还会在旁边写出物品定义与 blockstate。检查范围是结构与引用是否有效。没有任何 Minecraft 客户端渲染过结果，所以外观与游戏内行为都未验证。
+
 ---
 
 ## MCP 服务器
 
-`mc-asset mcp` 会启动一个 stdio MCP 服务器，底层和 CLI 是同一个核心，所以调用工具和执行对应命令会得到相同结果。它提供 21 个工具。
+`mc-asset mcp` 会启动一个 stdio MCP 服务器，底层和 CLI 是同一个核心，所以调用工具和执行对应命令会得到相同结果。它提供 23 个工具。
 
 ### 提供的 MCP 工具
 
@@ -405,6 +427,8 @@ mc-asset gui-scale ./textures/gui/dialog.png \
 | `animate_asset` | 对动画帧组提供 `pack`/`unpack`/`reorder`/`resize`/`validate`/`preview`。 |
 | `validate_pack_asset` | 只读整包扫描：命名空间、模型、贴图、图集、版本对应。 |
 | `inspect_asset` | 只读 `structure`（图层、区域、颜色用量、重叠）或 `view`（合成 PNG 图块加 metadata）；输入为 `inputPath`。 |
+| `optimize_asset` | 无损地把 PNG 重新编码成能精确表示像素的最小编码（或保留源文件）；逐文件报告、`dryRun`、显式的 `outputPath`／`outputDir`。 |
+| `model_asset` | Java 方块／物品模型 JSON：`inspect`、`validate`、`create`、`apply`、`export`（可生成物品定义与 blockstate）。报告结构与引用是否有效，不是渲染后的外观。 |
 
 `inspect_asset` 有两种模式：`structure` 报告图层、区域、色彩用量与重叠；`view` 把合成后的画布以 PNG 图像块返回，可选 `crop` 与 `scale`（1–16）。边长超过 1024px 的 view 会被拒绝并提示改用裁剪，不会自动缩小。`apply_asset_operations` 可以带可选的 `feedback` 对象（见[实践 7](#实践-7批处理编辑与视觉反馈build-与-apply_asset_operations)）；不带时结果完全不变。[`docs/mcp-guide.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.zh-CN.md) 为每个工具附上一次实际调用的捕获。
 
@@ -496,6 +520,9 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | | `inspect <input>` | 只读结构报告或合成视图（`--mode structure\|view`、`--crop`、`--scale`）。 |
 | | `validate <asset>` | 单文件素材规范核验（可附加 `.mcmeta`）。 |
 | | `validate-pack <path>`| 资源包全目录关联与完整性核验。 |
+| **优化与模型** | `optimize <input...>` | 无损地把 PNG 重新编码成能精确表示像素的最小编码，或保留源字节（`--output`、`--output-dir`、`--stdout`、`--dry-run`、`--mode`、`--ancillary`）。 |
+| | `model inspect\|validate <file>` | 只读报告 Java 方块／物品模型 JSON（结构、UV、旋转、display、引用）。 |
+| | `model create\|apply\|export` | 创建、编辑或放置 Java 模型（长方体 `elements`）及其物品定义与 blockstate。 |
 | **Agent 接口** | `mcp` | 启动 stdio MCP 服务器。 |
 
 ---

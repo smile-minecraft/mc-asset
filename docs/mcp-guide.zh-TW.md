@@ -5,13 +5,13 @@
 ## 目錄
 
 - [安裝與註冊伺服器](#安裝與註冊伺服器)
-- [二十一個工具](#二十一個工具)
+- [二十三個工具](#二十三個工具)
 - [失敗時如何回傳](#失敗時如何回傳)
 - [限制與缺口](#限制與缺口)
 
 ---
 
-`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十一個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。
+`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十三個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。
 
 伺服器直接掛在 Core 上，所以每個工具都跑與 CLI 指令相同的引擎。像素層級的創作，透過 ASCII Grid 文件、批次操作陣列，或內嵌回傳的可編輯 `.mcpx` 來源來完成；刻意不提供 `set_pixel` 工具。
 
@@ -98,7 +98,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 以下擷取透過 MCP 用戶端 SDK 在一個示範工作目錄中執行，其中所有路徑都相對於該目錄，只有 `inspect_asset` 的結構擷取直接指向 repo 內的 fixture `tests/cli/fixtures/sword.mcpx`。原有七個工具的擷取取自已安裝的版本，後續新增的工具則取自本地源碼伺服器——兩者執行的是同一份伺服器程式碼。
 
-## 二十一個工具
+## 二十三個工具
 
 | 工具索引 | | |
 |---|---|---|
@@ -109,6 +109,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | [`palette_asset`](#palette_asset) | [`material_asset`](#material_asset) | [`tile_asset`](#tile_asset) |
 | [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
+| [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | |
 
 ### analyze_asset
 
@@ -479,6 +480,54 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 `structure` 回報圖層（範圍、面積、可見性、原始 RGBA 用色）、區域（只含識別、範圍、面積）與重疊。`view` 則把合成像素以標準圖片塊回傳，外加六鍵詮釋資料（`mode`、`sourceDimensions`、`crop`、`scale`、`outputDimensions`、`colorFormat`）——裁切／縮放／1024px 邊長規則與頂層 `inspect` 指令相同，圖片位元組不會另存一份 `pngBase64`。`view` 的 `scale` 是整數 1–16，預設 1；長邊自動放大（縮放前長邊不到 128 才往 128 放）只適用於 `apply_asset_operations` 的附圖，不適用 `view`。`crop` 是與批次 `selection` 同文法的選取表達式，落空時以 `EMPTY_SELECTION` 拒絕；輸出邊長超過 1024px 時以 `RESOURCE_LIMIT_EXCEEDED` 加裁切提示拒絕。
 
+### optimize_asset
+
+無損地把明確指定的 PNG 檔案重新編碼成能精確表示像素的最小編碼；沒有更小的編碼時保留來源位元組。它只讀輸入、絕不改寫輸入，只寫入明確指定的新 `outputPath`（單一輸入）或既有的 `outputDir`。`dryRun` 會算出完整報告但不寫任何檔案。只有一個輸入且沒給輸出欄位時，結果會內嵌 `pngBase64`。`mode` 預設 `auto`；指定模式會強制該編碼，無法精確表示像素時回報 `OPTIMIZE_MODE_NOT_EXACT`。`ancillary` 預設 `preserve`；`strip` 會丟棄所有中繼資料區塊並列出它們。
+
+呼叫：
+
+```json
+{"inputPaths":["px-8x8.png"],"dryRun":true}
+```
+
+結果（本機 MCP 文字區塊的實際回應）：
+
+```text
+{"command":"optimize","dryRun":true,"mode":"auto","ancillary":"preserve","engine":"pako@3.0.2 level=9 memLevel=9 windowBits=15 legacyHash=false","files":[{"input":"px-8x8.png","output":null,"status":"optimized","source":{"bytes":184,"width":8,"height":8,"bitDepth":8,"colorType":6,"interlaced":false},"result":{"bytes":102,"mode":"rgba","bitDepth":8,"colorType":6,"paletteSize":0},"savedBytes":82,"savedPermille":445,"candidates":[{"mode":"rgba","applicable":true,"bytes":102,"selected":true},{"mode":"rgb","applicable":false,"unavailableReason":"not-opaque","selected":false},{"mode":"grayscale-alpha","applicable":false,"unavailableReason":"not-gray","selected":false},{"mode":"grayscale","applicable":false,"unavailableReason":"not-opaque","selected":false},{"mode":"indexed","applicable":true,"bytes":296,"selected":false}],"preservedChunks":[],"strippedChunks":[],"interlaceRemoved":false,"warnings":[]}],"totals":{"files":1,"sourceBytes":184,"resultBytes":102,"savedBytes":82,"optimized":1,"unchanged":0,"converted":0}}
+```
+
+`candidates` 列出每一種嘗試過的編碼，以及其他編碼為什麼不適用。批次在計算階段是全有或全無：任何一個輸入失敗就不寫任何檔案，錯誤會列出 `processed` 與 `notProcessed`。
+
+### model_asset
+
+檢查、驗證、建立、編輯或匯出 Java 方塊／物品模型 JSON（只支援長方體 `elements`）。`inspect` 與 `validate` 唯讀；`create`、`apply`、`export` 只寫入明確指定的新路徑，`export` 還能依 `binding` 產生物品定義與 blockstate。它回報的是結構與引用是否有效，不是渲染後的外觀。
+
+呼叫（create，把模型寫進資源包）：
+
+```json
+{"mode":"create","spec":{"textures":{"all":"mypack:block/ruby"},"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"north":{"texture":"#all","uv":[0,0,16,16]},"up":{"texture":"#all"}}}]},"outputPath":"pack/assets/mypack/models/block/ruby.json","resourcePackVersion":"75"}
+```
+
+結果（本機 MCP 文字區塊的實際回應）：
+
+```text
+{"command":"model","mode":"create","version":{"packFormat":"75.0","rules":"verified","rulesReason":"verified-release"},"changed":true,"warnings":[],"preservedUnknown":[],"output":"pack/assets/mypack/models/block/ruby.json"}
+```
+
+呼叫（對資源包驗證該模型）：
+
+```json
+{"mode":"validate","inputPath":"pack/assets/mypack/models/block/ruby.json","packPath":"pack","resourcePackVersion":"75"}
+```
+
+結果（本機 MCP 文字區塊的實際回應；資源包內放了被引用的材質 `pack/assets/mypack/textures/block/ruby.png`）：
+
+```text
+{"command":"model","mode":"validate","path":"assets/mypack/models/block/ruby.json","target":"mypack:block/ruby","version":{"packFormat":"75.0","rules":"verified","rulesReason":"verified-release"},"verdict":"pass","findings":[],"coverage":{"status":"complete","skipped":[]}}
+```
+
+`apply` 接收型別化的 `operations`，全部套用成功或一個都不套用。`export` 使用 `binding.item` 時需要明確的版本，且資源包格式在 46.0 以上（否則回報 `MODEL_UNSUPPORTED_VERSION`）。沒有提供原版資源樹時，`minecraft` 命名空間的引用會記為略過的 coverage，而不是被解析。
+
 ## 失敗時如何回傳
 
 工具失敗時會設定 `isError: true`，內容是放在 `content[0].text` 的 JSON 字串：
@@ -508,8 +557,10 @@ isError: true
 - **沒有逐像素工具。** 不存在 `set_pixel`；像素工作要透過 ASCII Grid、批次操作陣列或內嵌的 `.mcpx` 文字來做。
 - **只接受明確路徑，不覆寫，不建目錄。** 目標已存在是 `OUTPUT_EXISTS`，缺少上層目錄是 `FILESYSTEM_ERROR`。錯誤訊息仍會提到 `--force`／`--mkdir`，但透過 MCP 無法傳入這兩個旗標，請改用新路徑，或自行建立目錄。
 - **省略輸出路徑會內嵌成品。** 沒有輸出路徑時，結果會帶 `pngBase64`（PNG）或 `mcpxText`（`.mcpx`），而不寫入檔案。這是逐個成品決定的：只給 `outputPngPath` 會寫出 PNG，並仍在結果中內嵌 `.mcpx` 文字。
-- **與 CLI 完全對等。** 二十一個工具涵蓋素材輸入與來源建置、空間變換、調色盤與減色、確定性像素化管線、程序化生成、磁磚與預覽、動畫 sprite sheet，以及單一素材與整個資源包的驗證（含依賴／原版解析與 GUI 精靈圖縮放）；版本目標設定透過 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 傳入。
+- **與 CLI 完全對等。** 二十三個工具涵蓋素材輸入與來源建置、空間變換、調色盤與減色、確定性像素化管線、程序化生成、磁磚與預覽、動畫 sprite sheet，以及單一素材與整個資源包的驗證（含依賴／原版解析與 GUI 精靈圖縮放）；版本目標設定透過 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 傳入。
 - **檢視與附圖都是圖片塊，不另存副本。** `inspect_asset` 的 `view` 與 `apply_asset_operations` 的附圖都不會再以 `pngBase64` 重複一份 PNG；位元組走標準的 `type: "image"`、`mimeType: "image/png"` 塊。檢視縮放預設 1；長邊自動放大（縮放前不到 128 才往 128 放，上限 16）只適用於附圖。超過 1024px 邊長一律是 `RESOURCE_LIMIT_EXCEEDED`，不會默默縮圖。
+- **模型只檢查結構與引用，不檢查外觀。** `model_asset` 與 `validate_pack_asset` 驗證 JSON 結構、UV 與旋轉範圍、display 變換，以及被引用的模型與材質是否存在。沒有任何 Minecraft 用戶端渲染過模型，所以模型在遊戲裡的外觀與行為都未驗證。只支援長方體 `elements`。
+- **`optimize_asset` 以像素比對確認無損。** 結果解碼後的像素與來源相同，位元組則不同。結果在遊戲用戶端裡的外觀未經檢查。
 - **`validate_asset` 只檢查單一 PNG。** 資源包層級與圖集感知的驗證，請用 `validate_pack_asset`。
 - **確定性只驗證過示範輸入。** 相同輸入加相同參數，對示範用的 `px-8x8.png`／`sword.mcpx`／`v04-anim-frames/` 與一個乾淨的資源包產生了相同結果。其他輸入與選項（WebP、`WxH` 尺寸、`region`、`atomic: false`、`animate` 的 `resize`）也演練過，但沒有重跑確認輸出是否一致。
 - **執行環境。** MCP 路徑只使用 `node:` 匯入，所以打包後的 `dist` 可在純 Node 下執行；CI 的 `node` job 使用 Node 22。需要 Node.js 22 或更新，`engines` 欄位已宣告 `>=22`。

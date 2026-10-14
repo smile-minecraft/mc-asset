@@ -16,6 +16,7 @@
   - [6. Animation & Sprite Sheets](#6-animation--sprite-sheets)
   - [7. Inspection, Validation & Pack Verification](#7-inspection-validation--pack-verification)
   - [8. Model Context Protocol (MCP) Server](#8-model-context-protocol-mcp-server)
+  - [9. PNG Optimization & Java Models](#9-png-optimization--java-models)
 - [Batch Operations Specification (`--operations`)](#batch-operations-specification---operations)
 - [Exit Code Registry](#exit-code-registry)
 - [Troubleshooting & Common Pitfalls](#troubleshooting--common-pitfalls)
@@ -241,7 +242,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
 mc-asset mcp
 ```
 
-Runs the native Model Context Protocol (MCP) stdio server for LLM agent integration. Provides 21 native tools without subprocess spawning:
+Runs the native Model Context Protocol (MCP) stdio server for LLM agent integration. Provides 23 native tools without subprocess spawning:
 - `analyze_asset`
 - `pixelize_asset`
 - `render_pixel_asset`
@@ -263,6 +264,49 @@ Runs the native Model Context Protocol (MCP) stdio server for LLM agent integrat
 - `validate_pack_asset`
 - `scale_gui_asset`
 - `inspect_asset`
+- `optimize_asset`
+- `model_asset`
+
+---
+
+### 9. PNG Optimization & Java Models
+
+| Command | Input | Output | Description |
+|---|---|---|---|
+| `optimize <input...>` | One to 256 explicit PNG files | PNG files at explicit new paths, or a report only (`--dry-run`) | Lossless re-encoding into the smallest exact encoding, or the source bytes kept when nothing smaller exists. |
+| `model inspect <file>` | Java block/item model JSON | Report only | Describes parent, textures, elements, display transforms, and resolved references. |
+| `model validate <file>` | Java block/item model JSON | Report only (exit 3 on defect) | Checks structure, UV, rotation, display transforms, and reference validity. |
+| `model create` | A model description (`--spec`) | Model JSON | Builds a model document from an explicit description. |
+| `model apply <file>` | Model JSON plus typed operations (`--operations`) | Model JSON | Applies all operations or none, then writes a new document. |
+| `model export <file>` | Model JSON, optional binding (`--binding`) | Model JSON, item definition, blockstate | Places a model in a pack and generates the item definition and blockstate next to it. |
+
+```text
+optimize     <input...> (--output <png> | --output-dir <dir> | --stdout | --dry-run)
+                        [--mode <auto|rgba|rgb|grayscale|grayscale-alpha|indexed>]
+                        [--ancillary <preserve|strip>] [--force] [--mkdir] [--json]
+model inspect  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
+                      [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+model validate <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
+                      [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+model create   --spec <file|-> (--output <json> | --stdout) [--force] [--mkdir]
+                      [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+model apply    <file> --operations <file|-> (--output <json> | --stdout) [--force] [--mkdir]
+                      [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+model export   <file> [--output <json>] [--binding <file|->] [--item-output <json>]
+                      [--blockstate-output <json>] [--pack <dir>] [--force] [--mkdir]
+                      [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+```
+
+- `optimize` input: explicit PNG paths only (no globs, no directories); the format is detected from the signature, and a file that is not a PNG raises `UNSUPPORTED_IMAGE_FORMAT`. The same file twice, or two inputs whose names collide under `--output-dir`, raise `ARGUMENT_CONFLICT`.
+- `optimize` output: exactly one of `--output` (a single input), `--output-dir` (each input written as `<dir>/<input name>`), `--stdout` (a single input), or `--dry-run` (computes the report, writes nothing). None raises `OUTPUT_REQUIRED`; more than one raises `ARGUMENT_CONFLICT`. There is no `--in-place`: inputs are never rewritten.
+- `--mode auto` (default) picks the smallest encoding that holds the pixels exactly, or keeps the source bytes; a named mode forces that encoding and raises `OPTIMIZE_MODE_NOT_EXACT` (exit 5) when it cannot hold the pixels exactly. `--ancillary preserve` (default) copies metadata chunks and refuses sources whose chunks depend on the color layout; `strip` drops every ancillary chunk and lists what it dropped.
+- `optimize` phases: every output path is checked first, then every input is computed in memory, then files are written. If any input fails to compute, nothing is written and the error `details` list `processed` and `notProcessed`. If a write fails midway, files already written stay, and `details` list `completed`, `failedTarget`, and `notStarted`. A file that cannot be made smaller (`unchanged`) is still written with the source bytes, except under `--dry-run`.
+- Human output is one line per file: `ok optimize input=<p> output=<p|-> status=<s> source=<bytes> result=<bytes> mode=<mode>`; warnings follow as `warning [CODE] message`. `--json` carries the same result with per-file `candidates`, `preservedChunks`, `strippedChunks`, and `totals`.
+- `model inspect` and `model validate` are read-only and take no output flags. `inspect` always exits 0; `validate` exits 3 when the verdict is `fail`. With `--pack`, `<file>` must sit under `<pack>/assets/<namespace>/models/` and the version comes from `pack.mcmeta` when no version flag is given (no usable value means the version is undetermined and no default is applied).
+- `model create` / `model apply` read their JSON from a file or `-` (stdin; at most one `-` per command) and need exactly one of `--output` or `--stdout`. They check the document itself and refuse `--pack`, `--vanilla`, and `--dependency`. Model support covers cuboid `elements` only.
+- `model export` needs at least one of `--output`, `--item-output`, `--blockstate-output`. `--item-output` needs `binding.item` (and the reverse), and `--blockstate-output` needs `binding.blockstate`. `binding.item` needs an explicit version at pack format 46.0 or later, otherwise `MODEL_UNSUPPORTED_VERSION` (exit 5). `--pack` adds layout and boundary checks. `--force` never applies to `--item-output` or `--blockstate-output`, which are never overwritten.
+- Shared write protection (`optimize` and `model`): every target is checked before the first byte is written. Outputs that alias an input or another output, directory targets, symlink targets (dangling ones included, even with `--force`), symlinked parent directories, and paths outside `--pack` for `model export` are refused. Existing files raise `OUTPUT_EXISTS` unless `--force` applies. Each file is still committed by an atomic rename.
+- Reports verify structure and reference validity only. Nothing renders a model in the game client, so appearance, lighting, and in-game behavior are not verified.
 
 ---
 
@@ -331,10 +375,10 @@ Batch execution is atomic: the first invalid operation rolls back all changes. (
 |---|---|---|---|
 | **0** | Success | Command completed successfully. | Clean validation, successful render. |
 | **1** | Internal Error | Unhandled engine defect (`INTERNAL_ERROR`). | Unexpected engine failure. |
-| **2** | Invalid Invocation | Syntax error, conflicting flags, missing required parameters. | Missing `--output`, conflicting `--force --in-place`. |
-| **3** | Asset Validation Failure | Engine executed properly, but the asset or pack failed validation. | `VALIDATION_FAILED`, broken textures, bad `.mcmeta`. |
+| **2** | Invalid Invocation | Syntax error, conflicting flags, missing required parameters. | Missing `--output`, conflicting `--force --in-place`, `MODEL_INVALID_JSON`, `MODEL_INVALID_OPERATION`. |
+| **3** | Asset Validation Failure | Engine executed properly, but the asset or pack failed validation. | `VALIDATION_FAILED`, broken textures, bad `.mcmeta`, model findings (`MODEL_INVALID_STRUCTURE`, `MODEL_INVALID_UV`, `MODEL_INVALID_ROTATION`, `MODEL_INVALID_DISPLAY`, `MODEL_VERSION_FEATURE`, `MODEL_SUSPICIOUS_VALUE`). |
 | **4** | Filesystem Refusal | File exists without `--force`, missing directories without `--mkdir`. | `OUTPUT_EXISTS`, `FILESYSTEM_ERROR`. |
-| **5** | Unsupported / Resource Limit | Input format not supported, canvas limits exceeded. | Corrupt image header, `UNSUPPORTED_IMAGE_FORMAT`. |
+| **5** | Unsupported / Resource Limit | Input format not supported, canvas limits exceeded. | Corrupt image header, `UNSUPPORTED_IMAGE_FORMAT`, `OPTIMIZE_MODE_NOT_EXACT`, `MODEL_UNSUPPORTED_VERSION`. |
 
 ---
 
@@ -351,4 +395,6 @@ Batch execution is atomic: the first invalid operation rolls back all changes. (
 | `INVALID_MCMETA` | 2 | A malformed `.mcmeta`; for `gui-scale`, also nine-slice borders that leave no middle band (`left + right >= width` or `top + bottom >= height`). | Keep `left + right < width` and `top + bottom < height`. |
 | `PACK_GUI_SCALING_BORDER` | 3 | `validate-pack` found a GUI sprite whose nine-slice borders leave no middle band (same test as `INVALID_MCMETA`). | Shrink the borders in that sprite's `.mcmeta`. |
 | `RESOURCE_LIMIT_EXCEEDED` | 5 | A hard limit was crossed: more than 4096 polygon points, a selection AST deeper than 32 or larger than 1024 nodes, an `inspect view` output edge over 1024px, or the canvas size and memory limits. | Use fewer points or a smaller selection expression; view a large canvas in pieces with `--crop`. |
+| `OPTIMIZE_MODE_NOT_EXACT` | 5 | `optimize --mode <name>` forced an encoding that cannot hold the pixels exactly (for example `rgb` on a source with transparency). | Use `--mode auto`, or a mode that can hold every pixel. |
+| `MODEL_UNSUPPORTED_VERSION` | 5 | The target version cannot express a requested feature, or `model export` with `binding.item` has no explicit version of pack format 46.0 or later. | Pass `--minecraft-version` or `--resource-pack-version` that supports the feature. |
 | `UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT` | 5 | A `minecraft:*` profile with an output path that does not end in `.png`. | Write Minecraft textures as `.png`. |

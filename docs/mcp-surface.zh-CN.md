@@ -6,7 +6,7 @@
 
 工具名称已冻结。早期草稿把批处理编辑工具称为 `edit_asset`，冻结后的名称是 `apply_asset_operations`。
 
-Minecraft 目标版本涵盖 `1.19.3` 到 `26.3`。二十一个工具中，有十二个（`import_asset` 到 `validate_pack_asset`）是为了与 CLI 完全对等而设。各版本的变更记录在 [`CHANGELOG.md`](../CHANGELOG.md)。
+Minecraft 目标版本涵盖 `1.19.3` 到 `26.3`。二十三个工具中，有十二个（`import_asset` 到 `validate_pack_asset`）是为了与 CLI 完全对等而设。各版本的变更记录在 [`CHANGELOG.md`](../CHANGELOG.md)。
 
 能力基础：与 CLI 完全对等——素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证。
 
@@ -37,6 +37,8 @@ Minecraft 目标版本涵盖 `1.19.3` 到 `26.3`。二十一个工具中，有�
 | `animate_asset` | 帧目录或 sprite sheet、一种 `mode`（`pack`／`unpack`／`reorder`／`resize`／`validate`／`preview`） | 显式的 PNG 路径（`pack`）或输出目录（`unpack`、`reorder`、`resize`） | Sheet PNG、帧或只读报告 |
 | `validate_pack_asset` | 资源包根目录，外加可选的原版资源树与依赖根目录 | 无 | 附发现项与 coverage 对象的只读判定 |
 | `inspect_asset` | 可编辑的 `.mcpx` 源码或位图（位图视为单一 base 图层）、一种 `mode`（`structure`／`view`），view 另有 `crop` 与 `scale` | 无 | 只读报告（structure），或合成 PNG 的 image block 加 metadata（view） |
+| `optimize_asset` | PNG 文件（1 至 256 个显式路径，绝不改写） | 可选的显式 PNG 输出路径，或已有的输出目录 | 逐文件报告（源与结果大小、模式、候选编码、块、警告）加总计；只有一个输入且没有输出时内嵌 PNG 字节 |
+| `model_asset` | Java 方块／物品模型 JSON、一种 `mode`（`inspect`／`validate`／`create`／`apply`／`export`），可选的资源包、原版与依赖根目录 | 可选的显式 `.json` 路径（模型、物品定义、blockstate） | 只读报告（`inspect`、`validate`），或模型文档与生成的 binding（`create`、`apply`、`export`） |
 
 ## 输入语义
 
@@ -50,6 +52,8 @@ Minecraft 目标版本涵盖 `1.19.3` 到 `26.3`。二十一个工具中，有�
 - 完整的操作参数表见 [CLI Surface](cli-surface.zh-CN.md)的「批处理操作规范」节；两个接口共用同一种 JSON 形状。`polygonFill` 最多 4096 个点，自交的环为 `SELF_INTERSECTING_POLYGON`，孔洞不支持。
 - 选择表达式可写原子（`all`、`rect:x,y,w,h`、`region:id`、`alpha[:layer]`、`color[:layer]:r,g,b,a`、`connected[:layer]:x,y`）或 JSON AST 对象（`op` 为 `union`／`intersect`／`subtract`／`invert`，加 `operands [...]`），深度上限 32、节点上限 1024。
 - `scale_gui_asset` 接收 `size`（`N` 或 `WxH`）、可选的 `mcmetaPath`（省略即为 `stretch`）与可选的版本字段；输出只有 PNG。
+- `optimize_asset` 接收 `inputPaths`（1 至 256 个显式的 PNG 文件），另可选 `mode`（默认 `auto`，或 `rgba`、`rgb`、`grayscale`、`grayscale-alpha`、`indexed`）、`ancillary`（默认 `preserve`，或 `strip`）、`dryRun`、`outputPath`（只能一个输入）与 `outputDir`（已有目录）。多个输入需要 `outputDir` 或 `dryRun`，否则报告 `INVALID_ARGUMENT`。强制的 `mode` 无法精确表示像素时是 `OPTIMIZE_MODE_NOT_EXACT`。
+- `model_asset` 接收 `mode` 加上该模式需要的字段：`inputPath`（`inspect`、`validate`、`apply`、`export`）、`spec`（`create`）、`operations`（`apply`，1 至 1000 个）、`binding`（`export`）、`packPath`／`vanillaPath`／`dependencyPaths`（`inspect`、`validate`；`export` 另可用 `packPath`）、`outputPath`、`itemOutputPath`、`blockstateOutputPath`。该模式不接受的字段会报告 `INVALID_ARGUMENT`，并点名字段与模式。模型支持范围只含长方体 `elements`。
 - `validate_pack_asset` 接收可选的 `vanillaPath` 与可选的有序 `dependencyPaths`（排前者优先）。
 - `transform_asset`／`animate_asset` 的 `resizeMode` 接受 `nearest`／`box`／`pixel-aware`。
 - 省略输出路径时，产物会内嵌在工具结果中（PNG 字节、`.mcpx` 文本），不写入磁盘。
@@ -60,3 +64,5 @@ Minecraft 目标版本涵盖 `1.19.3` 到 `26.3`。二十一个工具中，有�
 - 验证类报告带 `coverage: {status, skipped}`；`partial` 会逐项列出跳过的检查及其种类与原因，且不改变状态码。
 - 混合工具（`tile_asset`、`preview_asset`、`animate_asset`）在只读模式返回报告，在写入模式只写入显式指定的输出路径或目录。
 - 会产生文件的工具返回已应用的数量、各操作的状态、警告，以及实际写出的显式路径或内嵌的产物。
+- `optimize_asset` 与 `model_asset` 不接受 `force`、`mkdir` 或原地覆盖：输出已存在是 `OUTPUT_EXISTS`，缺少父目录是 `FILESYSTEM_ERROR`。第一个字节写出之前，所有目标都已检查完毕；与输入互为别名、符号链接目标，以及父目录是符号链接的情况都会被拒绝。没有输出路径时，结果内嵌产物（`pngBase64`、`modelText`、`itemText`、`blockstateText`）。
+- `optimize_asset` 与 `model_asset` 只报告像素是否相同、结构与引用是否有效。没有游戏客户端渲染过结果，所以外观与游戏内行为都未验证。

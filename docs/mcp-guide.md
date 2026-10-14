@@ -5,7 +5,7 @@
 ## Contents
 
 - [Installing and registering the server](#installing-and-registering-the-server)
-- [The twenty-one tools](#the-twenty-one-tools)
+- [The twenty-three tools](#the-twenty-three-tools)
 - [How failures come back](#how-failures-come-back)
 - [Limits and gaps](#limits-and-gaps)
 
@@ -13,7 +13,7 @@
 
 `mc-asset mcp` starts a stdio MCP server: stdout carries only MCP JSON-RPC,
 diagnostics go to stderr, and the process ends when stdin closes. The frozen
-surface — twenty-one tool names, their inputs, and the read/write contract — lives
+surface — twenty-three tool names, their inputs, and the read/write contract — lives
 in `docs/mcp-surface.md`; the input fields are frozen in `src/mcp/schema.ts`.
 This guide covers registration, one capture per tool (image bytes are
 abbreviated where noted, never verbatim), the error model, and the limits.
@@ -117,7 +117,7 @@ directory; every path in them is relative to that directory, except the
 original captures come from the installed build and the later additions from
 the local source server — the same server code runs either way.
 
-## The twenty-one tools
+## The twenty-three tools
 
 | Tool Index | | |
 |---|---|---|
@@ -128,6 +128,7 @@ the local source server — the same server code runs either way.
 | [`palette_asset`](#palette_asset) | [`material_asset`](#material_asset) | [`tile_asset`](#tile_asset) |
 | [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
+| [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | |
 
 ### analyze_asset
 
@@ -596,6 +597,70 @@ selection expression like the batch `selection`; an empty match refuses with
 `EMPTY_SELECTION`, and outputs beyond the 1024px edge refuse with
 `RESOURCE_LIMIT_EXCEEDED` and a crop hint.
 
+### optimize_asset
+
+Losslessly re-encodes explicit PNG files into the smallest exact encoding, or
+keeps the source bytes when nothing smaller exists. It reads its inputs and
+never rewrites them; it writes only to an explicit new `outputPath` (one input)
+or into an existing `outputDir`. `dryRun` computes the full report and writes
+nothing. With one input and no output field, the result embeds `pngBase64`.
+`mode` defaults to `auto`; a named mode forces that encoding and raises
+`OPTIMIZE_MODE_NOT_EXACT` when it cannot hold the pixels exactly. `ancillary`
+defaults to `preserve`; `strip` drops every metadata chunk and lists it.
+
+Call:
+
+```json
+{"inputPaths":["px-8x8.png"],"dryRun":true}
+```
+
+Result (actual local MCP text-block response):
+
+```text
+{"command":"optimize","dryRun":true,"mode":"auto","ancillary":"preserve","engine":"pako@3.0.2 level=9 memLevel=9 windowBits=15 legacyHash=false","files":[{"input":"px-8x8.png","output":null,"status":"optimized","source":{"bytes":184,"width":8,"height":8,"bitDepth":8,"colorType":6,"interlaced":false},"result":{"bytes":102,"mode":"rgba","bitDepth":8,"colorType":6,"paletteSize":0},"savedBytes":82,"savedPermille":445,"candidates":[{"mode":"rgba","applicable":true,"bytes":102,"selected":true},{"mode":"rgb","applicable":false,"unavailableReason":"not-opaque","selected":false},{"mode":"grayscale-alpha","applicable":false,"unavailableReason":"not-gray","selected":false},{"mode":"grayscale","applicable":false,"unavailableReason":"not-opaque","selected":false},{"mode":"indexed","applicable":true,"bytes":296,"selected":false}],"preservedChunks":[],"strippedChunks":[],"interlaceRemoved":false,"warnings":[]}],"totals":{"files":1,"sourceBytes":184,"resultBytes":102,"savedBytes":82,"optimized":1,"unchanged":0,"converted":0}}
+```
+
+The `candidates` list shows every encoding that was tried and why the others
+did not apply. In the compute phase a batch is all or nothing: if any input
+fails, nothing is written and the error lists `processed` and `notProcessed`.
+
+### model_asset
+
+Inspects, validates, creates, edits, or exports a Java block/item model JSON
+(cuboid `elements` only). `inspect` and `validate` are read-only; `create`,
+`apply`, and `export` write only to explicit new paths, and `export` can also
+generate an item definition and a blockstate from a `binding`. It reports
+structure and reference validity, not rendered appearance.
+
+Call (create, writing the model into a pack):
+
+```json
+{"mode":"create","spec":{"textures":{"all":"mypack:block/ruby"},"elements":[{"from":[0,0,0],"to":[16,16,16],"faces":{"north":{"texture":"#all","uv":[0,0,16,16]},"up":{"texture":"#all"}}}]},"outputPath":"pack/assets/mypack/models/block/ruby.json","resourcePackVersion":"75"}
+```
+
+Result (actual local MCP text-block response):
+
+```text
+{"command":"model","mode":"create","version":{"packFormat":"75.0","rules":"verified","rulesReason":"verified-release"},"changed":true,"warnings":[],"preservedUnknown":[],"output":"pack/assets/mypack/models/block/ruby.json"}
+```
+
+Call (validate that model against the pack):
+
+```json
+{"mode":"validate","inputPath":"pack/assets/mypack/models/block/ruby.json","packPath":"pack","resourcePackVersion":"75"}
+```
+
+Result (actual local MCP text-block response; the pack held the referenced texture `pack/assets/mypack/textures/block/ruby.png`):
+
+```text
+{"command":"model","mode":"validate","path":"assets/mypack/models/block/ruby.json","target":"mypack:block/ruby","version":{"packFormat":"75.0","rules":"verified","rulesReason":"verified-release"},"verdict":"pass","findings":[],"coverage":{"status":"complete","skipped":[]}}
+```
+
+`apply` takes typed `operations` and applies all of them or none. `export` with
+`binding.item` needs an explicit version of pack format 46.0 or later
+(`MODEL_UNSUPPORTED_VERSION` otherwise). Without a vanilla tree, `minecraft`
+references are recorded as skipped coverage instead of being resolved.
+
 ## How failures come back
 
 A tool failure sets `isError: true`, and the payload is a JSON string in
@@ -648,7 +713,7 @@ File-rule failures to expect:
   auto-scale (a pre-scale edge below 128 scaling up toward 128, capped at 16)
   applies to feedback images only. Anything beyond the 1024px edge is
   `RESOURCE_LIMIT_EXCEEDED`, never a silent downscale.
-- **Full CLI parity.** The twenty-one tools cover intake and source build,
+- **Full CLI parity.** The twenty-three tools cover intake and source build,
   transforms, palette and quantization, the deterministic pixelize
   pipeline, procedural generation, tiles and previews, animation sheets,
   and single-asset plus whole-pack validation, including
@@ -656,6 +721,15 @@ File-rule failures to expect:
   targeting travels
   through `analyze_asset`, `validate_asset`, and `validate_pack_asset`
   via `minecraftVersion` / `resourcePackVersion`.
+- **Models are checked for structure and references, not appearance.**
+  `model_asset` and `validate_pack_asset` verify JSON structure, UV and
+  rotation ranges, display transforms, and that referenced models and
+  textures exist. No Minecraft client rendered any model, so how a model
+  looks or behaves in the game is not verified. Only cuboid `elements` are
+  supported.
+- **`optimize_asset` is lossless by pixel comparison.** The result decodes to
+  the same pixels as the source, with different bytes. How the result looks
+  in a game client was not checked.
 - **`validate_asset` checks a single PNG.** Pack-level and atlas-aware
   validation is `validate_pack_asset`.
 - **Determinism was verified only for the demo inputs.** Same input plus same

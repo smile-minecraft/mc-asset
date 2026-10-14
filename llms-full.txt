@@ -2,7 +2,7 @@
 
 > mc-asset is a pixel-native 2D asset engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs. It turns raster references, hand-authored ASCII grids, and editable `.mcpx` sources into byte-reproducible PNG textures, animation sheets, palette reports, and validated resource packs — for human creators and AI coding agents.
 
-This file collects, in one place, what an agent needs to use the tool: install, registration, the twenty-one MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest.
+This file collects, in one place, what an agent needs to use the tool: install, registration, the twenty-three MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest.
 
 ## When to use it
 
@@ -68,7 +68,7 @@ check the client's own documentation when unsure. The guide at
 `docs/mcp-guide.md` carries per-client examples (Claude Code, Claude Desktop,
 Cursor, VS Code, Cline, OpenCode).
 
-## The twenty-one MCP tools (21 tools, not 25 — 25 is the batch-operation variant count)
+## The twenty-three MCP tools (23 tools, not 25 — 25 is the batch-operation variant count)
 
 | Tool | What it does | Required inputs |
 |---|---|---|
@@ -93,6 +93,8 @@ Cursor, VS Code, Cline, OpenCode).
 | `animate_asset` | Animation sheets: `pack`, `unpack`, `reorder`, `resize`, `validate`, `preview`. | `mode` + that mode's input path (`layout` for `pack` / `unpack` / `preview`) |
 | `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, dependency/vanilla resolution, version targeting, with a coverage object in the report. | `packPath` |
 | `inspect_asset` | Read-only `structure` (layers with bounds/area/visibility/raw RGBA color usage, regions with identity/bounds/area only, overlaps) or `view` (composited PNG image block plus six-key metadata). | `inputPath`, `mode` (`structure` / `view`; view-only `crop` and `scale`) |
+| `optimize_asset` | Lossless PNG re-encoding into the smallest exact encoding (or the source kept), with a per-file report; `dryRun`, explicit `outputPath` / `outputDir`. | `inputPaths` |
+| `model_asset` | Java block/item model JSON (cuboid `elements` only): `inspect`, `validate`, `create`, `apply`, `export`. Reports structure and reference validity, not rendered appearance. | `mode` (+ the mode's fields) |
 
 `inspect_asset` takes `inputPath` (an `.mcpx` source or a raster image; raster reads as a single base layer) plus `mode`. `structure` takes no `crop` or `scale`. `view` accepts an optional `crop` selection expression and an optional integer `scale` 1–16 (default 1, nearest). The view returns the composited PNG as a standard image block (`type: "image"`, `mimeType: "image/png"`) plus metadata, with no duplicate `pngBase64` in the text block. Outputs wider than the 1024px edge are `RESOURCE_LIMIT_EXCEEDED` with a crop hint. The small-image auto-scale (a pre-scale long edge below 128 scales up toward 128, capped at 16) applies to `apply_asset_operations` feedback images only, never to inspect view.
 
@@ -100,6 +102,7 @@ Required-input notes that the schema alone does not show: `pixelize_asset`
 raises `INVALID_ARGUMENT` when `size` is omitted, and `animate_asset` requires
 `layout` for `pack`, `unpack`, and `preview`. `transform_asset` cannot combine
 a `selection` with a geometry operation (`ARGUMENT_CONFLICT`), and
+`optimize_asset` takes 1 to 256 explicit PNG paths and never rewrites them; several inputs need `outputDir` or `dryRun`, and a forced `mode` that cannot hold the pixels exactly is `OPTIMIZE_MODE_NOT_EXACT`. `model_asset` rejects fields its `mode` does not accept with `INVALID_ARGUMENT`, and `export` with `binding.item` needs a version of pack format 46.0 or later. Neither tool accepts `force` or `mkdir`; an existing output is `OUTPUT_EXISTS`. Neither verifies appearance: no game client renders the result.
 `material_asset` requires `name` only for `show`. `inspect_asset` `structure`
 refuses `crop`/`scale` with `INVALID_ARGUMENT`; an empty view crop is
 `EMPTY_SELECTION`.

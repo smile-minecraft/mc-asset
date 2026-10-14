@@ -27,6 +27,8 @@ this table is the working summary.
 | `analyze <image>` | `analyze_asset` | size, colors, alpha class, heuristics |
 | `validate <asset>` | `validate_asset` | one texture (+ `--mcmeta`) against a profile |
 | `validate-pack <path>` | `validate_pack_asset` | a whole resource pack |
+| `optimize <input...>` | `optimize_asset` | lossless PNG re-encoding into the smallest exact encoding (or the source kept); `--dry-run` first |
+| `model inspect\|validate\|create\|apply\|export` | `model_asset` (`mode`) | Java block/item model JSON, cuboid `elements` only; structure and references are checked, not appearance |
 
 ## Reviewing a texture
 
