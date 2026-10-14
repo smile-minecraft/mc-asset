@@ -4,6 +4,7 @@ import { exitCodeForMcAssetError } from "../../src/cli/exit.ts";
 import {
 	ERROR_EXIT_CODE,
 	type ErrorCode,
+	isErrorCode,
 	McAssetError,
 	resolveExitCode,
 } from "../../src/core/errors.ts";
@@ -53,6 +54,32 @@ export const CONFORMANCE_CASES: ConformanceCase[] = [
 					exit,
 					`exitCodeForMcAssetError(${code})`,
 				);
+			}
+		},
+	},
+	{
+		name: "optimization and model error codes keep their specified exits",
+		run: (check) => {
+			const expectedExits = [
+				["OPTIMIZE_MODE_NOT_EXACT", 5],
+				["MODEL_INVALID_JSON", 2],
+				["MODEL_INVALID_OPERATION", 2],
+				["MODEL_UNSUPPORTED_VERSION", 5],
+				["MODEL_INVALID_STRUCTURE", 3],
+				["MODEL_INVALID_UV", 3],
+				["MODEL_INVALID_ROTATION", 3],
+				["MODEL_INVALID_DISPLAY", 3],
+				["MODEL_VERSION_FEATURE", 3],
+				["MODEL_SUSPICIOUS_VALUE", 3],
+			] as const;
+			for (const [code, exit] of expectedExits) {
+				check.equal(resolveExitCode(code), exit, `resolveExitCode(${code})`);
+				check.equal(
+					exitCodeForMcAssetError(new McAssetError(code, "probe")),
+					exit,
+					`exitCodeForMcAssetError(${code})`,
+				);
+				check.equal(isErrorCode(code), true, `isErrorCode(${code})`);
 			}
 		},
 	},

@@ -26,6 +26,8 @@ export type ErrorCode =
 	| "MCPX_PALETTE_OVERFLOW"
 	| "INVALID_ANIMATION_FRAME"
 	| "INVALID_MCMETA"
+	| "MODEL_INVALID_JSON"
+	| "MODEL_INVALID_OPERATION"
 	| "OUTPUT_REQUIRED"
 	| "VALIDATION_FAILED"
 	| "ATLAS_REFERENCE_ERROR"
@@ -36,6 +38,8 @@ export type ErrorCode =
 	| "UNSUPPORTED_IMAGE_FORMAT"
 	| "UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT"
 	| "RESOURCE_LIMIT_EXCEEDED"
+	| "OPTIMIZE_MODE_NOT_EXACT"
+	| "MODEL_UNSUPPORTED_VERSION"
 	| "PACK_INVALID_JSON"
 	| "PACK_MISSING_TEXTURE"
 	| "PACK_MISSING_ASSET"
@@ -54,6 +58,12 @@ export type ErrorCode =
 	| "PACK_UNRESOLVED_EXTERNAL"
 	| "PACK_COVERAGE_SKIPPED"
 	| "PACK_REFERENCE_CYCLE"
+	| "MODEL_INVALID_STRUCTURE"
+	| "MODEL_INVALID_UV"
+	| "MODEL_INVALID_ROTATION"
+	| "MODEL_INVALID_DISPLAY"
+	| "MODEL_VERSION_FEATURE"
+	| "MODEL_SUSPICIOUS_VALUE"
 	| "EMPTY_SELECTION"
 	| "SELF_INTERSECTING_POLYGON"
 	| "TRANSACTION_FAILED";
@@ -85,6 +95,8 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	MCPX_PALETTE_OVERFLOW: 2,
 	INVALID_ANIMATION_FRAME: 2,
 	INVALID_MCMETA: 2,
+	MODEL_INVALID_JSON: 2,
+	MODEL_INVALID_OPERATION: 2,
 	OUTPUT_REQUIRED: 2,
 	VALIDATION_FAILED: 3,
 	ATLAS_REFERENCE_ERROR: 3,
@@ -95,6 +107,8 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	UNSUPPORTED_IMAGE_FORMAT: 5,
 	UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT: 5,
 	RESOURCE_LIMIT_EXCEEDED: 5,
+	OPTIMIZE_MODE_NOT_EXACT: 5,
+	MODEL_UNSUPPORTED_VERSION: 5,
 	// Pack findings. These codes travel inside
 	// the validate-pack report; a failing verdict throws VALIDATION_FAILED.
 	// They are registered here so the §99 registry stays the single exit
@@ -121,6 +135,13 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	PACK_COVERAGE_SKIPPED: 3,
 	// Reference cycles (parent chains, texture variables) fail the verdict.
 	PACK_REFERENCE_CYCLE: 3,
+	// Model findings travel inside reports; a failing verdict uses VALIDATION_FAILED.
+	MODEL_INVALID_STRUCTURE: 3,
+	MODEL_INVALID_UV: 3,
+	MODEL_INVALID_ROTATION: 3,
+	MODEL_INVALID_DISPLAY: 3,
+	MODEL_VERSION_FEATURE: 3,
+	MODEL_SUSPICIOUS_VALUE: 3,
 	// A selection-scoped write whose read scope matched no pixels.
 	EMPTY_SELECTION: 2,
 	// A polygon whose nonadjacent edges touch or cross (holes unsupported).
