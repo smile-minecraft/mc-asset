@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-runtime comparison covers optimized PNG output and model create, apply, and export output, plus model preview PNG bytes (fixed cube render, source model and texture untouched).
 - `validate-pack` now resolves equipment (`equipment/`, plus `models/equipment/` at pack format 42.0), particle (`particles/`), and font (`font/` providers: `bitmap.file`, `reference.id`, `ttf.file`) references, with missing targets reported as errors and `minecraft`-namespace misses without a vanilla tree reported as `PACK_UNRESOLVED_EXTERNAL` warnings.
 - `validate-pack` classifies `assets/<namespace>/` top-level types: `textures`, `models`, `blockstates`, `items`, `atlases`, `equipment`, `particles`, and `font` are read; `lang` is inert; anything else is uninterpreted and makes `coverage` `partial` with one skip (`resource-type-not-interpreted: <type>`) and one `PACK_COVERAGE_SKIPPED` warning per type.
+- `skills/` ships two Agent Skills, installable with `npx skills add smile-minecraft/mc-asset`: `mc-asset` (the draw, render, preview, measure, and validate loop with this tool, the CLI/MCP command map, and how palette roles drive recoloring) and `minecraft-pixel-art` (vanilla style rules for items, blocks, GUI sprites, and animations, with an anti-pattern review checklist). Both are registered in `llms.txt` and the `AGENTS.md` repository map.
+- `docs/mcpx-format.md` (plus Simplified and Traditional Chinese editions) specifies the editable `.mcpx` grammar, checked against the parser and the CLI.
 
 ### Changed
 
