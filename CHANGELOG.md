@@ -14,17 +14,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Error codes `OPTIMIZE_MODE_NOT_EXACT`, `MODEL_INVALID_JSON`, `MODEL_INVALID_OPERATION`, `MODEL_UNSUPPORTED_VERSION`, and the finding codes `MODEL_INVALID_STRUCTURE`, `MODEL_INVALID_UV`, `MODEL_INVALID_ROTATION`, `MODEL_INVALID_DISPLAY`, `MODEL_VERSION_FEATURE`, `MODEL_SUSPICIOUS_VALUE`.
 - Shared write protection for the new commands and tools: every target is checked before the first byte is written, and aliases of an input, symlink targets, symlinked parent directories, and paths outside `--pack` are refused.
 - Cross-runtime comparison covers optimized PNG output and model create, apply, and export output.
+- `validate-pack` now resolves equipment (`equipment/`, plus `models/equipment/` at pack format 42.0), particle (`particles/`), and font (`font/` providers: `bitmap.file`, `reference.id`, `ttf.file`) references, with missing targets reported as errors and `minecraft`-namespace misses without a vanilla tree reported as `PACK_UNRESOLVED_EXTERNAL` warnings.
+- `validate-pack` classifies `assets/<namespace>/` top-level types: `textures`, `models`, `blockstates`, `items`, `atlases`, `equipment`, `particles`, and `font` are read; `lang` is inert; anything else is uninterpreted and makes `coverage` `partial` with one skip (`resource-type-not-interpreted: <type>`) and one `PACK_COVERAGE_SKIPPED` warning per type.
 
 ### Changed
+
+- Dotted texture IDs now resolve to PNG paths without false missing-texture or orphan findings, preserving explicit `.png` inputs.
+- Invalid equipment, particle, and font resource locations now retain `PACK_WRONG_PATH`, `PACK_NAMESPACE_PROBLEM`, and `PACK_INVALID_FILENAME` instead of being rewritten to `PACK_BROKEN_REFERENCE`; `PACK_CASE_MISMATCH`, empty-string errors, missing-file codes, and shape skips remain unchanged.
 
 - Every PNG the tool writes is now compressed instead of stored. Existing commands produce PNG files with different bytes and hashes, and identical pixels. The 25 showcase images under `docs/assets` went from 2,764,911 to 9,617 bytes through `optimize`, with identical decoded pixels.
 - `validate-pack` now checks model JSON as a whole: wrong element geometry, UV, rotation, and display transforms are reported as findings (errors or warnings) that earlier scans missed.
 - Object-form model textures (`{"sprite": ...}`) on Minecraft 26.1 and later no longer produce false reports.
 - A model with unknown fields or `overrides` makes the report `coverage` `partial` instead of complete.
+- On pack formats below 46.0 where item definitions are unavailable, legacy model `overrides[].model` entries are resolved again (a miss is a `PACK_BROKEN_REFERENCE` error); at 46.0 and later they stay untouched.
+- New coverage skip reasons: `resource-type-not-interpreted`, `trim-overrides-not-interpreted`, `particle-atlas-customized`, `internal-reference`, `pattern-reference`, `provider-not-interpreted`, `version-not-determined`, `feature-version-unknown`, `feature-not-in-version`, `unexpected-shape`. Every skip also carries a `PACK_COVERAGE_SKIPPED` warning, and `partial` coverage alone never changes the verdict.
 
 ### Known limits
 
 - Model support covers structure and reference validity only. No Minecraft client renders a model, so appearance, lighting, and in-game behavior are not verified.
+- Pack validation is not verified by loading in the game client. A customized particle atlas (`atlases/particles.json` in the pack or a dependency) turns particle misses into coverage skips, so those packs get no particle texture check; `trim_overrides[].texture` is skipped, never resolved; the font `reference` 15.0 boundary and the particle `#` internal-reference rule are unconfirmed inferences; the earliest format of the equipment, particle, and font types is unconfirmed, so an old but known format can still report errors; only `lang` is inert, so packs containing other unread types report `partial` coverage.
 - `optimize` confirms pixel equality by decoding, not how the result looks in a game client.
 
 ## [0.3.2] - 2026-09-23

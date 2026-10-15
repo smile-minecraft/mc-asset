@@ -154,8 +154,7 @@ function modelRelFor(namespace: string, path: string): string {
 }
 
 function textureRelFor(namespace: string, path: string): string {
-	const cut = path.lastIndexOf(".");
-	const leaf = cut < 0 ? `${path}.png` : path;
+	const leaf = path.endsWith(".png") ? path : `${path}.png`;
 	return `assets/${namespace}/textures/${leaf}`;
 }
 

@@ -407,8 +407,9 @@ function entityRelForResource(value: string): string | undefined {
 	if (parsed.namespace === "" || parsed.path === "") {
 		return undefined;
 	}
-	const leaf =
-		parsed.path.lastIndexOf(".") < 0 ? `${parsed.path}.png` : parsed.path;
+	const leaf = !parsed.path.endsWith(".png")
+		? `${parsed.path}.png`
+		: parsed.path;
 	return `assets/${parsed.namespace}/textures/${leaf}`;
 }
 
@@ -852,10 +853,9 @@ function executePalettedSource(
 			return;
 		}
 		const basePath = stripPngSuffix(parsedTexture.path);
-		const baseFile =
-			parsedTexture.path.lastIndexOf(".") < 0
-				? `assets/${parsedTexture.namespace}/textures/${parsedTexture.path}.png`
-				: `assets/${parsedTexture.namespace}/textures/${parsedTexture.path}`;
+		const baseFile = !parsedTexture.path.endsWith(".png")
+			? `assets/${parsedTexture.namespace}/textures/${parsedTexture.path}.png`
+			: `assets/${parsedTexture.namespace}/textures/${parsedTexture.path}`;
 		const baseStatus = fileStatusInLayers(
 			shared.layers,
 			shared.hasVanilla,
@@ -930,8 +930,9 @@ function paletteFileFor(
 	if (parsed.namespace === "" || parsed.path === "") {
 		return undefined;
 	}
-	const leaf =
-		parsed.path.lastIndexOf(".") < 0 ? `${parsed.path}.png` : parsed.path;
+	const leaf = !parsed.path.endsWith(".png")
+		? `${parsed.path}.png`
+		: parsed.path;
 	return `assets/${parsed.namespace}/${paletteRoot}${leaf}`;
 }
 

@@ -52,11 +52,19 @@ import {
 	resolveModelReference,
 	resolveTextureReference,
 } from "./resource-context.ts";
+import { findUninterpretedResources } from "./resource-kinds.ts";
 import {
 	parseResourceLocation,
 	validateDiskFilename,
 	validateResourceLocation,
 } from "./resource-location.ts";
+import {
+	checkEquipmentReferences,
+	checkFontReferences,
+	checkParticleReferences,
+	isLegacyEquipmentLocation,
+	type ReferenceSink,
+} from "./resource-references.ts";
 
 /**
  * validate-pack scan engine. Read-only end to end: the
@@ -350,8 +358,9 @@ function referenceLocationProblems(value: string): PackFinding[] {
 
 function resolveTextureRel(value: string): string {
 	const parsed = parseResourceLocation(value);
-	const leaf =
-		extensionOf(parsed.path) === "" ? `${parsed.path}.png` : parsed.path;
+	const leaf = parsed.path.endsWith(".png")
+		? parsed.path
+		: `${parsed.path}.png`;
 	return `assets/${parsed.namespace}/textures/${leaf}`;
 }
 
@@ -392,7 +401,8 @@ interface ScanState {
 				| "texture"
 				| "item-model"
 				| "blockstate"
-				| "texture-variable-external";
+				| "texture-variable-external"
+				| "resource-file";
 			field: string;
 			value: string;
 			firstRel: string;
@@ -401,6 +411,7 @@ interface ScanState {
 	modelTexts: Map<string, string>;
 	blockstateTexts: Map<string, string>;
 	modelSkips: PackCoverageSkip[];
+	referenceSkips: PackCoverageSkip[];
 }
 
 /** Per-file checks that need no cross-file view. Order matches FINDING_ORDER. */
@@ -755,6 +766,7 @@ function checkModelReferences(
 	if (parent !== undefined && !state.cycleFiles.has(rel)) {
 		checkParentReference(rel, parent, context, state);
 	}
+	checkLegacyOverrideReferences(rel, doc, context, state, rules);
 	const textures = doc.textures;
 	if (textures === undefined) {
 		return;
@@ -795,7 +807,8 @@ function recordUnresolved(
 		| "texture"
 		| "item-model"
 		| "blockstate"
-		| "texture-variable-external",
+		| "texture-variable-external"
+		| "resource-file",
 	field: string,
 	value: string,
 	target: string,
@@ -1033,6 +1046,51 @@ function checkTextureValue(
 	state.errorFiles.add(rel);
 }
 
+/** Legacy overrides are only read by clients before item definitions. */
+function checkLegacyOverrideReferences(
+	rel: string,
+	doc: Record<string, unknown>,
+	context: ResourceContext,
+	state: ScanState,
+	rules?: ModelRules,
+): void {
+	const hasItemDefinitions = rules?.has("itemDefinitions");
+	if (doc.overrides === undefined || hasItemDefinitions === true) {
+		return;
+	}
+	const skip = (field: string, reason: string): void => {
+		state.modelSkips.push({
+			kind: "model-version-rules",
+			reason,
+			target: `${rel}#/${field}`,
+			detail: "overrides",
+		});
+		push(
+			state.findings,
+			"PACK_COVERAGE_SKIPPED",
+			"warning",
+			`"${field}" in "${rel}" is not interpreted (${reason}); coverage recorded as skipped.`,
+			rel,
+		);
+	};
+	if (hasItemDefinitions === undefined) {
+		skip("overrides", "feature-version-unknown");
+		return;
+	}
+	if (!Array.isArray(doc.overrides)) {
+		skip("overrides", "unexpected-shape");
+		return;
+	}
+	for (const [index, entry] of doc.overrides.entries()) {
+		const field = `overrides[${index}].model`;
+		if (!isRecord(entry) || typeof entry.model !== "string") {
+			skip(`overrides/${index}/model`, "unexpected-shape");
+			continue;
+		}
+		checkModelRefValue(rel, field, entry.model, context, state, "item-model");
+	}
+}
+
 /** Shared model reference check for blockstate and item entries. */
 function checkModelRefValue(
 	rel: string,
@@ -1245,6 +1303,72 @@ function checkItemModelDefinitions(
 			if (!ok && state.errorFiles.has(rel)) {
 				break;
 			}
+		}
+	}
+}
+
+/**
+ * Equipment, particle and font references. The checkers report through a
+ * sink that feeds the same finding, error and unresolved bookkeeping as
+ * every other reference source.
+ */
+function checkResourceTypeReferences(
+	rels: {
+		equipmentRels: string[];
+		particleRels: string[];
+		fontRels: string[];
+	},
+	state: ScanState,
+	context: ResourceContext,
+	packFormat: string | undefined,
+): void {
+	const seenSkips = new Set<string>();
+	const sink: ReferenceSink = {
+		problem(code, message, rel) {
+			push(state.findings, code, "error", message, rel);
+			state.errorFiles.add(rel);
+		},
+		unresolved(entry) {
+			recordUnresolved(
+				entry.kind,
+				entry.field,
+				entry.value,
+				entry.target,
+				entry.rel,
+				state,
+			);
+		},
+		referencedTexture(rel) {
+			state.referencedTextures.add(rel);
+		},
+		skip(skip) {
+			const key = `${skip.kind}\u0000${skip.reason}\u0000${skip.target}\u0000${skip.detail ?? ""}`;
+			if (seenSkips.has(key)) {
+				return;
+			}
+			seenSkips.add(key);
+			state.referenceSkips.push(skip);
+			const detail = skip.detail === undefined ? "" : `: ${skip.detail}`;
+			push(
+				state.findings,
+				"PACK_COVERAGE_SKIPPED",
+				"warning",
+				`resource reference at "${skip.target}" was not checked (${skip.reason}${detail}); coverage recorded as skipped.`,
+				skip.target.split("#")[0] ?? skip.target,
+			);
+		},
+	};
+	const groups: Array<[string[], typeof checkEquipmentReferences]> = [
+		[rels.equipmentRels, checkEquipmentReferences],
+		[rels.particleRels, checkParticleReferences],
+		[rels.fontRels, checkFontReferences],
+	];
+	for (const [group, check] of groups) {
+		for (const rel of group) {
+			if (!state.docs.has(rel)) {
+				continue;
+			}
+			check({ rel, doc: state.docs.get(rel), context, packFormat, sink });
 		}
 	}
 }
@@ -1543,7 +1667,11 @@ export async function scanPack(
 		modelTexts: new Map(),
 		blockstateTexts: new Map(),
 		modelSkips: [],
+		referenceSkips: [],
 	};
+	const equipmentRels: string[] = [];
+	const particleRels: string[] = [];
+	const fontRels: string[] = [];
 	for (const rel of rels) {
 		if (rel === "pack.mcmeta") {
 			continue;
@@ -1579,6 +1707,16 @@ export async function scanPack(
 			lowRel.endsWith(".json")
 		) {
 			state.blockstateRels.push(rel);
+		}
+		const restLower = split?.rest.toLowerCase();
+		if (restLower !== undefined && lowRel.endsWith(".json")) {
+			if (restLower.startsWith("equipment/")) {
+				equipmentRels.push(rel);
+			} else if (restLower.startsWith("particles/")) {
+				particleRels.push(rel);
+			} else if (restLower.startsWith("font/")) {
+				fontRels.push(rel);
+			}
 		}
 	}
 	// The root pack.mcmeta parses for INVALID_JSON and, with no version
@@ -1626,6 +1764,15 @@ export async function scanPack(
 		}
 	}
 	const modelRules = resolveModelRules(effectivePackFormat);
+	// Equipment definitions sat under models/ for one release; they are
+	// not models, so they leave the model checks where that applies.
+	state.modelRels = state.modelRels.filter((rel) => {
+		if (!isLegacyEquipmentLocation(rel, effectivePackFormat)) {
+			return true;
+		}
+		equipmentRels.push(rel);
+		return false;
+	});
 
 	const views = modelDocViews(state, modelRules);
 	const parentOf = parentOfModels(state);
@@ -1762,6 +1909,12 @@ export async function scanPack(
 		}
 	}
 	checkItemModelDefinitions(state, context, options, mcmetaDoc);
+	checkResourceTypeReferences(
+		{ equipmentRels, particleRels, fontRels },
+		state,
+		context,
+		effectivePackFormat,
+	);
 	const reachability = computeReachability(parentOf, state);
 	const atlasSkips = await checkAtlasCoverage(
 		state,
@@ -1813,7 +1966,25 @@ export async function scanPack(
 		...atlasSkips,
 		...state.itemSkips,
 		...state.modelSkips,
+		...state.referenceSkips,
 	];
+	// Resource types the scan does not read must not pass as complete:
+	// one skip and one warning per unread type, naming the type, like
+	// every other coverage skip.
+	for (const unread of findUninterpretedResources(rels)) {
+		skipped.push({
+			kind: "uninterpreted-resource",
+			reason: `resource-type-not-interpreted: ${unread.kind}`,
+			target: unread.target,
+		});
+		push(
+			state.findings,
+			"PACK_COVERAGE_SKIPPED",
+			"warning",
+			`resource type "${unread.kind}" at "${unread.target}" is not interpreted; its references were not checked; coverage recorded as skipped.`,
+			unread.target,
+		);
+	}
 	for (const [target, entry] of pending) {
 		if (entry.kind === "texture-variable-external") {
 			const cut = target.indexOf(String.fromCharCode(0));
@@ -1849,7 +2020,9 @@ export async function scanPack(
 				? `parent "${entry.value}" in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`
 				: entry.kind === "texture"
 					? `"${entry.field}" "${entry.value}" in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`
-					: `model "${entry.value}"${withField} in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`;
+					: entry.kind === "resource-file"
+						? `"${entry.field}" "${entry.value}" in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`
+						: `model "${entry.value}"${withField} in "${entry.firstRel}" cannot be resolved without the vanilla resource tree; skipped as an external reference.`;
 		push(
 			state.findings,
 			"PACK_UNRESOLVED_EXTERNAL",

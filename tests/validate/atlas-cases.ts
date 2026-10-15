@@ -42,6 +42,124 @@ function skipSummary(
 
 export const ATLAS_CASES: AtlasCase[] = [
 	{
+		name: "single resources append png after dotted names and directories",
+		run: (check) => {
+			for (const path of ["item/sword.v2", "item.v2/sword"]) {
+				for (const suffix of ["", ".png"]) {
+					const parsed = parseAtlasLayers(
+						[
+							layerOf(
+								[
+									[
+										"assets/minecraft/atlases/items.json",
+										{
+											sources: [
+												{
+													type: "single",
+													resource: `minecraft:${path}${suffix}`,
+												},
+											],
+										},
+									],
+								],
+								[],
+							),
+						],
+						{ packFormat: "75.0", hasVanilla: true },
+					);
+					check.equal(
+						parsed.atlases.get("items")?.sprites.get(`minecraft:${path}`)
+							?.entity,
+						`assets/minecraft/textures/${path}.png`,
+						`single entity for ${path}${suffix}`,
+					);
+					check.equal(
+						atlasSpriteCoverageFor(parsed, "items", `minecraft:${path}`),
+						"covered",
+					);
+					check.deepEqual(skipSummary(parsed), []);
+				}
+			}
+		},
+	},
+	...(["base", "palette"] as const).map(
+		(target): AtlasCase => ({
+			name: `paletted ${target} resources append png after dotted names and directories across layers`,
+			run: (check) => {
+				for (const [packFormat, paletteRoot] of [
+					["75.0", "textures/"],
+					["97.1", "textures/palettes/"],
+				] as const) {
+					for (const dottedPath of ["part.v2", "folder.v2/part"]) {
+						for (const suffix of ["", ".png"]) {
+							for (const fileLayer of [0, 1, 2]) {
+								// Isolate palette-key and permutation lookups so either regression fails.
+								for (const paletteTarget of target === "palette"
+									? ["key", "permutation"]
+									: ["none"]) {
+									const base =
+										target === "base" ? `item/${dottedPath}` : "item/sword";
+									const key =
+										paletteTarget === "key"
+											? `palette/${dottedPath}`
+											: "palette/key";
+									const permutation =
+										paletteTarget === "permutation"
+											? `palette/${dottedPath}`
+											: "palette/emerald";
+									const files = [
+										`assets/minecraft/textures/${base}.png`,
+										`assets/minecraft/${paletteRoot}${key}.png`,
+										`assets/minecraft/${paletteRoot}${permutation}.png`,
+									];
+									const layers = [0, 1, 2].map((index) =>
+										layerOf(
+											index === 2
+												? [
+														[
+															"assets/minecraft/atlases/items.json",
+															{
+																sources: [
+																	{
+																		type: "paletted_permutations",
+																		textures: [`minecraft:${base}${suffix}`],
+																		palette_key: `minecraft:${key}${suffix}`,
+																		permutations: {
+																			emerald: `minecraft:${permutation}${suffix}`,
+																		},
+																	},
+																],
+															},
+														],
+													]
+												: [],
+											index === fileLayer ? files : [],
+										),
+									);
+									const parsed = parseAtlasLayers(layers, {
+										packFormat,
+										hasVanilla: true,
+									});
+									const label = `${packFormat} ${target} ${paletteTarget} ${dottedPath}${suffix} layer ${fileLayer}`;
+									check.equal(
+										atlasSpriteCoverageFor(
+											parsed,
+											"items",
+											`minecraft:${base}_emerald`,
+										),
+										"covered",
+										label,
+									);
+									check.deepEqual(skipSummary(parsed), [], label);
+								}
+							}
+						}
+					}
+				}
+			},
+		}),
+	),
+	{
 		name: "directory source covers its subtree only",
 		run: (check) => {
 			const parsed = parseAtlasLayers(

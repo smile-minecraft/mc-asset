@@ -463,8 +463,19 @@ export const PACK_CASES: PackCase[] = [
 				check.equal(report.verdict, "fail", "misplaced texture fails");
 				check.deepEqual(
 					uniqueCodes(report),
+					["PACK_COVERAGE_SKIPPED", "PACK_WRONG_PATH"],
+					"the wrong path plus the unread-type coverage warning",
+				);
+				check.deepEqual(
+					[
+						...new Set(
+							report.findings
+								.filter((finding) => finding.level === "error")
+								.map((finding) => finding.code),
+						),
+					],
 					["PACK_WRONG_PATH"],
-					"only that code",
+					"the only error is the wrong path, never a missing texture",
 				);
 			});
 		},
