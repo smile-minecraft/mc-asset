@@ -109,24 +109,28 @@ transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
 
 | 命令 | 输入 | 输出 | 说明 |
 |---|---|---|---|
-| `quantize <input>` | PNG、JPEG、WebP、`.mcpx` | PNG 和／或 `.mcpx` | 将不同颜色的数量缩减到目标值。 |
+| `quantize <input>` | PNG、JPEG、WebP、`.mcpx` | PNG 和／或 `.mcpx` | 将不同颜色的数量缩减到目标值，或映射到指定调色板；保留色保持不变。 |
 | `cleanup <input>` | PNG、JPEG、WebP、`.mcpx` | PNG 和／或 `.mcpx` | 检测或消除孤立点、噪点与离群像素。 |
 | `palette extract <image>` | PNG、JPEG、WebP、`.mcpx` | 仅报告 | 提取图像中不重复的 RGBA 颜色。 |
 | `palette inspect <image>` | PNG、JPEG、WebP、`.mcpx` | 仅报告 | 分析调色板分布、角色与对比度。 |
 | `material list` | 无 | 仅报告 | 列出可用的内置材质定义。 |
 | `material show <name>` | 无 | 仅报告 | 查看某个材质的色阶与定义。 |
-| `recolor <source>` | `.mcpx` | PNG 和／或 `.mcpx` | 将颜色重新映射到内置材质调色板。 |
-| `variant <source>` | `.mcpx` | `--output-dir` 下的多个文件 | 生成材质变体（例如 iron、copper、gold）。 |
+| `recolor <source>` | `.mcpx`、PNG | PNG 和／或 `.mcpx` | 将颜色重新映射到内置材质调色板。 |
+| `variant <source>` | `.mcpx`、PNG | `--output-dir` 下的多个文件 | 生成材质变体（例如 iron、copper、gold）。 |
 
 ```text
-quantize <input> --colors <N> [--selection <scope>] <file flags>
+quantize <input> (--colors <N> | --palette <name|path>) [--keep-color <r,g,b,a> ...] [--selection <scope>] <file flags>
 cleanup  <input> [--fix <classes>] [--allow-render-pass-change] [--selection <scope>] <file flags>
-recolor  <source> --material <name> [--region <id>] <file flags>
+recolor  <source> --material <name> [--region <id>] [--selection <scope>] <file flags>
 variant  <source> --materials <a,b,...> --output-dir <dir> [--mkdir] [--force] [--profile <p>]
 ```
 
+- `quantize` 必须恰好给出 `--colors` 或 `--palette` 之一：两者并用是 `ARGUMENT_CONFLICT`，都没给是 `INVALID_ARGUMENT`。`--palette` 接受内置材质名或 `.mcpx` 路径（最多 4096 色，按声明顺序，含未使用项）。每个像素按整数 RGBA 平方距离映射到最近的项；距离相同取靠前的项，alpha 为 0 的隐藏 RGB 也参与。
+- `--keep-color <r,g,b,a>`（可重复）让该 RGBA 完全不变。配合 `--palette` 时，保留色必须是调色板中的项（否则 `INVALID_ARGUMENT`）。配合 `--colors` 时，每层只把选择范围内实际出现的不重复保留色计入预算，其余选中像素用剩余预算量化；预算用完则映射到保留色，保留色多于预算会在写入前返回 `INVALID_ARGUMENT`。使用 `--keep-color` 或 `--palette` 时，`--selection` 会把预算与映射限制在选中像素，范围外字节不变。
+- 调色板文件是只读输入，任何输出参数（含 `--force`、`--in-place`）都不能覆盖它。量化用的调色板可能与写出的 `.mcpx` 声明板不同，后者沿用画布原有的板。`--json` 结果在使用时会多出 `palette` 与 `keepColors`（RGBA 对象）；`colorCount` 是各层量化调色板颜色数的最大值。
 - `cleanup --fix <classes>`：以逗号分隔的类别列表（`isolated`、`noise`、`cluster`、`fringe`、`outlier`、`hole`、`aa`）。修改会影响 alpha 的类别时，必须加 `--allow-render-pass-change`。
 - `palette` 与 `material` 子命令只输出报告，收到文件写入标志会被拒绝（`INVALID_ARGUMENT`）。
+- `recolor` 与 `variant` 接受可编辑的 `.mcpx` 来源或扁平 PNG。PNG 没有调色板角色信息，因此像素按整数明度分段映射到目标材质调色板（96 以下为暗部、96 到 159 为中间、160 以上为亮部），不会虚构图层角色。全透明像素（alpha 为 0）保持字节不变，包含隐藏 RGB，区域遮罩也不会被改写。PNG 搭配 `--region` 时，缺失区域沿用既有的 `REGION_NOT_FOUND` 错误；`--selection` 仍可限定写回范围，未选中像素会原样还原。JPEG 与 WebP 仍会被拒绝（`INVALID_ARGUMENT`）。`variant` 的每个材质都从同一个原始来源独立生成，材质顺序不影响结果；文件命名为 `<stem>_<material>.png` 加 `<stem>_<material>.mcpx`。输入文件不会被修改；所有文件目标会在写入前先做联合预检。
 
 ---
 
@@ -215,6 +219,7 @@ animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--colum
 | `inspect <input>` | PNG、JPEG、WebP、`.mcpx` | 仅报告（`--json` 的 view 另附 PNG 字节） | 冻结的结构报告或合成后的 view（只读）。 |
 | `validate <asset>` | 资产文件（PNG） | 仅报告（有缺陷时状态码 3） | 验证单个资产贴图与可选的 `.mcmeta`。 |
 | `validate-pack <path>` | 资源包根目录 | 仅报告（有缺陷时状态码 3） | 完整扫描资源包的完整性、命名空间、模型、贴图与图集。 |
+| `compare <before> <after>` | 两张同尺寸 PNG | 仅报告或诊断 PNG（`--output`、`--stdout`） | 比较两张同尺寸 PNG，回报原始 RGBA 与可见差异像素数及差异框。 |
 
 ```text
 analyze       <image> [--profile <p>] [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
@@ -223,6 +228,7 @@ validate      <asset> [--profile <p>] [--minecraft-version <v>] [--resource-pack
                       [--mcmeta <path>] [--json]
 validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
                       [--vanilla <path>] [--dependency <path>]... [--json]
+compare       <before> <after> [--output <path>] [--stdout] [--scale <N>] [--force] [--mkdir] [--json]
 ```
 
 - 验证的状态码：通过为 0；验证检查失败为 3（`VALIDATION_FAILED`）；调用语法错误为 2；文件系统错误为 4。
@@ -243,7 +249,7 @@ validate-pack <path>  [--minecraft-version <v>] [--resource-pack-version <n>]
 mc-asset mcp
 ```
 
-启动原生 Model Context Protocol（MCP）stdio 服务器，供 LLM Agent 集成，提供 23 个原生工具，无需另起子进程：
+启动原生 Model Context Protocol（MCP）stdio 服务器，供 LLM Agent 集成，提供原生工具，无需另起子进程：
 - `analyze_asset`
 - `pixelize_asset`
 - `render_pixel_asset`
@@ -267,6 +273,8 @@ mc-asset mcp
 - `inspect_asset`
 - `optimize_asset`
 - `model_asset`
+- `mcmeta_asset`
+- `compare_assets`
 
 ---
 
@@ -275,14 +283,19 @@ mc-asset mcp
 | 命令 | 输入 | 输出 | 说明 |
 |---|---|---|---|
 | `optimize <input...>` | 1 至 256 个明确的 PNG 文件 | 写到明确新路径的 PNG，或只出报告（`--dry-run`） | 无损重新编码成能精确表示像素的最小编码；没有更小的就保留源字节。 |
+| `optimize --input-dir <dir>` | 包含 PNG 的目录（最多 4096 个 PNG，`--recursive`） | 保留相对目录结构写到 `--output-dir`，或只出报告（`--dry-run`） | 按 UTF-8 字节顺序扫描 PNG，检查预算上限（256 MiB 源文件、16,777,216 解码像素），无损重新编码各文件。 |
 | `model inspect <file>` | Java 方块／物品模型 JSON | 只出报告 | 描述 parent、textures、elements、display 变换与解析后的引用。 |
 | `model validate <file>` | Java 方块／物品模型 JSON | 只出报告（有缺陷时退出码 3） | 检查结构、UV、旋转、display 变换与引用是否有效。 |
 | `model create` | 模型描述（`--spec`） | 模型 JSON | 按明确的描述创建模型文档。 |
 | `model apply <file>` | 模型 JSON 加类型化操作（`--operations`） | 模型 JSON | 全部操作成功才写出新文档，否则一个都不应用。 |
 | `model export <file>` | 模型 JSON，可选 binding（`--binding`） | 模型 JSON、物品定义、blockstate | 把模型放进资源包，并在旁边生成物品定义与 blockstate。 |
+| `model preview <file>` | Java 方块／物品模型 JSON | 诊断 PNG（正面、右侧、上面） | 从长方体 `elements` 画出固定的三视图诊断图。 |
 
 ```text
 optimize     <input...> (--output <png> | --output-dir <dir> | --stdout | --dry-run)
+                        [--mode <auto|rgba|rgb|grayscale|grayscale-alpha|indexed>]
+                        [--ancillary <preserve|strip>] [--force] [--mkdir] [--json]
+optimize     --input-dir <dir> [--recursive] (--output-dir <dir> | --dry-run)
                         [--mode <auto|rgba|rgb|grayscale|grayscale-alpha|indexed>]
                         [--ancillary <preserve|strip>] [--force] [--mkdir] [--json]
 model inspect  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
@@ -296,18 +309,31 @@ model apply    <file> --operations <file|-> (--output <json> | --stdout) [--forc
 model export   <file> [--output <json>] [--binding <file|->] [--item-output <json>]
                       [--blockstate-output <json>] [--pack <dir>] [--force] [--mkdir]
                       [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
+model preview  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
+                      [--minecraft-version <v>] [--resource-pack-version <n>]
+                      [--size <64|128|256>] (--output <png> | --stdout) [--force] [--mkdir] [--json]
 ```
 
-- `optimize` 的输入：只接受明确的 PNG 路径（不展开通配符、不遍历目录）；格式按签名判断，不是 PNG 的文件会报告 `UNSUPPORTED_IMAGE_FORMAT`。同一个文件出现两次，或两个输入在 `--output-dir` 下文件名相同，会报告 `ARGUMENT_CONFLICT`。
-- `optimize` 的输出：`--output`（单个输入）、`--output-dir`（每个输入写成 `<dir>/<输入文件名>`）、`--stdout`（单个输入）、`--dry-run`（只算报告、不写文件）必须恰好一个。都没给是 `OUTPUT_REQUIRED`，多于一个是 `ARGUMENT_CONFLICT`。没有 `--in-place`：输入文件永远不会被改写。
+- `optimize` 的输入：可传入明确的 PNG 路径清单（1 至 256 个文件；不展开通配符、不遍历目录），或传入 `--input-dir <dir>`（可选 `--recursive`，最多 4096 个 PNG）。两者都提供会报告 `ARGUMENT_CONFLICT`；都没提供报告 `INVALID_ARGUMENT`。未指定 `--input-dir` 却提供 `--recursive` 报告 `ARGUMENT_CONFLICT`。
+- 清单模式下，格式按签名判断，不是 PNG 的文件会报告 `UNSUPPORTED_IMAGE_FORMAT`。同一个文件出现两次，或两个输入在 `--output-dir` 下文件名相同，会报告 `ARGUMENT_CONFLICT`。
+- 目录模式（`--input-dir`）：
+  - 按 UTF-8 字节顺序遍历相对路径，输出目录保留原目录结构。创建中间输出目录需明确指定 `--mkdir`。
+  - 绝不跟随符号链接：扫描范围内任何符号链接（含源根目录）或读取失败一律报告 `FILESYSTEM_ERROR`（`symlink-not-supported`）。
+  - 源根目录与输出根目录必须互不相交：两者不得为别名（含大小写别名），也不得相互包含，违者报告 `ARGUMENT_CONFLICT`。
+  - 写入前检查资源预算：最多 4096 个 PNG、总源文件大小上限 256 MiB（268,435,456 字节）、总解码像素上限 16,777,216，并沿用单图大小限制。任一超限皆报告 `RESOURCE_LIMIT_EXCEEDED` 且不自动分批。
+  - 一般非 PNG 文件（如 `.mcmeta`、`.txt`、`.json`）自动跳过，不复制也不修改；目录内无任何 PNG 文件报告 `INVALID_ARGUMENT`。
+  - 目录模式只接受 `--output-dir` 或 `--dry-run`；单文件输出（`--output`）或 `--stdout` 会报告 `ARGUMENT_CONFLICT`。
+  - 在 `--dry-run` 下，不创建目录、不写文件，也不碰非 PNG 文件（`.mcmeta` 等），直接返回所有 PNG 的计算报告。
+- `optimize` 的输出：清单模式下 `--output`（单个输入）、`--output-dir`（每个输入写成 `<dir>/<输入文件名>`）、`--stdout`（单个输入）、`--dry-run`（只算报告、不写文件）必须恰好一个。都没给是 `OUTPUT_REQUIRED`，多于一个是 `ARGUMENT_CONFLICT`。没有 `--in-place`：输入文件永远不会被改写。
 - `--mode auto`（默认）选出能精确表示像素的最小编码，或保留源字节；指定模式会强制该编码，若无法精确表示像素则报告 `OPTIMIZE_MODE_NOT_EXACT`（退出码 5）。`--ancillary preserve`（默认）复制元数据块，并拒绝块内容依赖颜色布局的源文件；`strip` 会丢弃所有辅助块并列出被丢弃的项目。
-- `optimize` 分三个阶段：先检查所有输出路径，再在内存里算完所有输入，最后才写文件。任何一个输入计算失败，就整批都不写，错误的 `details` 列出 `processed` 与 `notProcessed`。写文件中途失败时，已写入的文件保留，`details` 列出 `completed`、`failedTarget` 与 `notStarted`。无法缩小的文件（`unchanged`）仍会以源字节写出，`--dry-run` 除外。
+- `optimize` 分三个阶段：先整批预检所有输出路径，再在内存里算完所有输入，最后才写文件。任何一个输入计算失败，就整批都不写，错误的 `details` 列出 `processed` 与 `notProcessed`。写文件中途失败时，已写入的文件保留（多文件写入为单文件原子提交，非跨文件事务），`details` 列出 `completed`、`failedTarget` 与 `notStarted`。无法缩小的文件（`unchanged`）仍会以源字节写出，`--dry-run` 除外。
 - 人类可读输出每个文件一行：`ok optimize input=<p> output=<p|-> status=<s> source=<bytes> result=<bytes> mode=<mode>`；警告另起一行 `warning [CODE] message`。`--json` 带相同的结果，另含每个文件的 `candidates`、`preservedChunks`、`strippedChunks` 与 `totals`。
 - `model inspect` 与 `model validate` 只读，不接受输出标志。`inspect` 一律退出 0；`validate` 在判定为 `fail` 时退出 3。给了 `--pack` 时，`<file>` 必须位于 `<pack>/assets/<命名空间>/models/` 之下；没给版本标志时，版本按 `pack.mcmeta` 推定（没有可用的值就视为版本不明，不套用默认）。
 - `model create`／`model apply` 从文件或 `-`（stdin；每个命令最多一个 `-`）读 JSON，并且 `--output` 与 `--stdout` 必须恰好一个。它们只检查文档本身，不接受 `--pack`、`--vanilla`、`--dependency`。模型支持范围只含长方体 `elements`。
 - `model export` 至少要有 `--output`、`--item-output`、`--blockstate-output` 之一。`--item-output` 需要 `binding.item`（反过来也一样），`--blockstate-output` 需要 `binding.blockstate`。`binding.item` 需要明确的版本且资源包格式在 46.0 以上，否则报告 `MODEL_UNSUPPORTED_VERSION`（退出码 5）。`--pack` 会加上布局与边界检查。`--force` 不适用于 `--item-output`、`--blockstate-output`，这两个文件永远不会被覆盖。
+- `model preview` 画出固定的诊断图：三个正方形面板横向排列（`front`、右侧、`top`），每个面板边长为 `--size`（64、128 或 256，默认 64），所以 PNG 宽为 `size * 3`、高为 `size`。`front` 是从北方看北面，右侧面板是从东方看东面，`top` 是从上方看上面且北方在上。只画轴对齐的长方体 `elements`、既有 UV 与 0/90/180/270 的面旋转，使用整数投影加深度缓冲；坐标必须是精确的 1/256 倍数。父链与贴图变量沿用既有的解析上下文。缺失的贴图以固定棋盘格填满该矩形并发出警告；元素旋转、非 1/256 坐标、半透明面与无法解析的贴图会列在 `coverage.skipped`（`partial`），不会默默画错。`display` 变换与游戏光照不会应用。`--output` 与 `--stdout` 必须恰好一个（都没给是 `OUTPUT_REQUIRED`，两个都给是 `ARGUMENT_CONFLICT`）；`size` 不是 64/128/256 是 `INVALID_ARGUMENT`。模型与贴图只会被读取，不会被改写。
 - 共用的写入保护（`optimize` 与 `model`）：第一个字节写出之前，所有目标都已检查完毕。与输入或其他输出互为别名、目标是目录、目标是符号链接（含悬空的，带 `--force` 也一样）、直接父目录是符号链接，以及 `model export` 时位于 `--pack` 之外的路径，都会被拒绝。已存在的文件除非 `--force` 适用，否则报告 `OUTPUT_EXISTS`。每个文件仍以原子重命名提交。
-- 报告只验证结构与引用是否有效。没有任何东西在游戏客户端里渲染过模型，所以外观、光照与游戏内行为都未验证。
+- 报告只验证结构与引用是否有效。没有任何东西在游戏客户端里渲染过模型，所以外观、光照与游戏内行为都未验证。`model preview` 是诊断视图，不是游戏渲染器。
 
 ---
 
@@ -399,3 +425,34 @@ model export   <file> [--output <json>] [--binding <file|->] [--item-output <jso
 | `OPTIMIZE_MODE_NOT_EXACT` | 5 | `optimize --mode <名称>` 强制的编码无法精确表示像素（例如对带透明度的源文件指定 `rgb`）。 | 改用 `--mode auto`，或选一个能容纳所有像素的模式。 |
 | `MODEL_UNSUPPORTED_VERSION` | 5 | 目标版本无法表示所要求的特性，或 `model export` 使用 `binding.item` 时没有明确的 46.0 以上资源包版本。 | 传入支持该特性的 `--minecraft-version` 或 `--resource-pack-version`。 |
 | `UNSUPPORTED_MINECRAFT_TEXTURE_FORMAT` | 5 | 使用 `minecraft:*` 资产配置，但输出路径不是 `.png`。 | Minecraft 贴图一律输出 `.png`。 |
+
+## 生成 mcmeta 设置
+
+从 PNG 生成动画或 GUI 缩放设置：
+
+```sh
+mc-asset mcmeta animation sheet.png --frame-size 16 --frametime 2 --frames '[0,{"index":1,"time":4},0]' --minecraft-version 1.21.2 --output sheet.png.mcmeta
+mc-asset mcmeta gui panel.png --type nine_slice --border 4 --stretch-inner --resource-pack-version 42 --stdout
+```
+
+动画必须指定 `--frame-size <N|WxH>`，帧只支持单排或单列，尺寸必须整除 PNG；不接受网格。`frametime` 默认 1，`frames` 接受索引或 `{index,time}` 对象，可重复或只播放部分帧；省略时依序播放全部帧。时間必须是正整数，索引不得越界；`--interpolate` 启用插值。GUI 必须指定 `--type <stretch|tile|nine_slice>`，tile 与 nine_slice 以 PNG 尺寸作设计尺寸。nine_slice 必须指定 `--border <N|json>`，四边 left、top、right、bottom 为非负整数，中央必须保留正面积；只有 nine_slice 接受 `--stretch-inner`。
+
+CLI 必须明确选择 `--output <path.mcmeta>` 或 `--stdout` 其中之一，不猜同名路径。已存在的目标需要 `--force`，它会整个文件替换，不保留其他区段；`--mkdir` 允许建立缺少的父目录。来源 PNG 与无关的同名设置不变，输入别名与符号链接会被拒绝。输出只含指定区段，以固定键顺序的紧凑 JSON 加一个结尾换行生成。
+
+版本选项 `--minecraft-version` 与 `--resource-pack-version` 只能选一个。GUI scaling 需要 pack format 16.0，stretch_inner 需要 42.0；不相容会在输出前回报 `ARGUMENT_CONFLICT`。未指定版本，或版本在 12.0 到 97.1 之外，会回报 `versionChecked: false` 与 `VERSION_NOT_CHECKED`，但不会跳过 GUI 最低版本限制。动画依据文档格式及历史在表内标示已检查，并非逐版本游戏客户端实测。来源见[材质动画与历史](https://minecraft.wiki/w/Resource_pack#Texture_animation)（interpolate 在 14w25a 加入，早于支持表）、[GUI scaling](https://www.minecraft.net/en-us/article/minecraft-snapshot-23w31a) 与 [pack format](https://minecraft.wiki/w/Pack_format)。这些检查确认设置结构与已知版本相容性，不代表已验证游戏内外观或行为。
+
+## 比较 PNG 的变化
+
+```sh
+mc-asset compare before.png after.png --json
+mc-asset compare before.png after.png --output diff.png --scale 4
+mc-asset compare before.png after.png --stdout --json > diff.png
+```
+
+只接受尺寸相同的 PNG；尺寸不同返回 `INVALID_ARGUMENT`。未指定 `--output` 或 `--stdout` 时只返回报告，不写文件。使用 `--stdout` 时，PNG 字节写入 stdout，报告写入 stderr。`--output` 与 `--stdout` 不能同时使用。
+
+报告包含 `width`、`height`、`totalPixels`、`rawChangedPixels`、`visibleChangedPixels`、`rawBounds`、`visibleBounds`。原始差异逐一比较解码后的 RGBA 通道，包括 alpha 为零时隐藏的 RGB。可见差异采用现有 flatten 合成规则，但双方 alpha 都为零时忽略 RGB。差异框采用原图坐标，以从零开始的 `{x,y,width,height}` 表示，包含最后一个变化像素；没有差异时为 `null`。
+
+诊断 PNG 用洋红色（`255,0,255,255`）标记可见差异，用青色（`0,255,255,255`）标记仅有原始差异的像素，未变像素为透明（`0,0,0,0`）。该图是诊断标记，不是修改后的素材。`--scale` 接受 1 到 16 的整数，默认为 1，通过 nearest 放大标记图，不改变报告统计。图像放大后的长边不得超过 1024 像素，超限返回 `RESOURCE_LIMIT_EXCEEDED`，不会自动缩小。仅报告模式沿用现有 PNG 解码器限制。
+
+两个源文件都不会被改写。显式输出路径必须以 `.png` 结尾；源文件别名、符号链接目标或父目录都会被拒绝。覆盖现有目标需要 `--force`，创建缺少的父目录需要 `--mkdir`；这两个选项都需要文件输出路径。所有输出先通过检查，才写入文件或发送 stdout 图像字节。

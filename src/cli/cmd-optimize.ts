@@ -19,6 +19,14 @@ import {
 } from "./channels.ts";
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
 import { exitCodeForMcAssetError } from "./exit.ts";
+import type { AtomicWriteSeams } from "./filesystem.ts";
+import {
+	assertDisjointDirectories,
+	checkDecodedPixelsLimit,
+	checkSourceBytesLimit,
+	type OptimizeDirSeams,
+	scanPngDirectory,
+} from "./optimize-dir.ts";
 import {
 	canonicalKey,
 	type OutputTarget,
@@ -28,6 +36,8 @@ import {
 } from "./safe-output.ts";
 
 export interface OptimizeCliOptions {
+	inputDir?: string | undefined;
+	recursive?: boolean | undefined;
 	output?: string | undefined;
 	outputDir?: string | undefined;
 	stdout?: boolean | undefined;
@@ -36,6 +46,8 @@ export interface OptimizeCliOptions {
 	ancillary?: string | undefined;
 	force?: boolean | undefined;
 	mkdir?: boolean | undefined;
+	seams?: OptimizeDirSeams | undefined;
+	atomicSeams?: AtomicWriteSeams | undefined;
 }
 
 /** Most explicit inputs one call accepts; more is RESOURCE_LIMIT_EXCEEDED. */
@@ -113,12 +125,16 @@ export type OptimizeDestination =
 	| { readonly kind: "dir"; readonly dir: string };
 
 export interface OptimizeRequest {
-	readonly inputs: readonly string[];
+	readonly inputs?: readonly string[] | undefined;
+	readonly inputDir?: string | undefined;
+	readonly recursive?: boolean | undefined;
 	readonly mode?: string | undefined;
 	readonly ancillary?: string | undefined;
 	readonly destination: OptimizeDestination;
 	readonly force: boolean;
 	readonly mkdir: boolean;
+	readonly seams?: OptimizeDirSeams | undefined;
+	readonly atomicSeams?: AtomicWriteSeams | undefined;
 }
 
 export interface OptimizeOutcome {
@@ -384,27 +400,183 @@ export async function runOptimizeRequest(
 ): Promise<OptimizeOutcome> {
 	const mode = requestedMode(request.mode);
 	const ancillary = requestedAncillary(request.ancillary);
-	const { inputs, destination } = request;
-	if (inputs.length === 0) {
+	const { inputs, inputDir, destination } = request;
+
+	if (inputs !== undefined && inputs.length > 0 && inputDir !== undefined) {
 		throw new McAssetError(
-			"INVALID_ARGUMENT",
-			"optimize needs at least one input.",
+			"ARGUMENT_CONFLICT",
+			"Give inputs or inputDir, not both.",
 		);
 	}
-	if (inputs.length > MAX_INPUTS) {
+	if ((inputs === undefined || inputs.length === 0) && inputDir === undefined) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			"optimize needs at least one input or --input-dir.",
+		);
+	}
+	if (inputDir === undefined && request.recursive === true) {
+		throw new McAssetError(
+			"ARGUMENT_CONFLICT",
+			"--recursive requires inputDir.",
+		);
+	}
+
+	if (inputDir !== undefined) {
+		if (destination.kind === "file" || destination.kind === "stdout") {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				"Directory mode does not accept single-file output or stdout.",
+			);
+		}
+		if (destination.kind === "embed") {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				"Directory mode requires outputDir, or dryRun set to true.",
+			);
+		}
+		if (destination.kind === "dir") {
+			await assertDisjointDirectories(inputDir, destination.dir);
+		}
+
+		const entries = await scanPngDirectory(
+			inputDir,
+			request.recursive ?? false,
+			request.seams,
+		);
+
+		let totalBytes = 0;
+		for (const entry of entries) {
+			let size: number;
+			if (entry.size !== undefined) {
+				size = entry.size;
+			} else if (request.seams?.statFile !== undefined) {
+				const s = await request.seams.statFile(entry.fullPath);
+				size = s.size;
+			} else {
+				try {
+					size = (await stat(entry.fullPath)).size;
+				} catch {
+					throw new McAssetError(
+						"FILESYSTEM_ERROR",
+						`Cannot read input: ${entry.fullPath}.`,
+					);
+				}
+			}
+			if (size > PNG_SOURCE_LIMITS.maxInputBytes) {
+				throw new McAssetError(
+					"RESOURCE_LIMIT_EXCEEDED",
+					`Input exceeds ${PNG_SOURCE_LIMITS.maxInputBytes} bytes: ${entry.fullPath}.`,
+					{ limit: PNG_SOURCE_LIMITS.maxInputBytes, actual: size },
+				);
+			}
+			totalBytes += size;
+			checkSourceBytesLimit(totalBytes);
+		}
+
+		let totalDecodedPixels = 0;
+		const computed: ComputedInput[] = [];
+		for (const [index, entry] of entries.entries()) {
+			try {
+				const bytes = await readInput(entry.fullPath);
+				if (request.seams?.getPixelDimensions !== undefined) {
+					const dims = request.seams.getPixelDimensions(entry.fullPath, bytes);
+					totalDecodedPixels += dims.width * dims.height;
+					checkDecodedPixelsLimit(totalDecodedPixels);
+				}
+				const optimized = optimizePng(bytes, {
+					mode,
+					ancillary,
+				});
+				if (request.seams?.getPixelDimensions === undefined) {
+					totalDecodedPixels +=
+						optimized.report.source.width * optimized.report.source.height;
+					checkDecodedPixelsLimit(totalDecodedPixels);
+				}
+				computed.push({
+					input: entry.fullPath,
+					bytes: optimized.bytes,
+					report: optimized.report,
+				});
+			} catch (error) {
+				throw batchFailure(
+					error,
+					entry.fullPath,
+					computed.map((item) => item.input),
+					entries.slice(index + 1).map((e) => e.fullPath),
+				);
+			}
+		}
+
+		let planned: readonly PlannedTarget[] = [];
+		if (destination.kind === "dir") {
+			const targets: OutputTarget[] = entries.map((entry) => ({
+				path: join(destination.dir, entry.relativePath),
+				extension: ".png",
+				allowOverwrite: request.force,
+			}));
+			const inputPaths = entries.map((e) => e.fullPath);
+			planned = await planOutputTargets(targets, {
+				inputs: inputPaths,
+				mkdir: request.mkdir,
+			});
+		}
+
+		if (destination.kind === "dry-run") {
+			const files = computed.map((item) => fileResultOf(item, null));
+			return {
+				result: {
+					command: "optimize",
+					dryRun: true,
+					mode,
+					ancillary,
+					engine: computed[0]?.report.engine ?? DEFLATE_ENGINE_ID,
+					files,
+					totals: totalsOf(files),
+				},
+			};
+		}
+
+		const payloads = new Map<string, Uint8Array>();
+		const files = computed.map((item, index) => {
+			const target: PlannedTarget | undefined = planned[index];
+			if (target !== undefined) payloads.set(target.path, item.bytes);
+			return fileResultOf(item, target?.path ?? null);
+		});
+		await writePlannedTargets(
+			planned,
+			payloads,
+			{ mkdir: request.mkdir },
+			request.atomicSeams,
+		);
+
+		return {
+			result: {
+				command: "optimize",
+				dryRun: false,
+				mode,
+				ancillary,
+				engine: computed[0]?.report.engine ?? DEFLATE_ENGINE_ID,
+				files,
+				totals: totalsOf(files),
+			},
+		};
+	}
+
+	const explicitInputs = inputs ?? [];
+	if (explicitInputs.length > MAX_INPUTS) {
 		throw new McAssetError(
 			"RESOURCE_LIMIT_EXCEEDED",
 			`optimize takes at most ${MAX_INPUTS} inputs.`,
-			{ limit: MAX_INPUTS, actual: inputs.length },
+			{ limit: MAX_INPUTS, actual: explicitInputs.length },
 		);
 	}
-	checkArity(destination, inputs.length);
-	await checkDistinctInputs(inputs);
+	checkArity(destination, explicitInputs.length);
+	await checkDistinctInputs(explicitInputs);
 	const planned = await planOutputTargets(
-		outputTargets(destination, inputs, request.force),
-		{ inputs, mkdir: request.mkdir },
+		outputTargets(destination, explicitInputs, request.force),
+		{ inputs: explicitInputs, mkdir: request.mkdir },
 	);
-	const computed = await computeInputs(inputs, mode, ancillary);
+	const computed = await computeInputs(explicitInputs, mode, ancillary);
 
 	const payloads = new Map<string, Uint8Array>();
 	const files = computed.map((item, index) => {
@@ -413,7 +585,12 @@ export async function runOptimizeRequest(
 		return fileResultOf(item, target?.path ?? null);
 	});
 	if (planned.length > 0) {
-		await writePlannedTargets(planned, payloads, { mkdir: request.mkdir });
+		await writePlannedTargets(
+			planned,
+			payloads,
+			{ mkdir: request.mkdir },
+			request.atomicSeams,
+		);
 	}
 
 	const single = computed[0];
@@ -436,6 +613,31 @@ export async function runOptimizeRequest(
 }
 
 function cliDestination(options: OptimizeCliOptions): OptimizeDestination {
+	if (options.inputDir !== undefined) {
+		if (options.output !== undefined || options.stdout === true) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				"Directory mode does not accept --output or --stdout. Use --output-dir or --dry-run.",
+			);
+		}
+		if (options.outputDir === undefined && options.dryRun !== true) {
+			throw new McAssetError(
+				"OUTPUT_REQUIRED",
+				"Directory mode requires --output-dir or --dry-run.",
+			);
+		}
+		if (options.outputDir !== undefined && options.dryRun === true) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				"Use only one of --output-dir or --dry-run.",
+			);
+		}
+		if (options.outputDir !== undefined) {
+			return { kind: "dir", dir: options.outputDir };
+		}
+		return { kind: "dry-run" };
+	}
+
 	const chosen = [
 		options.output !== undefined,
 		options.outputDir !== undefined,
@@ -480,13 +682,36 @@ export async function runOptimize(
 	});
 	let request: OptimizeRequest | undefined;
 	try {
+		if (inputs.length > 0 && options.inputDir !== undefined) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				"Give positional inputs or --input-dir, not both.",
+			);
+		}
+		if (inputs.length === 0 && options.inputDir === undefined) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				"optimize needs at least one input or --input-dir.",
+			);
+		}
+		if (options.inputDir === undefined && options.recursive === true) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				"--recursive requires --input-dir.",
+			);
+		}
+
 		request = {
-			inputs,
+			inputs: inputs.length > 0 ? inputs : undefined,
+			inputDir: options.inputDir,
+			recursive: options.recursive === true,
 			mode: options.mode,
 			ancillary: options.ancillary,
 			destination: cliDestination(options),
 			force: options.force === true,
 			mkdir: options.mkdir === true,
+			seams: options.seams,
+			atomicSeams: options.atomicSeams,
 		};
 		const outcome = await runOptimizeRequest(request);
 		if (outcome.artifact !== undefined) {

@@ -6,8 +6,13 @@
 //   - analyze JSON canonical bytes (stable key order, stdout envelope only)
 //   - V0.2: transform PNG+mcpx (sword.mcpx --flip h)
 //   - V0.2: quantize PNG+mcpx (sword.mcpx --colors 2)
+//   - quantize palette PNG+mcpx (sword.mcpx --palette iron) and
+//     quantize colors+keep PNG+mcpx (sword.mcpx --colors 2
+//     --keep-color 0,255,0,255)
 //   - V0.2: pixelize PNG bytes (px-8x8.jpg and px-lossless.webp --size 16)
 //   - V0.2: variant fan-out (sword.mcpx iron,copper: 2 PNG + 2 mcpx)
+//   - PNG recolor (px-8x8.png to iron: PNG + mcpx bytes) and PNG
+//   - variant fan-out (px-8x8.png iron,copper: 2 PNG + 2 mcpx)
 //   - V0.2: analyze JSON canonical bytes (px-8x8.png --json)
 //   - V0.3: generate PNG bytes + generate .mcpx text bytes
 //   - V0.3: tile JSON canonical bytes (px-8x8.png report mode)
@@ -24,10 +29,15 @@
 //   - optimize: every docs/assets PNG (--output-dir), the fixture PNG and each
 //   - runtime's own render.png (auto, forced rgba, ancillary strip), plus the
 //   - dry-run report in canonical JSON
+//   - directory optimize: docs/assets recursively (--input-dir), relative paths
+//   - preserved, source files untouched, plus dry-run in canonical JSON
 //   - model: create, apply and export text outputs, and the inspect and
-//   - validate reports in canonical JSON (fixed spec, operations, binding)
+//   - validate reports in canonical JSON (fixed spec, operations, binding),
+//   - plus the model preview PNG bytes (fixed cube render with its texture,
+//   - source model and texture untouched)
 // Any difference exits non-zero so CI fails. stderr, timing, and absolute
 // paths never enter the comparison. Temp dirs are always cleaned up.
+import { PNG } from "pngjs";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -309,6 +319,49 @@ function compareOptimize(bunDir, nodeDir) {
 	const bunDry = runBun(["optimize", PX_PNG_FIXTURE, "--dry-run", "--json"], "optimize-dry-run");
 	const nodeDry = runNode(["optimize", PX_PNG_FIXTURE, "--dry-run", "--json"], "optimize-dry-run");
 	compareCanonicalJson("optimize-dry-run.json", bunDry.stdout, nodeDry.stdout);
+
+	// Directory mode: recursive optimize with --input-dir, preserving relative paths
+	const beforeHashes = new Map();
+	for (const doc of docs) {
+		beforeHashes.set(doc, sha256Hex(readFileSync(doc)));
+	}
+	const dirModeArgs = (dir) => [
+		"optimize",
+		"--input-dir",
+		DOCS_ASSETS,
+		"--recursive",
+		"--output-dir",
+		join(dir, "optimize-dir-docs"),
+		"--mkdir",
+	];
+	runBun(dirModeArgs(bunDir), "optimize-dir-docs");
+	runNode(dirModeArgs(nodeDir), "optimize-dir-docs");
+	const relPaths = docs.map((p) => p.slice(DOCS_ASSETS.length + 1));
+	for (const rel of relPaths) {
+		compareFile(
+			`optimize-dir-docs/${rel}`,
+			join(bunDir, "optimize-dir-docs", rel),
+			join(nodeDir, "optimize-dir-docs", rel),
+		);
+	}
+	const bunDirDry = runBun(
+		["optimize", "--input-dir", DOCS_ASSETS, "--recursive", "--dry-run", "--json"],
+		"optimize-dir-dry-run",
+	);
+	const nodeDirDry = runNode(
+		["optimize", "--input-dir", DOCS_ASSETS, "--recursive", "--dry-run", "--json"],
+		"optimize-dir-dry-run",
+	);
+	compareCanonicalJson(
+		"optimize-dir-dry-run.json",
+		bunDirDry.stdout,
+		nodeDirDry.stdout,
+	);
+	for (const doc of docs) {
+		if (sha256Hex(readFileSync(doc)) !== beforeHashes.get(doc)) {
+			fail(`source file was modified during directory optimization: ${doc}`);
+		}
+	}
 }
 
 const MODEL_SPEC = {
@@ -340,7 +393,7 @@ const MODEL_BINDING = {
 	},
 };
 
-/** model create, apply and export text by bytes; inspect and validate by canonical JSON. */
+/** model create, apply and export text by bytes; inspect and validate by canonical JSON; preview PNG by bytes with sources untouched. */
 function compareModel(bunDir, nodeDir, workdir) {
 	const specPath = join(workdir, "model-spec.json");
 	const operationsPath = join(workdir, "model-operations.json");
@@ -387,6 +440,64 @@ function compareModel(bunDir, nodeDir, workdir) {
 			normalize(bun.stdout, bunDir),
 			normalize(node.stdout, nodeDir),
 		);
+	}
+
+	// Model preview: the fixed cube plus its texture renders to
+	// byte-identical PNGs on both runtimes (explicit names, never readdir
+	// order). The model file and the texture stay untouched.
+	const previewModelText = JSON.stringify({
+		textures: { all: "mypack:block/ruby" },
+		elements: [
+			{
+				from: [0, 0, 0],
+				to: [16, 16, 16],
+				faces: {
+					north: { texture: "#all", uv: [0, 0, 16, 16] },
+					east: { texture: "#all" },
+					up: { texture: "#all" },
+				},
+			},
+		],
+	});
+	const previewRel = join("pack", "assets", "mypack", "models", "block", "preview.json");
+	for (const dir of [bunDir, nodeDir]) {
+		writeFileSync(join(dir, previewRel), previewModelText);
+	}
+	const previewHashBefore = sha256Hex(Buffer.from(previewModelText, "utf8"));
+	const textureHashBefore = sha256Hex(readFileSync(PX_PNG_FIXTURE));
+	for (const [run, dir] of [[runBun, bunDir], [runNode, nodeDir]]) {
+		run(
+			[
+				"model",
+				"preview",
+				join(dir, previewRel),
+				"--pack",
+				join(dir, "pack"),
+				...version,
+				"--size",
+				"64",
+				"--output",
+				join(dir, "model-preview.png"),
+			],
+			"model-preview",
+		);
+	}
+	compareFile(
+		"model-preview.png",
+		join(bunDir, "model-preview.png"),
+		join(nodeDir, "model-preview.png"),
+	);
+	if (
+		sha256Hex(readFileSync(join(bunDir, previewRel))) !== previewHashBefore ||
+		sha256Hex(readFileSync(join(nodeDir, previewRel))) !== previewHashBefore
+	) {
+		fail("model preview changed its source model");
+	}
+	if (
+		sha256Hex(readFileSync(join(bunDir, "pack", "assets", "mypack", "textures", "block", "ruby.png"))) !== textureHashBefore ||
+		sha256Hex(readFileSync(join(nodeDir, "pack", "assets", "mypack", "textures", "block", "ruby.png"))) !== textureHashBefore
+	) {
+		fail("model preview changed its source texture");
 	}
 }
 
@@ -504,6 +615,52 @@ function main() {
 			join(bunDir, "quantize.mcpx"),
 			join(nodeDir, "quantize.mcpx"),
 		);
+		const quantizePaletteArgs = (dir) => [
+			"quantize",
+			MCPX_FIXTURE,
+			"--palette",
+			"iron",
+			"--output",
+			join(dir, "quantize-palette.png"),
+			"--source",
+			join(dir, "quantize-palette.mcpx"),
+		];
+		const quantizeKeepArgs = (dir) => [
+			"quantize",
+			MCPX_FIXTURE,
+			"--colors",
+			"2",
+			"--keep-color",
+			"0,255,0,255",
+			"--output",
+			join(dir, "quantize-keep.png"),
+			"--source",
+			join(dir, "quantize-keep.mcpx"),
+		];
+		runBun(quantizePaletteArgs(bunDir), "quantize-palette");
+		runNode(quantizePaletteArgs(nodeDir), "quantize-palette");
+		runBun(quantizeKeepArgs(bunDir), "quantize-keep");
+		runNode(quantizeKeepArgs(nodeDir), "quantize-keep");
+		compareFile(
+			"quantize-palette.png",
+			join(bunDir, "quantize-palette.png"),
+			join(nodeDir, "quantize-palette.png"),
+		);
+		compareFile(
+			"quantize-palette.mcpx",
+			join(bunDir, "quantize-palette.mcpx"),
+			join(nodeDir, "quantize-palette.mcpx"),
+		);
+		compareFile(
+			"quantize-keep.png",
+			join(bunDir, "quantize-keep.png"),
+			join(nodeDir, "quantize-keep.png"),
+		);
+		compareFile(
+			"quantize-keep.mcpx",
+			join(bunDir, "quantize-keep.mcpx"),
+			join(nodeDir, "quantize-keep.mcpx"),
+		);
 
 		// V0.2 pixelize raster intake: JPEG and lossless WebP each decode
 		// to PNG bytes at the requested size.
@@ -562,6 +719,56 @@ function main() {
 				`variant/${name}`,
 				join(bunDir, "variant", name),
 				join(nodeDir, "variant", name),
+			);
+		}
+
+		// PNG recolor plus PNG variant fan-out: the shared 8x8 fixture maps
+		// by integer luminance bands to iron; the two variant materials each
+		// start from the pristine PNG, so outputs are compared per file and
+		// never depend on directory listing order.
+		const pngRecolorArgs = (dir) => [
+			"recolor",
+			PX_PNG_FIXTURE,
+			"--material",
+			"iron",
+			"--output",
+			join(dir, "recolor-png.png"),
+			"--source",
+			join(dir, "recolor-png.mcpx"),
+		];
+		runBun(pngRecolorArgs(bunDir), "recolor-png");
+		runNode(pngRecolorArgs(nodeDir), "recolor-png");
+		compareFile(
+			"recolor-png.png",
+			join(bunDir, "recolor-png.png"),
+			join(nodeDir, "recolor-png.png"),
+		);
+		compareFile(
+			"recolor-png.mcpx",
+			join(bunDir, "recolor-png.mcpx"),
+			join(nodeDir, "recolor-png.mcpx"),
+		);
+		const pngVariantArgs = (dir) => [
+			"variant",
+			PX_PNG_FIXTURE,
+			"--materials",
+			"iron,copper",
+			"--output-dir",
+			join(dir, "variant-png"),
+			"--mkdir",
+		];
+		runBun(pngVariantArgs(bunDir), "variant-png");
+		runNode(pngVariantArgs(nodeDir), "variant-png");
+		for (const name of [
+			"px-8x8_iron.png",
+			"px-8x8_iron.mcpx",
+			"px-8x8_copper.png",
+			"px-8x8_copper.mcpx",
+		]) {
+			compareFile(
+				`variant-png/${name}`,
+				join(bunDir, "variant-png", name),
+				join(nodeDir, "variant-png", name),
 			);
 		}
 
@@ -706,6 +913,17 @@ function main() {
 			);
 		}
 
+		for (const [mode, input, options] of [
+			["animation", join(bunDir, "v04-sheet.png"), ["--frame-size", "4", "--frametime", "2", "--frames", '[1,{"index":0,"time":3},1]', "--interpolate"]],
+			["gui", PX_PNG_FIXTURE, ["--type", "nine_slice", "--border", "2", "--stretch-inner", "--resource-pack-version", "42"]],
+		]) {
+			const label = `mcmeta-${mode}`;
+			const args = (dir) => ["mcmeta", mode, mode === "animation" ? join(dir, "v04-sheet.png") : input, ...options, "--output", join(dir, `${label}.mcmeta`)];
+			runBun(args(bunDir), label);
+			runNode(args(nodeDir), label);
+			compareFile(`${label}.mcmeta`, join(bunDir, `${label}.mcmeta`), join(nodeDir, `${label}.mcmeta`));
+		}
+
 		// V0.4 validate --mcmeta: read-only report over each runtime's own
 		// sheet; only the stdout JSON envelope enters the comparison, in
 		// canonical form. Each side gets the same mcmeta basename so the
@@ -832,6 +1050,26 @@ function main() {
 			bunPackDefect.stdout,
 			nodePackDefect.stdout,
 		);
+		const beforePath = join(workdir, "compare-before.png");
+		const afterPath = join(workdir, "compare-after.png");
+		const beforeBytes = PNG.sync.write({ width: 3, height: 1, gamma: 0, data: Buffer.from([0,0,0,255, 10,20,30,0, 7,8,9,255]) });
+		const afterBytes = PNG.sync.write({ width: 3, height: 1, gamma: 0, data: Buffer.from([255,0,0,255, 40,20,30,0, 7,8,9,255]) });
+		writeFileSync(beforePath, beforeBytes);
+		writeFileSync(afterPath, afterBytes);
+		const compareArgs = ["compare", beforePath, afterPath, "--json"];
+		const bunReport = runBun(compareArgs, "compare-report");
+		const nodeReport = runNode(compareArgs, "compare-report");
+		compareCanonicalJson("compare-report.json", bunReport.stdout, nodeReport.stdout);
+		const expectedReport = { width: 3, height: 1, totalPixels: 3, rawChangedPixels: 2, visibleChangedPixels: 1, rawBounds: { x: 0, y: 0, width: 2, height: 1 }, visibleBounds: { x: 0, y: 0, width: 1, height: 1 } };
+		if (canonicalize(JSON.parse(String(bunReport.stdout)).result) !== canonicalize(expectedReport)) fail("compare report differs from hand-calculated values");
+		for (const [run, dir] of [[runBun, bunDir], [runNode, nodeDir]]) {
+			run([...compareArgs, "--output", join(dir, "compare-diff.png"), "--scale", "2"], "compare-diff");
+		}
+		const diffBytes = compareFile("compare-diff.png", join(bunDir, "compare-diff.png"), join(nodeDir, "compare-diff.png"));
+		const diff = PNG.sync.read(diffBytes);
+		const row = [255,0,255,255, 255,0,255,255, 0,255,255,255, 0,255,255,255, 0,0,0,0, 0,0,0,0];
+		if (diff.width !== 6 || diff.height !== 2 || !buffersEqual(diff.data, Buffer.from([...row, ...row]))) fail("compare diagnostic pixels differ from hand-calculated nearest markers");
+		if (!buffersEqual(readFileSync(beforePath), beforeBytes) || !buffersEqual(readFileSync(afterPath), afterBytes)) fail("compare changed a source PNG");
 		compareOptimize(bunDir, nodeDir, workdir);
 		compareModel(bunDir, nodeDir, workdir);
 		process.stdout.write("compare-runtime: all outputs identical\n");

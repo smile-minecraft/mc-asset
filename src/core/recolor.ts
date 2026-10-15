@@ -191,3 +191,57 @@ export function recolorLayer(
 	}
 	return { pixelsChanged };
 }
+
+/**
+ * Role-less canvas recolor entry for flat raster sources (e.g. PNG).
+ * Pure integer luminance bands (<96 shadow, 96-159 base, >=160 highlight).
+ * Transparent pixels (A = 0) and their hidden RGB are strictly preserved.
+ * Never invents layer roles or palette entries.
+ */
+export function recolorRolelessCanvas(
+	canvas: PixelCanvas,
+	targetMaterialId: string,
+	options?: RecolorOptions,
+): RecolorReport {
+	assertValidCanvas(canvas);
+	const target = getMaterial(targetMaterialId);
+	const region =
+		options?.regionId !== undefined
+			? getRegion(canvas, options.regionId)
+			: undefined;
+	const shadow = bandColor(target.palette, target.id, "shadow");
+	const base = bandColor(target.palette, target.id, "base");
+	const highlight = bandColor(target.palette, target.id, "highlight");
+	const width = canvas.width;
+	const height = canvas.height;
+	let pixelsChanged = 0;
+	for (const layer of canvas.layers) {
+		for (let y = 0; y < height; y += 1) {
+			for (let x = 0; x < width; x += 1) {
+				const cell = y * width + x;
+				if (region !== undefined && region.mask[cell] !== 1) {
+					continue;
+				}
+				const offset = cell * 4;
+				const r = layer.pixels[offset] as number;
+				const g = layer.pixels[offset + 1] as number;
+				const blue = layer.pixels[offset + 2] as number;
+				const a = layer.pixels[offset + 3] as number;
+				if (a === 0) {
+					continue;
+				}
+				const band = bandForLuminance(luminanceOf({ r, g, b: blue, a }));
+				const out =
+					band === "shadow" ? shadow : band === "base" ? base : highlight;
+				if (out.r !== r || out.g !== g || out.b !== blue || out.a !== a) {
+					layer.pixels[offset] = out.r;
+					layer.pixels[offset + 1] = out.g;
+					layer.pixels[offset + 2] = out.b;
+					layer.pixels[offset + 3] = out.a;
+					pixelsChanged += 1;
+				}
+			}
+		}
+	}
+	return { pixelsChanged };
+}

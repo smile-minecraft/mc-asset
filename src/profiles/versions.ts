@@ -41,6 +41,11 @@ export interface GuiStretchInnerValue {
 	field: "stretch_inner";
 }
 
+export interface GuiScalingValue {
+	section: "gui.scaling";
+	types: ["stretch", "tile", "nine_slice"];
+}
+
 export interface AtlasSeparatorValue {
 	separator: "_";
 }
@@ -154,6 +159,22 @@ export const GUI_STRETCH_INNER_FACT: VersionedFact<GuiStretchInnerValue> = {
 	checkedAt: "2026-09-22",
 };
 
+/**
+ * The `gui.scaling` section (stretch, tile, nine_slice) of a sprite
+ * `.mcmeta`. Kept out of COMPAT_FACTS on purpose: only the mcmeta
+ * generator reads it, so the validators and the fact table stay as they
+ * were.
+ */
+export const GUI_SCALING_FACT: VersionedFact<GuiScalingValue> = {
+	fact: "gui-scaling-section",
+	since: { packFormat: "16.0" },
+	value: { section: "gui.scaling", types: ["stretch", "tile", "nine_slice"] },
+	status: "verified",
+	source:
+		"Minecraft snapshot 23w31a technical changes, GUI Sprite .mcmeta (https://www.minecraft.net/en-us/article/minecraft-snapshot-23w31a); Minecraft Wiki Pack format, resource pack format 16 = 23w31a (https://minecraft.wiki/w/Pack_format). Release 1.20.2 (RP 18.0) is the first listed release with it.",
+	checkedAt: "2026-10-15",
+};
+
 export const ATLAS_SEPARATOR_FACT: VersionedFact<AtlasSeparatorValue> = {
 	fact: "atlas-separator-field",
 	since: { packFormat: "55.0" },
@@ -173,6 +194,20 @@ export const ATLAS_PALETTE_ROOT_FACT: VersionedFact<AtlasPaletteRootValue> = {
 		"§95; Minecraft Wiki Atlas (palette path textures/palettes, 26.3); Minecraft Wiki Template:Resource pack format (26.3-snap1 / RP 97.1)",
 	checkedAt: "2026-09-22",
 };
+
+/**
+ * Pack formats the release table covers (1.19.3 = 12.0 through 26.3 =
+ * 97.1, see src/cli/version-options.ts). Outside it a version cannot be
+ * called checked for a feature the table says nothing about.
+ */
+export const KNOWN_PACK_FORMAT_RANGE = { min: "12.0", max: "97.1" } as const;
+
+export function isPackFormatInKnownRange(packFormat: string): boolean {
+	return (
+		comparePackFormats(packFormat, KNOWN_PACK_FORMAT_RANGE.min) >= 0 &&
+		comparePackFormats(packFormat, KNOWN_PACK_FORMAT_RANGE.max) <= 0
+	);
+}
 
 export const COMPAT_FACTS: VersionedFact<unknown>[] = [
 	TRIM_PALETTE_FACT,

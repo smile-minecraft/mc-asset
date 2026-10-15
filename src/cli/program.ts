@@ -13,11 +13,17 @@ import {
 import { type AnimateOptions, runAnimate } from "./cmd-animate.ts";
 import { type BuildOptions, runBuild } from "./cmd-build.ts";
 import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
+import { type CompareCliOptions, runCompare } from "./cmd-compare.ts";
 import { type GenerateOptions, runGenerate } from "./cmd-generate.ts";
 import { type GuiScaleOptions, runGuiScale } from "./cmd-gui-scale.ts";
 import { type ImportOptions, runImport } from "./cmd-import.ts";
 import { type InspectOptions, runInspect } from "./cmd-inspect.ts";
 import { type MaterialOptions, runMaterial } from "./cmd-material.ts";
+import {
+	type McmetaCliOptions,
+	type McmetaMode,
+	runMcmeta,
+} from "./cmd-mcmeta.ts";
 import { runMcp } from "./cmd-mcp.ts";
 import { type ModelCliOptions, type ModelMode, runModel } from "./cmd-model.ts";
 import { runOptimize } from "./cmd-optimize.ts";
@@ -559,8 +565,23 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 
 	program
 		.command("quantize <input>")
-		.description("Reduce the color count with the integer median-cut.")
-		.option("--colors <n>", "Required color budget, an integer in [1, 4096].")
+		.description(
+			"Reduce the color count with the integer median-cut, or map onto an explicit palette.",
+		)
+		.option(
+			"--colors <n>",
+			"Color budget, an integer in [1, 4096]; give this or --palette.",
+		)
+		.option(
+			"--palette <name|path>",
+			"Explicit palette source (builtin material id or .mcpx path); conflicts with --colors.",
+		)
+		.option(
+			"--keep-color <r,g,b,a>",
+			"Reserved RGBA color kept byte-identical; repeatable.",
+			(value: string, previous: string[]): string[] => [...previous, value],
+			[] as string[],
+		)
 		.option("--output <path>", "Explicit PNG output file path.")
 		.option("--stdout", "Write PNG bytes to stdout.")
 		.option("--source <path>", "Write the editable .mcpx source file.")
@@ -1214,7 +1235,9 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		});
 
 	program
-		.command("optimize <input...>")
+		.command("optimize [input...]")
+		.option("--input-dir <dir>")
+		.option("--recursive")
 		.option("--output <path>")
 		.option("--output-dir <dir>")
 		.option("--stdout")
@@ -1231,6 +1254,93 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 				streams,
 			);
 		});
+	program
+		.command("compare <before> <after>")
+		.description(
+			"Compare two same-size PNGs; optionally render diagnostic differences.",
+		)
+		.option("--output <path>", "Explicit diagnostic .png path.")
+		.option("--stdout", "Write diagnostic PNG to stdout.")
+		.option("--scale <N>", "Nearest scale from 1 to 16.")
+		.option("--force", "Replace an existing output.")
+		.option("--mkdir", "Create missing output parents.")
+		.action(
+			async (
+				before: string,
+				after: string,
+				options: CompareCliOptions,
+				current: Command,
+			) => {
+				process.exitCode = await runCompare(
+					before,
+					after,
+					options,
+					current.optsWithGlobals().json === true,
+					streams,
+				);
+			},
+		);
+	const mcmeta = program
+		.command("mcmeta")
+		.description(
+			"Generate a .mcmeta animation or GUI scaling document from a PNG.",
+		);
+	for (const mode of ["animation", "gui"] as const) {
+		const command = mcmeta
+			.command(`${mode} <png>`)
+			.description(
+				mode === "animation"
+					? "Write an animation section for a sprite sheet."
+					: "Write a gui.scaling section sized from the PNG.",
+			);
+		if (mode === "animation") {
+			command
+				.option("--frame-size <size>", "Frame size: N or WxH.")
+				.option(
+					"--frametime <N>",
+					"Ticks per frame, a positive integer (default 1).",
+				)
+				.option(
+					"--frames <json>",
+					"Playback order: JSON array of indices and/or {index,time} objects.",
+				)
+				.option("--interpolate", "Blend between frames.");
+		} else {
+			command
+				.option("--type <type>", "Scaling type: stretch, tile, or nine_slice.")
+				.option(
+					"--border <N|json>",
+					"nine_slice border: N or {left,top,right,bottom}.",
+				)
+				.option("--stretch-inner", "nine_slice only: stretch the inner bands.");
+		}
+		command
+			.option(
+				"--minecraft-version <v>",
+				"Minecraft version",
+				singleUseOption("--minecraft-version"),
+			)
+			.option(
+				"--resource-pack-version <v>",
+				"Pack version",
+				singleUseOption("--resource-pack-version"),
+			)
+			.option("--output <path>", "Explicit .mcmeta output file path.")
+			.option("--stdout", "Write the document to stdout.")
+			.option("--force", "Replace an existing output file as a whole.")
+			.option("--mkdir", "Create missing parent directories.")
+			.action(
+				async (png: string, options: McmetaCliOptions, current: Command) => {
+					process.exitCode = await runMcmeta(
+						mode as McmetaMode,
+						png,
+						options,
+						current.optsWithGlobals().json === true,
+						streams,
+					);
+				},
+			);
+	}
 	const model = program.command("model");
 	for (const mode of [
 		"inspect",
@@ -1238,6 +1348,7 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		"create",
 		"apply",
 		"export",
+		"preview",
 	] as const) {
 		const command = model.command(mode + (mode === "create" ? "" : " <file>"));
 		command
@@ -1251,9 +1362,14 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 				"Pack version",
 				singleUseOption("--resource-pack-version"),
 			);
-		if (mode === "inspect" || mode === "validate" || mode === "export")
+		if (
+			mode === "inspect" ||
+			mode === "validate" ||
+			mode === "export" ||
+			mode === "preview"
+		)
 			command.option("--pack <dir>");
-		if (mode === "inspect" || mode === "validate")
+		if (mode === "inspect" || mode === "validate" || mode === "preview")
 			command
 				.option("--vanilla <dir>")
 				.option(
@@ -1271,7 +1387,14 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 				.option("--blockstate-output <file>");
 		if (mode === "create" || mode === "apply" || mode === "export")
 			command.option("--output <file>").option("--force").option("--mkdir");
-		if (mode === "create" || mode === "apply") command.option("--stdout");
+		if (mode === "preview")
+			command
+				.option("--size <n>", "Panel edge: 64, 128, or 256 (default 64).")
+				.option("--output <file>")
+				.option("--force")
+				.option("--mkdir");
+		if (mode === "create" || mode === "apply" || mode === "preview")
+			command.option("--stdout");
 		command.action(async (...args: unknown[]) => {
 			const current = args[args.length - 1] as Command;
 			process.exitCode = await runModel(

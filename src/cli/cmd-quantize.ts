@@ -1,7 +1,10 @@
-import { replaceLayerPixels } from "../core/canvas.ts";
+import { McAssetError } from "../core/errors.ts";
+import {
+	normalizeKeepColors,
+	parseKeepColorOption,
+} from "../core/quantize-palette.ts";
 import {
 	assertMcpxPaletteCapacity,
-	quantizePixels,
 	validateColorsOption,
 } from "../core/quantizer.ts";
 import { encodePng } from "../io/png.ts";
@@ -11,11 +14,9 @@ import {
 	emitCommandFailure,
 	emitCommandSuccess,
 	ensureMcpxText,
-	preflightArtifactTargets,
 	resolveArtifactTargets,
 	resolveInputPath,
 	type WarningNote,
-	writeArtifactPayloads,
 } from "./artifacts.ts";
 import {
 	loadEditableCanvas,
@@ -25,9 +26,20 @@ import {
 } from "./canvas-input.ts";
 import { emitArtifact, type OutputStreams, routeStreams } from "./channels.ts";
 import { parseProfile } from "./profiles.ts";
+import {
+	quantizeCanvasScope,
+	resolveLayerQuantizeScope,
+} from "./quantize-canvas.ts";
+import {
+	planQuantizeOutputs,
+	writeQuantizeOutputs,
+} from "./quantize-output.ts";
+import { resolveQuantizePalette } from "./quantize-palette-source.ts";
 
 export interface QuantizeOptions {
 	colors?: string | undefined;
+	palette?: string | undefined;
+	keepColor?: string[] | undefined;
 	output?: string | undefined;
 	stdout?: boolean | undefined;
 	source?: string | undefined;
@@ -40,10 +52,14 @@ export interface QuantizeOptions {
 }
 
 /**
- * Color-budget entry: --colors is required (missing is INVALID_ARGUMENT,
- * not OUTPUT_REQUIRED) and must be an integer in [1, 4096]. Each layer is
- * quantized to at most that many colors with the frozen integer
- * median-cut; --selection restores unselected pixels verbatim afterwards.
+ * Color-budget or palette entry: exactly one of --colors/--palette is
+ * required (both is ARGUMENT_CONFLICT, neither is INVALID_ARGUMENT).
+ * --colors must be an integer in [1, 4096]; --palette takes a builtin
+ * material id or an .mcpx path with at most 4096 colors. --keep-color
+ * entries stay byte-identical. With --keep-color or --palette, --selection
+ * scopes the budget and the mapping to the selected pixels of each layer.
+ * Without them, each whole layer is quantized and unselected pixels are
+ * restored verbatim afterwards.
  */
 export async function runQuantize(
 	input: string | undefined,
@@ -58,10 +74,36 @@ export async function runQuantize(
 	try {
 		const profile = parseProfile(options.profile);
 		const inputPath = resolveInputPath(input, options.input, "quantize");
-		const colors =
-			options.colors === undefined || options.colors === ""
-				? validateColorsOption(undefined)
-				: validateColorsOption(Number(options.colors));
+		const hasColors = options.colors !== undefined && options.colors !== "";
+		const palettePath =
+			options.palette === undefined || options.palette === ""
+				? undefined
+				: options.palette;
+		if (hasColors && palettePath !== undefined) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				"--colors and --palette cannot be combined; pass one.",
+				{},
+			);
+		}
+		if (!hasColors && palettePath === undefined) {
+			validateColorsOption(undefined);
+		}
+		const keepColors = normalizeKeepColors(
+			(options.keepColor ?? []).map((entry) => parseKeepColorOption(entry)),
+		);
+		const colors = hasColors
+			? validateColorsOption(Number(options.colors))
+			: undefined;
+		const resolvedPalette =
+			palettePath === undefined
+				? undefined
+				: await resolveQuantizePalette(palettePath);
+		const scope = resolveLayerQuantizeScope({
+			colors,
+			palette: resolvedPalette?.colors,
+			keepColors,
+		});
 		const inPlaceKind =
 			options.inPlace === true && inputPath.toLowerCase().endsWith(".mcpx")
 				? "build"
@@ -83,14 +125,7 @@ export async function runQuantize(
 		const warnings: WarningNote[] = loaded.warnings;
 		const selection = resolveCommandSelection(canvas, options.selection, false);
 		const before = snapshotLayerBytes(canvas);
-		let colorCount = 0;
-		for (const layer of canvas.layers) {
-			const result = quantizePixels(layer.pixels, colors);
-			replaceLayerPixels(canvas, layer.id, result.pixels);
-			if (result.colorCount > colorCount) {
-				colorCount = result.colorCount;
-			}
-		}
+		const colorCount = quantizeCanvasScope(canvas, selection, scope);
 		const modifiedPixels = restoreUnselectedPixels(canvas, before, selection);
 		if (targets.mcpxFiles.length > 0) {
 			assertMcpxPaletteCapacity(collectCanvasColors(canvas).length);
@@ -107,23 +142,20 @@ export async function runQuantize(
 		}
 		// File-target preflight runs before any stdout artifact byte, so a
 		// conflict keeps stdout empty.
-		await preflightArtifactTargets(targets, {
+		const outputPlan = await planQuantizeOutputs(targets, {
 			inputPath,
+			palette: palettePath,
 			inPlace: options.inPlace,
 			mkdir: options.mkdir,
 		});
 		if (pngBytes !== undefined && targets.pngStdout) {
 			emitArtifact(pngBytes, streams, route);
 		}
-		await writeArtifactPayloads(
-			[
-				...(targets.pngFiles.length > 0 && pngBytes !== undefined
-					? [{ targets: targets.pngFiles, data: pngBytes }]
-					: []),
-				...(targets.mcpxFiles.length > 0 && mcpxText !== undefined
-					? [{ targets: targets.mcpxFiles, data: mcpxText }]
-					: []),
-			],
+		await writeQuantizeOutputs(
+			outputPlan,
+			targets,
+			pngBytes,
+			mcpxText,
 			options.mkdir,
 		);
 		emitCommandSuccess(streams, route, globalJson, {
@@ -133,7 +165,13 @@ export async function runQuantize(
 			operations: [],
 			warnings,
 			details: {
-				colors,
+				...(scope.kind === "colors" ? { colors: scope.colors } : {}),
+				...(resolvedPalette === undefined
+					? {}
+					: { palette: resolvedPalette.label }),
+				...(scope.keepColors.length > 0
+					? { keepColors: scope.keepColors.map((color) => ({ ...color })) }
+					: {}),
 				colorCount,
 				modifiedPixels,
 				...(selection.kind !== "all" ? { selection: options.selection } : {}),

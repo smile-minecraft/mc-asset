@@ -22,10 +22,12 @@ export const modelOptimizeCases = [
 	{
 		name: "additive tool names",
 		async run() {
-			assert.equal(MCP_TOOL_NAMES.length, 23);
-			assert.deepEqual(MCP_TOOL_NAMES.slice(-2), [
+			assert.equal(MCP_TOOL_NAMES.length, 25);
+			assert.deepEqual(MCP_TOOL_NAMES.slice(-4), [
 				"optimize_asset",
 				"model_asset",
+				"mcmeta_asset",
+				"compare_assets",
 			]);
 		},
 	},

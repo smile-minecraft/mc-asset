@@ -1,7 +1,8 @@
 import { basename, join as joinPath } from "node:path";
 import { McAssetError } from "../core/errors.ts";
 import { isBuiltinMaterialId } from "../core/material.ts";
-import { recolorLayer } from "../core/recolor.ts";
+import { recolorLayer, recolorRolelessCanvas } from "../core/recolor.ts";
+import type { PixelCanvas } from "../core/types.ts";
 import { encodePng } from "../io/png.ts";
 import { parseMcpx } from "../mcpx/index.ts";
 import {
@@ -12,6 +13,7 @@ import {
 	type WarningNote,
 	writeArtifactPayloads,
 } from "./artifacts.ts";
+import { cloneCanvas, loadEditableCanvas } from "./canvas-input.ts";
 import {
 	emitEnvelope,
 	emitLog,
@@ -111,22 +113,29 @@ export async function runVariant(
 			);
 		}
 		const outputDir = options.outputDir;
-		if (!inputPath.toLowerCase().endsWith(".mcpx")) {
+		const isMcpx = inputPath.toLowerCase().endsWith(".mcpx");
+		const isPng = inputPath.toLowerCase().endsWith(".png");
+		if (!isMcpx && !isPng) {
 			throw new McAssetError(
 				"INVALID_ARGUMENT",
-				"variant reads an editable .mcpx source.",
+				"variant reads an editable .mcpx or .png source.",
 				{ input: inputPath },
 			);
 		}
-		const stem = basename(inputPath).replace(/\.mcpx$/i, "");
+		const stem = basename(inputPath).replace(/\.(mcpx|png)$/i, "");
 		if (stem === "") {
 			throw new McAssetError(
 				"INVALID_ARGUMENT",
-				"variant needs a named .mcpx source.",
+				"variant needs a named source.",
 				{ input: inputPath },
 			);
 		}
-		const sourceText = await readInputText(inputPath, "canvas input");
+		const sourceText = isMcpx
+			? await readInputText(inputPath, "canvas input")
+			: undefined;
+		const pristineCanvas = isPng
+			? (await loadEditableCanvas(inputPath)).canvas
+			: undefined;
 		const warnings: WarningNote[] = [];
 		const files: VariantFileEntry[] = [];
 		const payloads: Array<{
@@ -134,10 +143,21 @@ export async function runVariant(
 			data: Uint8Array | string;
 		}> = [];
 		for (const material of materials) {
-			const canvas = parseMcpx(sourceText);
+			let canvas: PixelCanvas;
 			let pixelsChanged = 0;
-			for (const layer of canvas.layers) {
-				pixelsChanged += recolorLayer(canvas, layer.id, material).pixelsChanged;
+			if (isMcpx) {
+				canvas = parseMcpx(sourceText as string);
+				for (const layer of canvas.layers) {
+					pixelsChanged += recolorLayer(
+						canvas,
+						layer.id,
+						material,
+					).pixelsChanged;
+				}
+			} else {
+				canvas = cloneCanvas(pristineCanvas as PixelCanvas);
+				const report = recolorRolelessCanvas(canvas, material);
+				pixelsChanged = report.pixelsChanged;
 			}
 			const pngPath = joinPath(outputDir, `${stem}_${material}.png`);
 			const mcpxPath = joinPath(outputDir, `${stem}_${material}.mcpx`);

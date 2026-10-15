@@ -31,6 +31,11 @@ import {
 	validateModel,
 } from "../model/inspect.ts";
 import { MODEL_LIMITS } from "../model/limits.ts";
+import {
+	type ModelPreviewReport,
+	type ModelPreviewSize,
+	renderModelPreview,
+} from "../model/preview/render.ts";
 import type { ModelSpec } from "../model/types.ts";
 import { type ModelRules, resolveModelRules } from "../model/versions.ts";
 import { normalizePackFormat } from "../profiles/versions.ts";
@@ -55,7 +60,13 @@ import {
 	resolveVersionTarget,
 } from "./version-options.ts";
 
-export type ModelMode = "inspect" | "validate" | "create" | "apply" | "export";
+export type ModelMode =
+	| "inspect"
+	| "validate"
+	| "create"
+	| "apply"
+	| "export"
+	| "preview";
 
 export interface ModelCliOptions {
 	pack?: string | undefined;
@@ -66,6 +77,7 @@ export interface ModelCliOptions {
 	spec?: string | undefined; // path or "-"
 	operations?: string | undefined; // path or "-"
 	binding?: string | undefined; // path or "-"
+	size?: string | undefined;
 	output?: string | undefined;
 	stdout?: boolean | undefined;
 	itemOutput?: string | undefined;
@@ -111,7 +123,8 @@ export interface ModelEditOutput {
 export type ModelResult =
 	| ModelInspectReport
 	| ModelValidateReport
-	| ModelEditOutput;
+	| ModelEditOutput
+	| ModelPreviewReport;
 
 export interface ModelRequest {
 	readonly mode: ModelMode;
@@ -124,6 +137,7 @@ export interface ModelRequest {
 	readonly dependencyPaths?: readonly string[] | undefined;
 	readonly minecraftVersion?: string | undefined;
 	readonly resourcePackVersion?: string | undefined;
+	readonly size?: number | undefined;
 	readonly outputPath?: string | undefined;
 	readonly itemOutputPath?: string | undefined;
 	readonly blockstateOutputPath?: string | undefined;
@@ -155,6 +169,7 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"spec",
 		"operations",
 		"binding",
+		"size",
 		"outputPath",
 		"itemOutputPath",
 		"blockstateOutputPath",
@@ -164,6 +179,7 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"spec",
 		"operations",
 		"binding",
+		"size",
 		"outputPath",
 		"itemOutputPath",
 		"blockstateOutputPath",
@@ -173,6 +189,7 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"inputPath",
 		"operations",
 		"binding",
+		"size",
 		"packPath",
 		"vanillaPath",
 		"dependencyPaths",
@@ -182,13 +199,28 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 	apply: [
 		"spec",
 		"binding",
+		"size",
 		"packPath",
 		"vanillaPath",
 		"dependencyPaths",
 		"itemOutputPath",
 		"blockstateOutputPath",
 	],
-	export: ["spec", "operations", "vanillaPath", "dependencyPaths", "stdout"],
+	export: [
+		"spec",
+		"operations",
+		"size",
+		"vanillaPath",
+		"dependencyPaths",
+		"stdout",
+	],
+	preview: [
+		"spec",
+		"operations",
+		"binding",
+		"itemOutputPath",
+		"blockstateOutputPath",
+	],
 };
 
 const MODEL_LAYOUT = /^assets\/([a-z0-9_.-]+)\/models\/(.+)\.json$/;
@@ -561,6 +593,85 @@ function outputChoice(request: ModelRequest): {
 	return { path: request.outputPath, stdout };
 }
 
+async function runPreview(request: ModelRequest): Promise<ModelOutcome> {
+	const modelPath = requireInput(request);
+	const size = previewSize(request);
+	const packRoot =
+		request.packPath === undefined
+			? undefined
+			: await requireDirectory(request.packPath, "Pack");
+	const vanillaRoot =
+		request.vanillaPath === undefined
+			? undefined
+			: await requireDirectory(request.vanillaPath, "Vanilla");
+	const dependencyRoots: string[] = [];
+	for (const dependency of request.dependencyPaths ?? []) {
+		dependencyRoots.push(await requireDirectory(dependency, "Dependency"));
+	}
+	const target = resolveVersionTarget(versionFlags(request));
+	const packFormat =
+		target.packFormat ??
+		(packRoot === undefined ? undefined : await packFormatFromMcmeta(packRoot));
+	const modelId =
+		packRoot === undefined
+			? undefined
+			: (await modelLocationOf(packRoot, modelPath)).id;
+	const context =
+		packRoot === undefined &&
+		vanillaRoot === undefined &&
+		dependencyRoots.length === 0
+			? undefined
+			: await createFsModelContext({
+					...(packRoot === undefined ? {} : { packRoot }),
+					...(dependencyRoots.length === 0 ? {} : { dependencyRoots }),
+					...(vanillaRoot === undefined ? {} : { vanillaRoot }),
+				});
+	// Path phase: every output is checked before anything is computed.
+	const output = outputChoice(request);
+	const planned = await planTargets(
+		request,
+		modelPreviewTargets(output.path, request.force === true),
+	);
+	const text = await readModelText(modelPath);
+	const rendered = await renderModelPreview(text, {
+		path: displayPath(modelPath, packRoot),
+		...(modelId === undefined ? {} : { modelId }),
+		...(packFormat === undefined ? {} : { packFormat }),
+		...(target.minecraftVersion === undefined
+			? {}
+			: { minecraftVersion: target.minecraftVersion }),
+		...(context === undefined ? {} : { context }),
+		size,
+	});
+	// The PNG and the report are computed before anything is written.
+	const payloads = new Map<string, Uint8Array>();
+	if (output.path !== undefined) payloads.set(output.path, rendered.png);
+	const written = await writePlannedTargets(planned, payloads, {
+		mkdir: request.mkdir === true,
+	});
+	return {
+		result: {
+			...rendered.report,
+			...(output.path !== undefined && written.includes(output.path)
+				? { output: output.path }
+				: {}),
+		},
+		failed: false,
+		artifact: output.stdout ? rendered.png : undefined,
+	};
+}
+
+/** The CLI accepts only 64, 128, or 256; the MCP schema enforces the same. */
+function previewSize(request: ModelRequest): ModelPreviewSize {
+	const value = request.size ?? 64;
+	if (value === 64 || value === 128 || value === 256) return value;
+	throw new McAssetError(
+		"INVALID_ARGUMENT",
+		`preview size must be one of 64, 128, or 256: ${String(value)}.`,
+		{ field: "size", size: value },
+	);
+}
+
 function modelTargets(
 	path: string | undefined,
 	force: boolean,
@@ -568,6 +679,15 @@ function modelTargets(
 	return path === undefined
 		? []
 		: [{ path, extension: ".json", allowOverwrite: force }];
+}
+
+function modelPreviewTargets(
+	path: string | undefined,
+	force: boolean,
+): OutputTarget[] {
+	return path === undefined
+		? []
+		: [{ path, extension: ".png", allowOverwrite: force }];
 }
 
 /** Path phase: every output is checked before any document is computed. */
@@ -981,6 +1101,8 @@ export async function runModelRequest(
 			return runApply(request);
 		case "export":
 			return runExport(request);
+		case "preview":
+			return runPreview(request);
 	}
 }
 
@@ -990,8 +1112,17 @@ function coverageLine(coverage: ModelCoverage): string {
 }
 
 function reportLines(
-	report: ModelInspectReport | ModelValidateReport,
+	report: ModelInspectReport | ModelValidateReport | ModelPreviewReport,
 ): string[] {
+	if (report.mode === "preview") {
+		return [
+			`command: ${report.command}`,
+			`mode: ${report.mode}`,
+			`path: ${report.path}`,
+			`size: ${String(report.size)}`,
+			coverageLine(report.coverage),
+		];
+	}
 	const lines = [
 		`command: ${report.command}`,
 		`mode: ${report.mode}`,
@@ -1068,6 +1199,7 @@ export async function runModel(
 			outputPath: options.output,
 			itemOutputPath: options.itemOutput,
 			blockstateOutputPath: options.blockstateOutput,
+			size: options.size === undefined ? undefined : Number(options.size),
 			stdout: options.stdout,
 			force: options.force,
 			mkdir: options.mkdir,
@@ -1096,6 +1228,8 @@ export async function runModel(
 		}
 		if (json) {
 			emitEnvelope(successEnvelope(outcome.result), streams, route);
+		} else if ("mode" in outcome.result && outcome.result.mode === "preview") {
+			emitLog(reportLines(outcome.result).join("\n"), streams, route);
 		} else if ("verdict" in outcome.result) {
 			emitLog(reportLines(outcome.result).join("\n"), streams, route);
 		} else {

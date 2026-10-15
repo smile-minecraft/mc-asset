@@ -8,11 +8,13 @@ import {
 	handleApplyAssetOperations,
 	handleBuildAsset,
 	handleCleanupAsset,
+	handleCompareAssets,
 	handleCreateVariants,
 	handleGenerateAsset,
 	handleImportAsset,
 	handleInspectAsset,
 	handleMaterialAsset,
+	handleMcmetaAsset,
 	handleModelAsset,
 	handleOptimizeAsset,
 	handlePaletteAsset,
@@ -231,6 +233,22 @@ export function createMcpServer(): McpServer {
 			inputSchema: TOOL_INPUT_SCHEMAS.model_asset,
 		},
 		handleModelAsset,
+	);
+	server.registerTool(
+		"mcmeta_asset",
+		{
+			description: toolDescription("mcmeta_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.mcmeta_asset,
+		},
+		handleMcmetaAsset,
+	);
+	server.registerTool(
+		"compare_assets",
+		{
+			description: toolDescription("compare_assets"),
+			inputSchema: TOOL_INPUT_SCHEMAS.compare_assets,
+		},
+		handleCompareAssets,
 	);
 	return server;
 }

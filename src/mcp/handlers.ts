@@ -21,16 +21,32 @@ import {
 } from "../cli/artifacts.ts";
 import { buildAsciiDoc, toHex } from "../cli/ascii-doc.ts";
 import {
+	cloneCanvas,
 	loadEditableCanvas,
 	loadRasterCanvas,
 	resolveCommandSelection,
 	restoreUnselectedPixels,
 	snapshotLayerBytes,
 } from "../cli/canvas-input.ts";
+import { prepareCompare, writeCompare } from "../cli/compare-request.ts";
 import { atomicWriteFile } from "../cli/filesystem.ts";
 import { parseGridFile } from "../cli/grid.ts";
+import {
+	planMcmetaOutput,
+	prepareMcmeta,
+	writeMcmetaOutput,
+} from "../cli/mcmeta-request.ts";
 import { parseOperationsJson } from "../cli/operations-json.ts";
 import { parseProfile } from "../cli/profiles.ts";
+import {
+	quantizeCanvasScope,
+	resolveLayerQuantizeScope,
+} from "../cli/quantize-canvas.ts";
+import {
+	planQuantizeOutputs,
+	writeQuantizeOutputs,
+} from "../cli/quantize-output.ts";
+import { resolveQuantizePalette } from "../cli/quantize-palette-source.ts";
 import type { ValidateMcmetaSection } from "../cli/validate.ts";
 import {
 	formatVersionTarget,
@@ -92,12 +108,12 @@ import {
 	parseGeneratePattern,
 	parseGenerateSeed,
 } from "../core/procedural.ts";
+import { normalizeKeepColors } from "../core/quantize-palette.ts";
 import {
 	assertMcpxPaletteCapacity,
-	quantizePixels,
 	validateColorsOption,
 } from "../core/quantizer.ts";
-import { recolorLayer } from "../core/recolor.ts";
+import { recolorLayer, recolorRolelessCanvas } from "../core/recolor.ts";
 import {
 	applyTileCorrections,
 	buildTilePreview,
@@ -130,7 +146,11 @@ import { GUI_STRETCH_INNER_FACT, isFactActive } from "../profiles/versions.ts";
 import type { ValidateFinding, ValidateReport } from "../validate/checks.ts";
 import { validateCanvas } from "../validate/checks.ts";
 import { scanPack } from "../validate/pack.ts";
-import type { TOOL_INPUT_SCHEMAS } from "./schema.ts";
+import type {
+	CompareAssetsInput,
+	McmetaAssetInput,
+	TOOL_INPUT_SCHEMAS,
+} from "./schema.ts";
 
 /**
  * MCP tool handlers: thin composition over the existing Core and CLI
@@ -310,6 +330,17 @@ function requireMcpxSource(command: string, sourcePath: string): void {
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
 			`${command} reads an editable .mcpx source.`,
+			{ input: sourcePath },
+		);
+	}
+}
+
+function requireEditableOrPngSource(command: string, sourcePath: string): void {
+	const lower = sourcePath.toLowerCase();
+	if (!lower.endsWith(".mcpx") && !lower.endsWith(".png")) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			`${command} reads an editable .mcpx or .png source.`,
 			{ input: sourcePath },
 		);
 	}
@@ -662,7 +693,7 @@ export async function handleRecolorAsset(
 		}
 		const regionId =
 			args.region === undefined || args.region === "" ? undefined : args.region;
-		requireMcpxSource("recolor_asset", args.sourcePath);
+		requireEditableOrPngSource("recolor_asset", args.sourcePath);
 		if (args.outputPngPath !== undefined) {
 			assertMinecraftOutputPath(profile, args.outputPngPath);
 		}
@@ -670,10 +701,17 @@ export async function handleRecolorAsset(
 		const canvas = loaded.canvas;
 		const warnings: WarningNote[] = [...loaded.warnings];
 		let pixelsChanged = 0;
-		for (const layer of canvas.layers) {
-			pixelsChanged += recolorLayer(canvas, layer.id, args.material, {
+		if (args.sourcePath.toLowerCase().endsWith(".mcpx")) {
+			for (const layer of canvas.layers) {
+				pixelsChanged += recolorLayer(canvas, layer.id, args.material, {
+					...(regionId !== undefined ? { regionId } : {}),
+				}).pixelsChanged;
+			}
+		} else {
+			const report = recolorRolelessCanvas(canvas, args.material, {
 				...(regionId !== undefined ? { regionId } : {}),
-			}).pixelsChanged;
+			});
+			pixelsChanged = report.pixelsChanged;
 		}
 		assertMcpxPaletteCapacity(collectCanvasColors(canvas).length);
 		const pngBytes = encodePng(canvas);
@@ -735,17 +773,23 @@ export async function handleCreateVariants(
 			}
 			seen.add(id);
 		}
-		requireMcpxSource("create_variants", args.sourcePath);
+		requireEditableOrPngSource("create_variants", args.sourcePath);
 		await assertOutputDirectory(args.outputDir);
-		const stem = basename(args.sourcePath).replace(/\.mcpx$/i, "");
+		const isMcpx = args.sourcePath.toLowerCase().endsWith(".mcpx");
+		const stem = basename(args.sourcePath).replace(/\.(mcpx|png)$/i, "");
 		if (stem === "") {
 			throw new McAssetError(
 				"INVALID_ARGUMENT",
-				"create_variants needs a named .mcpx source.",
+				"create_variants needs a named source.",
 				{ input: args.sourcePath },
 			);
 		}
-		const sourceText = await readInputText(args.sourcePath, "canvas input");
+		const sourceText = isMcpx
+			? await readInputText(args.sourcePath, "canvas input")
+			: undefined;
+		const pristineCanvas = !isMcpx
+			? (await loadEditableCanvas(args.sourcePath)).canvas
+			: undefined;
 		const warnings: WarningNote[] = [];
 		const files: Array<{
 			material: string;
@@ -754,10 +798,21 @@ export async function handleCreateVariants(
 			pixelsChanged: number;
 		}> = [];
 		for (const material of args.materials) {
-			const canvas = parseMcpx(sourceText);
+			let canvas: PixelCanvas;
 			let pixelsChanged = 0;
-			for (const layer of canvas.layers) {
-				pixelsChanged += recolorLayer(canvas, layer.id, material).pixelsChanged;
+			if (isMcpx) {
+				canvas = parseMcpx(sourceText as string);
+				for (const layer of canvas.layers) {
+					pixelsChanged += recolorLayer(
+						canvas,
+						layer.id,
+						material,
+					).pixelsChanged;
+				}
+			} else {
+				canvas = cloneCanvas(pristineCanvas as PixelCanvas);
+				const report = recolorRolelessCanvas(canvas, material);
+				pixelsChanged = report.pixelsChanged;
 			}
 			const pngPath = joinPath(args.outputDir, `${stem}_${material}.png`);
 			const mcpxPath = joinPath(args.outputDir, `${stem}_${material}.mcpx`);
@@ -1293,10 +1348,12 @@ export async function handleTransformAsset(
 }
 
 /**
- * Color-budget entry over a raster or `.mcpx` input: each layer is
- * quantized to at most `colors` with the frozen integer median-cut, and
- * the selection restores unselected pixels verbatim. Mirrors the
- * cmd-quantize.ts middle.
+ * Color-budget or explicit-palette entry over a raster or `.mcpx` input.
+ * Mirrors the cmd-quantize.ts middle through the shared quantize-canvas
+ * wiring: exactly one of colors or palette is required, reserved colors
+ * stay byte-identical, and the selection restores unselected pixels
+ * verbatim. Every source, budget, and output check runs before any file
+ * is written.
  */
 export async function handleQuantizeAsset(
 	args: QuantizeAssetInput,
@@ -1306,40 +1363,68 @@ export async function handleQuantizeAsset(
 		if (args.outputPngPath !== undefined) {
 			assertMinecraftOutputPath(profile, args.outputPngPath);
 		}
-		const colors = validateColorsOption(args.colors);
+		const palettePath = args.palette === "" ? undefined : args.palette;
+		if (args.colors !== undefined && palettePath !== undefined) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				"colors and palette cannot be combined; pass one.",
+				{},
+			);
+		}
+		const keepColors = normalizeKeepColors(args.keepColors ?? []);
+		const colors =
+			args.colors === undefined ? undefined : validateColorsOption(args.colors);
+		const resolvedPalette =
+			palettePath === undefined
+				? undefined
+				: await resolveQuantizePalette(palettePath);
+		const scope = resolveLayerQuantizeScope({
+			colors,
+			palette: resolvedPalette?.colors,
+			keepColors,
+		});
 		const loaded = await loadEditableCanvas(args.inputPath);
 		const canvas = loaded.canvas;
 		const warnings: WarningNote[] = [...loaded.warnings];
 		const selection = resolveCommandSelection(canvas, args.selection, false);
 		const before = snapshotLayerBytes(canvas);
-		let colorCount = 0;
-		for (const layer of canvas.layers) {
-			const result = quantizePixels(layer.pixels, colors);
-			replaceLayerPixels(canvas, layer.id, result.pixels);
-			if (result.colorCount > colorCount) {
-				colorCount = result.colorCount;
-			}
-		}
+		const colorCount = quantizeCanvasScope(canvas, selection, scope);
 		const modifiedPixels = restoreUnselectedPixels(canvas, before, selection);
 		assertMcpxPaletteCapacity(collectCanvasColors(canvas).length);
 		const pngBytes = encodePng(canvas);
 		const mcpxText = ensureMcpxText(canvas, (warning) => {
 			warnings.push({ code: warning.code, message: warning.message });
 		});
-		if (args.outputPngPath !== undefined) {
-			await writeMcpArtifact(args.outputPngPath, pngBytes);
-		}
-		if (args.outputMcpxPath !== undefined) {
-			await writeMcpArtifact(args.outputMcpxPath, mcpxText);
-		}
+		const targets = {
+			pngStdout: false,
+			pngFiles:
+				args.outputPngPath === undefined
+					? []
+					: [{ path: args.outputPngPath, force: false }],
+			mcpxFiles:
+				args.outputMcpxPath === undefined
+					? []
+					: [{ path: args.outputMcpxPath, force: false }],
+		};
+		const outputPlan = await planQuantizeOutputs(targets, {
+			inputPath: args.inputPath,
+			palette: palettePath,
+		});
+		await writeQuantizeOutputs(outputPlan, targets, pngBytes, mcpxText, false);
 		return textResult({
 			profile,
 			applied: 0,
 			operations: [],
 			warnings,
-			colors,
+			...(scope.kind === "colors" ? { colors: scope.colors } : {}),
+			...(resolvedPalette === undefined
+				? {}
+				: { palette: resolvedPalette.label }),
 			colorCount,
 			modifiedPixels,
+			...(scope.keepColors.length > 0
+				? { keepColors: scope.keepColors.map((color) => ({ ...color })) }
+				: {}),
 			...(selection.kind !== "all" ? { selection: args.selection } : {}),
 			...(args.outputPngPath !== undefined
 				? { output: args.outputPngPath }
@@ -2522,7 +2607,85 @@ export async function handleScaleGuiAsset(
 	}
 }
 
+/**
+ * mcmeta_asset: generate one animation or gui.scaling document from a PNG.
+ * Writes only to the explicit outputPath through the shared write guard
+ * (whole-file replace with force, never a merge); without outputPath the
+ * text is returned and nothing touches disk.
+ */
+export async function handleMcmetaAsset(
+	args: McmetaAssetInput,
+): Promise<McpTextResult> {
+	try {
+		const prepared = await prepareMcmeta({
+			mode: args.mode,
+			inputPath: args.inputPath,
+			frameSize: args.frameSize,
+			frametime: args.frametime,
+			frames: args.frames,
+			interpolate: args.interpolate,
+			type: args.type,
+			border: args.border,
+			stretchInner: args.stretchInner,
+			minecraftVersion: args.minecraftVersion,
+			resourcePackVersion: args.resourcePackVersion,
+		});
+		if (args.outputPath === undefined && (args.force || args.mkdir)) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				"force and mkdir need an outputPath.",
+			);
+		}
+		if (args.outputPath !== undefined) {
+			const plan = await planMcmetaOutput({
+				output: args.outputPath,
+				inputPath: args.inputPath,
+				force: args.force === true,
+				mkdir: args.mkdir === true,
+			});
+			await writeMcmetaOutput(plan, prepared.text, args.mkdir === true);
+		}
+		return textResult({
+			mode: args.mode,
+			width: prepared.sheetWidth,
+			height: prepared.sheetHeight,
+			versionChecked: prepared.versionChecked,
+			version: prepared.version,
+			target: prepared.target,
+			warnings: prepared.warnings,
+			...(args.outputPath !== undefined
+				? { output: args.outputPath }
+				: { mcmetaText: prepared.text }),
+		});
+	} catch (error) {
+		return errorResult(error);
+	}
+}
+
 export {
 	handleModelAsset,
 	handleOptimizeAsset,
 } from "./handlers-model-optimize.ts";
+
+export async function handleCompareAssets(args: CompareAssetsInput) {
+	try {
+		const prepared = await prepareCompare(args);
+		await writeCompare(args, prepared);
+		const result = textResult({ ...prepared.report });
+		if (prepared.png !== undefined && args.outputPath === undefined) {
+			return {
+				content: [
+					...result.content,
+					{
+						type: "image" as const,
+						mimeType: "image/png" as const,
+						data: Buffer.from(prepared.png).toString("base64"),
+					},
+				],
+			};
+		}
+		return result;
+	} catch (error) {
+		return errorResult(error);
+	}
+}

@@ -119,7 +119,7 @@ bun run build
 ## For AI agents
 
 - [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt) — a compact index of the repository for agents.
-- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt) — the same material as a single file: install, the twenty-three MCP tools, batch operations, the error model, and the limits.
+- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt) — the same material as a single file: install, the twenty-five MCP tools, batch operations, the error model, and the limits.
 - [`docs/cli-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.md) — the frozen CLI commands, the batch operations specification, and the exit-code registry.
 - [`docs/mcpx-format.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.md) — the editable multi-layer `.mcpx` and `.grid` grammar and specification.
 - [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md) — registration, one verbatim capture per MCP tool, and the error model.
@@ -221,12 +221,13 @@ mc-asset validate /tmp/mc-asset-demo/gem.png --profile minecraft:item
 
 ### Recipe 9: Lossless PNG Optimization & Java Models (`optimize` & `model`)
 
-`optimize` re-encodes PNGs into the smallest encoding that holds the same pixels exactly, or keeps the source when nothing is smaller. It never rewrites its inputs; pick `--output`, `--output-dir`, `--stdout`, or `--dry-run`.
+`optimize` re-encodes PNGs into the smallest encoding that holds the same pixels exactly, or keeps the source when nothing is smaller. It takes explicit PNG paths (up to 256 files) or a whole directory (`--input-dir`, up to 4096 PNGs, optional `--recursive`, preserving relative paths). It never rewrites its inputs; pick `--output`, `--output-dir`, `--stdout`, or `--dry-run`.
 
 ```sh
 mc-asset optimize ./gem.png --dry-run
 # ok optimize input=./gem.png output=- status=optimized source=184 result=102 mode=rgba
 mc-asset optimize ./gem.png ./sword.png --output-dir ./optimized --mkdir
+mc-asset optimize --input-dir ./textures --recursive --output-dir ./optimized --mkdir
 ```
 
 `model` works on Java block/item model JSON (cuboid `elements` only). Create a model, edit it with typed operations, and validate it against a pack:
@@ -240,6 +241,15 @@ mc-asset validate-pack ./pack --resource-pack-version 75
 ```
 
 `model apply` takes `--operations` and applies all of them or none; `model export` places the model and, with `--binding`, writes an item definition and a blockstate next to it. The checks cover structure and reference validity. No Minecraft client renders the result, so appearance and in-game behavior are not verified.
+
+`model preview` renders a fixed diagnostic image from cuboid `elements`: three square panels side by side (`front` = north face, `right` = east face, `top` = up face with north at the top), each `--size` pixels (64, 128, or 256; default 64):
+
+```sh
+mc-asset model preview ./pack/assets/mypack/models/block/ruby.json \
+  --pack ./pack --size 64 --output ./ruby-preview.png --resource-pack-version 75
+```
+
+Exactly one of `--output` or `--stdout` is required. The report carries panel names and coordinates, the input range, `coverage`, and `warnings`. A missing texture renders as a fixed checkerboard with a warning; element rotation, non-1/256 coordinates, translucent faces, and unresolvable textures are listed as `partial` coverage. `display` transforms and game lighting are not applied: this is a diagnostic view, not a game renderer.
 
 ---
 
@@ -299,7 +309,10 @@ These fix classes can change alpha, and with it the render pass the texture need
 
 ### Recipe 4: Material Variants (`variant` & `recolor`)
 
-Fan one source out into several material tiers, or recolor it to a single material:
+Fan one source out into several material tiers, or recolor it to a single
+material. The source can be an editable `.mcpx` or a flat PNG (a PNG
+carries no palette roles, so its pixels map by integer luminance bands
+with no invented layer roles):
 
 ```sh
 mc-asset variant sword.mcpx \
@@ -400,7 +413,7 @@ All three are shown ×4. With the mcmeta the cut corners and the 2px bevels copy
 
 ## MCP Server
 
-`mc-asset mcp` starts a stdio MCP server on the same core as the CLI, so a tool call and the matching command return the same result. It exposes 23 tools.
+`mc-asset mcp` starts a stdio MCP server on the same core as the CLI, so a tool call and the matching command return the same result. It exposes 25 tools.
 
 ### Exposed MCP Tools
 
@@ -417,18 +430,20 @@ All three are shown ×4. With the mcmeta the cut corners and the 2px bevels copy
 | `build_asset` | Builds `.mcpx` sources into PNG bytes or re-serialized source with an optional batch. |
 | `transform_asset` | Applies one geometry operation (flip, rotate, crop, pad, resize, translate) to a raster or `.mcpx` input. |
 | `scale_gui_asset` | Scales a GUI sprite with the mcmeta stretch/tile/nine_slice mapping; PNG only. |
-| `quantize_asset` | Reduces distinct colors to a target count. |
+| `quantize_asset` | Reduces distinct colors to a target count or an explicit palette, keeping chosen RGBA colors. |
 | `cleanup_asset` | Detects or fixes pixel defects (`isolated`, `noise`, `cluster`, `fringe`, `outlier`, `hole`, `aa`). |
 | `palette_asset` | Read-only palette `extract` / `inspect` reports (unique colors, distribution, roles, contrast). |
 | `material_asset` | Read-only `list` / `show` reports over the built-in material set. |
 | `tile_asset` | Seam, edge-repetition, and brightness analysis with an optional tiled preview PNG. |
 | `generate_asset` | Deterministic procedural texture generation (pattern, size, palette, seed). |
 | `preview_asset` | `ascii` / `palette-map` reports, `scale` and `nine-slice` guide PNGs. |
+| `mcmeta_asset` | Generate animation or GUI scaling metadata from PNG. |
 | `animate_asset` | Animation `pack` / `unpack` / `reorder` / `resize` / `validate` / `preview` over frame sets. |
 | `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, version targeting. |
 | `inspect_asset` | Read-only `structure` (layers, regions, color usage, overlaps) or `view` (composited PNG image block plus metadata); takes `inputPath`. |
-| `optimize_asset` | Lossless PNG re-encoding into the smallest exact encoding (or the source kept); per-file report, `dryRun`, explicit `outputPath` / `outputDir`. |
-| `model_asset` | Java block/item model JSON: `inspect`, `validate`, `create`, `apply`, `export` (with item definition and blockstate bindings). Reports structure and references, not rendered appearance. |
+| `optimize_asset` | Lossless PNG re-encoding into the smallest exact encoding (or the source kept); per-file report, `dryRun`, explicit `outputPath` / `outputDir`, or whole-directory scan (`inputDir`, `recursive`, 4096 PNG limit). |
+| `model_asset` | Java block/item model JSON: `inspect`, `validate`, `create`, `apply`, `export` (with item definition and blockstate bindings), and `preview` (fixed diagnostic three-view PNG via `size` / `outputPngPath`). Reports structure and references, not rendered appearance. |
+| `compare_assets` | Compares same-size PNGs; reports raw RGBA and visible differences, bounds, and optional diagnostic diff image. |
 
 `inspect_asset` has two modes: `structure` reports layers, regions, color usage, and overlaps; `view` returns the composited canvas as a PNG image block, with optional `crop` and `scale` (1–16). A view wider than 1024px is refused with a crop hint instead of being downscaled. `apply_asset_operations` takes an optional `feedback` object ([Recipe 7](#recipe-7-batch-edits-with-visual-feedback-build--apply_asset_operations)); without it the result is unchanged. [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md) has one captured call per tool.
 
@@ -498,7 +513,7 @@ Add to `opencode.json` or `opencode.jsonc`:
 | | `render <grid>` | Compiles ASCII grid (`.grid`) to PNG and/or `.mcpx`. |
 | | `build [source]` | Builds `.mcpx` source file or stdin (`--stdin`) to PNG. |
 | **Transform & Geometry** | `transform <input>` | Spatial operations: `--flip`, `--rotate`, `--crop`, `--pad`, `--resize`, `--translate`. |
-| **Color & Cleanup** | `quantize <input>` | Color reduction to target count (`--colors <N>`). |
+| **Color & Cleanup** | `quantize <input>` | Color reduction to a count (`--colors <N>`) or an explicit palette (`--palette`), with `--keep-color`. |
 | | `cleanup <input>` | Artifact removal (`--fix isolated,noise,outlier`). |
 | | `palette extract` | Extracts palette from image. |
 | | `palette inspect` | Detailed palette analysis and role mapping. |
@@ -516,14 +531,48 @@ Add to `opencode.json` or `opencode.jsonc`:
 | | `animate resize` | Rescales animation frames. |
 | | `animate validate`| Validates frame counts and layout against `.mcmeta`. |
 | | `animate preview` | ASCII or diagnostic preview of animation sequence. |
+| | `mcmeta animation\|gui` | Generates `.mcmeta` animation or GUI scaling document from PNG dimensions (`--output`, `--stdout`). |
 | **Validation** | `analyze <image>` | Read-only metric analysis (colors, alpha, dimensions). |
 | | `inspect <input>` | Read-only structure report or composited view (`--mode structure\|view`, `--crop`, `--scale`). |
 | | `validate <asset>` | Validates single asset texture and optional `.mcmeta`. |
 | | `validate-pack <path>`| Validates entire resource pack root directory. |
-| **Optimization & Models** | `optimize <input...>` | Lossless PNG re-encoding into the smallest exact encoding, or the source bytes kept (`--output`, `--output-dir`, `--stdout`, `--dry-run`, `--mode`, `--ancillary`). |
+| | `compare <before> <after>` | Compares two same-size PNGs; reports raw RGBA and visible differences with optional diagnostic PNG (`--output`, `--stdout`, `--scale`). |
+| **Optimization & Models** | `optimize <input...>` or `--input-dir <dir>` | Lossless PNG re-encoding into the smallest exact encoding, or the source bytes kept (`--output`, `--output-dir`, `--stdout`, `--dry-run`, `--mode`, `--ancillary`, `--recursive`). |
 | | `model inspect\|validate <file>` | Read-only report on a Java block/item model JSON (structure, UV, rotation, display, references). |
 | | `model create\|apply\|export` | Builds, edits, or places a Java model (cuboid `elements`) and its item definition and blockstate. |
+| | `model preview <file>` | Fixed diagnostic three-view PNG (`front`, `right`, `top` panels, `--size 64\|128\|256`, `--output` or `--stdout`); partial coverage for unsupported content, never a game render. |
 | **Agent Interface** | `mcp` | Starts the stdio MCP server. |
+
+### Generate animation and GUI metadata (`mcmeta`)
+
+Generate an animation or GUI scaling document from a PNG:
+
+```sh
+mc-asset mcmeta animation sheet.png --frame-size 16 --frametime 2 --frames '[0,{"index":1,"time":4},0]' --minecraft-version 1.21.2 --output sheet.png.mcmeta
+mc-asset mcmeta gui panel.png --type nine_slice --border 4 --stretch-inner --resource-pack-version 42 --stdout
+```
+
+Animation requires `--frame-size <N|WxH>` and a single row or column of equal-sized frames that divide the PNG exactly; grids are rejected. `frametime` defaults to 1. `frames` accepts indices or `{index,time}` objects, including repeated or partial sequences; omitted means all frames in order. Times are positive integers and indices must be in range. `--interpolate` enables interpolation. GUI requires `--type <stretch|tile|nine_slice>`; tile and nine_slice use the PNG dimensions as design dimensions. Nine_slice requires `--border <N|json>` (four nonnegative sides: left, top, right, bottom) with a positive center. Only nine_slice accepts `--stretch-inner`.
+
+CLI requires exactly one explicit `--output <path.mcmeta>` or `--stdout`; it never guesses a sibling name. Existing outputs require `--force`, which replaces the entire file and preserves no other sections. `--mkdir` permits missing parent directories. Inputs and unrelated sibling metadata remain unchanged; aliases and symbolic links are refused. Output is compact JSON with fixed key order and one trailing newline, containing only the requested section.
+
+Use one of `--minecraft-version` or `--resource-pack-version`. GUI scaling requires pack format 16.0; stretch_inner requires 42.0. An incompatible target is `ARGUMENT_CONFLICT` before output. With no target, or a target outside 12.0 through 97.1, `versionChecked` is false with `VERSION_NOT_CHECKED`; this does not bypass GUI minimum versions. Animation is marked checked within that table based on the documented format and its history; this is not a per-release game-client test. See [texture animation and its history](https://minecraft.wiki/w/Resource_pack#Texture_animation) (interpolate added in 14w25a, before the supported release table), [GUI scaling](https://www.minecraft.net/en-us/article/minecraft-snapshot-23w31a), and [pack formats](https://minecraft.wiki/w/Pack_format). These checks establish metadata structure and known version compatibility, not appearance or behavior in a game client.
+
+### Compare PNG changes (`compare`)
+
+```sh
+mc-asset compare before.png after.png --json
+mc-asset compare before.png after.png --output diff.png --scale 4
+mc-asset compare before.png after.png --stdout --json > diff.png
+```
+
+Only same-size PNGs are accepted; different dimensions raise `INVALID_ARGUMENT`. Without `--output` or `--stdout`, the command returns a report and writes nothing. With `--stdout`, PNG bytes go to stdout and the report goes to stderr. `--output` and `--stdout` are mutually exclusive.
+
+The report contains `width`, `height`, `totalPixels`, `rawChangedPixels`, `visibleChangedPixels`, `rawBounds`, and `visibleBounds`. Raw differences compare decoded RGBA channels, including hidden RGB under alpha zero. Visible differences use the existing flatten composition rules but ignore RGB when both pixels have alpha zero. Bounds are zero-based `{x,y,width,height}` rectangles in original-image coordinates, including the last changed pixel; no differences means `null`.
+
+The diagnostic PNG marks visible changes magenta (`255,0,255,255`), raw-only changes cyan (`0,255,255,255`), and unchanged pixels transparent (`0,0,0,0`). It is a diagnostic marker image, not the modified asset. `--scale` is an integer from 1 to 16, default 1, and uses nearest sampling without changing report statistics. Image output, including scaling, must have a longest edge of at most 1024 pixels or raises `RESOURCE_LIMIT_EXCEEDED`; it is never automatically downscaled. Report-only comparisons retain the existing PNG decoder limits.
+
+Both sources remain unchanged. An explicit output must end in `.png`; source aliases and symbolic-link outputs or parents are refused. Existing targets require `--force`; missing parent directories require `--mkdir`. These flags require a file output path. Every output is checked before any file or stdout artifact bytes are emitted.
 
 ---
 

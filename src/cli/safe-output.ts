@@ -8,12 +8,15 @@ import { type AtomicWriteSeams, atomicWriteFile } from "./filesystem.ts";
 export interface OutputTarget {
 	readonly path: string;
 	/** Extension the path must carry (case-insensitive). */
-	readonly extension: ".png" | ".json";
+	readonly extension: ".png" | ".json" | ".mcmeta";
 	/** --force semantics: an existing file may be replaced. */
 	readonly allowOverwrite: boolean;
 	/** Binding files: an existing file is always refused, --force or not. */
 	readonly createOnly?: boolean;
 }
+
+/** An output whose path keeps whatever extension the caller chose. */
+export type ExtensionlessOutputTarget = Omit<OutputTarget, "extension">;
 
 export interface OutputGuardOptions {
 	/** Every input path of the command (never writable, even with --force). */
@@ -86,16 +89,21 @@ async function lstatOrUndefined(path: string): Promise<Stats | undefined> {
 }
 
 /** Path shape (step 1): non-empty, no NUL byte, extension matches case-insensitively. */
-function shapeProblem(target: OutputTarget): string | undefined {
+function shapeProblem(
+	target: ExtensionlessOutputTarget & { readonly extension?: string },
+): string | undefined {
 	if (target.path === "") return "Output path is empty.";
 	if (target.path.includes("\0")) return "Output path contains a NUL byte.";
-	if (extname(target.path).toLowerCase() !== target.extension) {
+	if (
+		target.extension !== undefined &&
+		extname(target.path).toLowerCase() !== target.extension
+	) {
 		return `Output path must end with ${target.extension}: ${target.path}.`;
 	}
 	return undefined;
 }
 
-function isInside(root: string, key: string): boolean {
+export function isInside(root: string, key: string): boolean {
 	const prefix = root.endsWith(sep) ? root : `${root}${sep}`;
 	return key === root || key.startsWith(prefix);
 }
@@ -117,6 +125,27 @@ function conflict(message: string): McAssetError {
  */
 export async function planOutputTargets(
 	targets: readonly OutputTarget[],
+	options: OutputGuardOptions,
+): Promise<readonly PlannedTarget[]> {
+	return planTargets(targets, options);
+}
+
+/**
+ * Same preflight as planOutputTargets, minus the extension whitelist, for
+ * commands that always accepted any output extension. Every other check
+ * (aliases, directories, symlinks, existing files, parents) is unchanged.
+ */
+export async function planOutputTargetsKeepingExtension(
+	targets: readonly ExtensionlessOutputTarget[],
+	options: OutputGuardOptions,
+): Promise<readonly PlannedTarget[]> {
+	return planTargets(targets, options);
+}
+
+async function planTargets(
+	targets: readonly (ExtensionlessOutputTarget & {
+		readonly extension?: OutputTarget["extension"];
+	})[],
 	options: OutputGuardOptions,
 ): Promise<readonly PlannedTarget[]> {
 	const inputKeys = options.inputs.map((input) => lexicalKey(input));

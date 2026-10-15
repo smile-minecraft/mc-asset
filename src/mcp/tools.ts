@@ -16,6 +16,12 @@ export interface McpToolDefinition {
  */
 export const MCP_TOOLS: readonly McpToolDefinition[] = [
 	{
+		name: "compare_assets",
+		description:
+			"Compare same-size PNGs without modifying sources. Optional diagnostic image marks visible changes magenta and raw-only changes cyan; not a replacement asset.",
+		inputSchema: TOOL_INPUT_SCHEMAS.compare_assets,
+	},
+	{
 		name: "analyze_asset",
 		description:
 			"Analyze a raster image (PNG, JPEG, WebP) and return a read-only report: dimensions, palette, predicted alpha classification, pixel-art characteristics, and processing recommendations. Reads only, never writes.",
@@ -78,7 +84,7 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 	{
 		name: "quantize_asset",
 		description:
-			"Reduce the distinct colors of a raster image or .mcpx source to a target count, optionally scoped by a selection. Returns PNG bytes and/or the editable source via explicit output paths or embedded artifacts; no force, mkdir, or in-place writes.",
+			"Reduce the distinct colors of a raster image or .mcpx source to a target count or an explicit palette, with reserved colors kept byte-identical and an optional selection. Returns PNG bytes and/or the editable source via explicit output paths or embedded artifacts; no force, mkdir, or in-place writes.",
 		inputSchema: TOOL_INPUT_SCHEMAS.quantize_asset,
 	},
 	{
@@ -149,7 +155,14 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 	},
 	{
 		name: "model_asset",
-		description: "Inspect, validate, create, apply, or export Java models.",
+		description:
+			"Inspect, validate, create, apply, export, or preview Java models. Preview renders a diagnostic three-view PNG, never writes without outputPath, and never claims game rendering.",
 		inputSchema: TOOL_INPUT_SCHEMAS.model_asset,
+	},
+	{
+		name: "mcmeta_asset",
+		description:
+			"Generate an animation or GUI scaling .mcmeta document from a PNG. Writes only to the explicit .mcmeta outputPath (never merges; force replaces the whole file); without outputPath it returns the text. The PNG is read only. Checks the document is valid, not how it looks in game.",
+		inputSchema: TOOL_INPUT_SCHEMAS.mcmeta_asset,
 	},
 ];

@@ -164,6 +164,7 @@ export {
 	mapRoleToBand,
 	recolorColor,
 	recolorLayer,
+	recolorRolelessCanvas,
 } from "./recolor.ts";
 export type {
 	EvaluatedSelection,

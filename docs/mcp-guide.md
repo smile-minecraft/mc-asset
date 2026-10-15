@@ -5,7 +5,7 @@
 ## Contents
 
 - [Installing and registering the server](#installing-and-registering-the-server)
-- [The twenty-three tools](#the-twenty-three-tools)
+- [Tools](#tools)
 - [How failures come back](#how-failures-come-back)
 - [Limits and gaps](#limits-and-gaps)
 
@@ -13,7 +13,7 @@
 
 `mc-asset mcp` starts a stdio MCP server: stdout carries only MCP JSON-RPC,
 diagnostics go to stderr, and the process ends when stdin closes. The frozen
-surface — twenty-three tool names, their inputs, and the read/write contract — lives
+surface — twenty-five tool names, their inputs, and the read/write contract — lives
 in `docs/mcp-surface.md`; the input fields are frozen in `src/mcp/schema.ts`.
 This guide covers registration, one capture per tool (image bytes are
 abbreviated where noted, never verbatim), the error model, and the limits.
@@ -117,7 +117,7 @@ directory; every path in them is relative to that directory, except the
 original captures come from the installed build and the later additions from
 the local source server — the same server code runs either way.
 
-## The twenty-three tools
+## Tools
 
 | Tool Index | | |
 |---|---|---|
@@ -128,7 +128,8 @@ the local source server — the same server code runs either way.
 | [`palette_asset`](#palette_asset) | [`material_asset`](#material_asset) | [`tile_asset`](#tile_asset) |
 | [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
-| [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | |
+| [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | [`mcmeta_asset`](#mcmeta_asset) |
+| [`compare_assets`](#compare_assets) | | |
 
 ### analyze_asset
 
@@ -275,8 +276,14 @@ arrives as a second `type: "image"`, `mimeType: "image/png"` block:
 
 ### recolor_asset
 
-Recolors every layer of an `.mcpx` source with one builtin material id; an
-optional `region` limits the write to a single region. `material` is required.
+Recolors every layer of an `.mcpx` source with one builtin material id, or
+remaps a flat PNG the same way; an optional `region` limits the write to a
+single region. `material` is required. A PNG carries no palette roles, so
+its pixels map by integer luminance bands (below 96 to shadow, 96–159 to
+base, 160 and above to highlight) onto the target palette; no layer roles
+are invented, and fully transparent pixels stay byte-identical. JPEG and
+WebP are still refused (`INVALID_ARGUMENT`), and a missing region keeps
+the existing `REGION_NOT_FOUND` error.
 
 Call:
 
@@ -293,8 +300,9 @@ is embedded):
 
 ### create_variants
 
-Fans one `.mcpx` source out to one PNG plus one `.mcpx` per material under an
-explicit `outputDir`, each starting from the pristine source. Listing the same
+Fans one `.mcpx` source or flat PNG out to one PNG plus one `.mcpx` per
+material under an explicit `outputDir`, each starting from the pristine
+source, so material order never matters. Listing the same
 material twice in one call is `ARGUMENT_CONFLICT`.
 
 Call:
@@ -382,9 +390,22 @@ Result (verbatim; `pngBase64` is truncated):
 
 ### quantize_asset
 
-Reduces a raster image or `.mcpx` to a required color count, with an
-optional selection. The result reports `colors`, `colorCount`, and
-`modifiedPixels`.
+Reduces a raster image or `.mcpx` to a color count (`colors`) or maps it
+onto an explicit `palette` (builtin material name or `.mcpx` path); pass
+exactly one (both is `ARGUMENT_CONFLICT`, neither is `INVALID_ARGUMENT`).
+`keepColors` (RGBA objects) stay unchanged; with `palette` each must be a
+palette entry, and with `colors` each layer counts only the distinct kept
+colors present in the selected pixels against the budget. An optional
+selection limits the work to selected pixels. The palette file is never
+overwritten by an output path. The result reports `colors` or `palette`,
+`colorCount`, `modifiedPixels`, and the normalized `keepColors`; the written
+`.mcpx` keeps the canvas palette rather than the declared input palette.
+Output paths may use any extension, as before. All output targets are checked
+together before the first write: an alias of the input or palette file, a
+symbolic-link target, a symbolic-link parent directory, or an existing file
+refuses the whole call (symbolic-link targets used to be followed). The writes
+themselves are one atomic file at a time, not a transaction; a disk failure
+mid-way can leave earlier outputs written.
 
 Call:
 
@@ -599,14 +620,19 @@ selection expression like the batch `selection`; an empty match refuses with
 
 ### optimize_asset
 
-Losslessly re-encodes explicit PNG files into the smallest exact encoding, or
-keeps the source bytes when nothing smaller exists. It reads its inputs and
-never rewrites them; it writes only to an explicit new `outputPath` (one input)
-or into an existing `outputDir`. `dryRun` computes the full report and writes
-nothing. With one input and no output field, the result embeds `pngBase64`.
-`mode` defaults to `auto`; a named mode forces that encoding and raises
+Losslessly re-encodes explicit PNG files or a directory of PNGs into the smallest exact encoding, or
+keeps the source bytes when nothing smaller exists. It accepts either explicit `inputPaths` (1 to 256 files)
+or `inputDir` (up to 4096 PNGs, optional `recursive`). It reads its inputs and
+never rewrites them; it writes only to an explicit new `outputPath` (one explicit input)
+or into an existing `outputDir`. In directory mode, relative paths are traversed in UTF-8 byte order and
+preserved under `outputDir`, budgets are enforced (256 MiB source, 16,777,216 decoded pixels), symlinks and
+overlapping/aliased directories are rejected, and non-PNG files (`.mcmeta` etc.) are skipped.
+`dryRun` computes the full report and writes nothing. With one explicit input and no output field,
+the result embeds `pngBase64`. `mode` defaults to `auto`; a named mode forces that encoding and raises
 `OPTIMIZE_MODE_NOT_EXACT` when it cannot hold the pixels exactly. `ancillary`
-defaults to `preserve`; `strip` drops every metadata chunk and lists it.
+defaults to `preserve`; `strip` drops every metadata chunk and lists it. Multi-file writes are atomic per file
+rather than a transaction: if writing fails midway, files already committed stay, and error details report
+`completed`, `failedTarget`, and `notStarted`.
 
 Call:
 
@@ -661,6 +687,28 @@ Result (actual local MCP text-block response; the pack held the referenced textu
 (`MODEL_UNSUPPORTED_VERSION` otherwise). Without a vanilla tree, `minecraft`
 references are recorded as skipped coverage instead of being resolved.
 
+Call (preview that model as a diagnostic three-view PNG):
+
+```json
+{"mode":"preview","inputPath":"pack/assets/mypack/models/block/ruby.json","packPath":"pack","size":64,"resourcePackVersion":"75"}
+```
+
+Result (actual local MCP text-block response; the pack held no texture, so the
+faces render as the fixed checkerboard and coverage is `partial`):
+
+```text
+{"command":"model","mode":"preview","path":"assets/mypack/models/block/ruby.json","size":64,"version":{"packFormat":"75.0","rules":"verified","rulesReason":"verified-release"},"image":{"width":192,"height":64},"panels":[{"name":"front","x":0,"y":0,"width":64,"height":64},{"name":"right","x":64,"y":0,"width":64,"height":64},{"name":"top","x":128,"y":0,"width":64,"height":64}],"range":{"min":[0,0,0],"max":[16,16,16],"pixelsPerUnit":3},"coverage":{"status":"partial","skipped":[{"kind":"texture","reason":"missing","target":"mypack:block/ruby"}]},"warnings":[{"code":"MODEL_PREVIEW_TEXTURE_MISSING","level":"warning","message":"Texture mypack:block/ruby could not be resolved (missing).","target":"mypack:block/ruby"}],"unapplied":["display","lighting"]}
+```
+
+Without `outputPngPath` the PNG returns as a standard image block next to
+that report. With `outputPngPath` the file is written and only the report
+returns as text. The preview image output path field is named `outputPngPath`, matching the other PNG-output tools; the model's `.json` output still uses the existing `outputPath`. The three panels are always `front` (north face), `right`
+(east face), and `top` (up face, north at the top); each panel is `size`
+pixels square. Only axis-aligned cuboids with exact 1/256 coordinates draw;
+`size` accepts 64, 128, or 256 (default 64). This is a diagnostic view:
+`display` transforms and game lighting are not applied, and nothing in a
+game client verified the appearance.
+
 ## How failures come back
 
 A tool failure sets `isError: true`, and the payload is a JSON string in
@@ -713,7 +761,7 @@ File-rule failures to expect:
   auto-scale (a pre-scale edge below 128 scaling up toward 128, capped at 16)
   applies to feedback images only. Anything beyond the 1024px edge is
   `RESOURCE_LIMIT_EXCEEDED`, never a silent downscale.
-- **Full CLI parity.** The twenty-three tools cover intake and source build,
+- **Full CLI parity.** The tools cover intake and source build,
   transforms, palette and quantization, the deterministic pixelize
   pipeline, procedural generation, tiles and previews, animation sheets,
   and single-asset plus whole-pack validation, including
@@ -726,7 +774,8 @@ File-rule failures to expect:
   rotation ranges, display transforms, and that referenced models and
   textures exist. No Minecraft client rendered any model, so how a model
   looks or behaves in the game is not verified. Only cuboid `elements` are
-  supported.
+  supported. `model_asset` in `preview` mode is a diagnostic view, not a
+  game renderer.
 - **`optimize_asset` is lossless by pixel comparison.** The result decodes to
   the same pixels as the source, with different bytes. How the result looks
   in a game client was not checked.
@@ -745,3 +794,52 @@ File-rule failures to expect:
   `scale` / `nine-slice`, `animate` `unpack` / `reorder` / `validate` /
   `preview`), and any error path other than the captured `INVALID_ARGUMENT`
   and the exercised `OUTPUT_EXISTS` / `FILESYSTEM_ERROR` cases.
+
+## Generate metadata with mcmeta
+
+Generate an animation or GUI scaling document from a PNG:
+
+```sh
+mc-asset mcmeta animation sheet.png --frame-size 16 --frametime 2 --frames '[0,{"index":1,"time":4},0]' --minecraft-version 1.21.2 --output sheet.png.mcmeta
+mc-asset mcmeta gui panel.png --type nine_slice --border 4 --stretch-inner --resource-pack-version 42 --stdout
+```
+
+Animation requires `--frame-size <N|WxH>` and a single row or column of equal-sized frames that divide the PNG exactly; grids are rejected. `frametime` defaults to 1. `frames` accepts indices or `{index,time}` objects, including repeated or partial sequences; omitted means all frames in order. Times are positive integers and indices must be in range. `--interpolate` enables interpolation. GUI requires `--type <stretch|tile|nine_slice>`; tile and nine_slice use the PNG dimensions as design dimensions. Nine_slice requires `--border <N|json>` (four nonnegative sides: left, top, right, bottom) with a positive center. Only nine_slice accepts `--stretch-inner`.
+
+CLI requires exactly one explicit `--output <path.mcmeta>` or `--stdout`; it never guesses a sibling name. Existing outputs require `--force`, which replaces the entire file and preserves no other sections. `--mkdir` permits missing parent directories. Inputs and unrelated sibling metadata remain unchanged; aliases and symbolic links are refused. Output is compact JSON with fixed key order and one trailing newline, containing only the requested section.
+
+Use one of `--minecraft-version` or `--resource-pack-version`. GUI scaling requires pack format 16.0; stretch_inner requires 42.0. An incompatible target is `ARGUMENT_CONFLICT` before output. With no target, or a target outside 12.0 through 97.1, `versionChecked` is false with `VERSION_NOT_CHECKED`; this does not bypass GUI minimum versions. Animation is marked checked within that table based on the documented format and its history; this is not a per-release game-client test. See [texture animation and its history](https://minecraft.wiki/w/Resource_pack#Texture_animation) (interpolate added in 14w25a, before the supported release table), [GUI scaling](https://www.minecraft.net/en-us/article/minecraft-snapshot-23w31a), and [pack formats](https://minecraft.wiki/w/Pack_format). These checks establish metadata structure and known version compatibility, not appearance or behavior in a game client.
+
+### mcmeta_asset
+
+Use `mode` (`animation` or `gui`) and `inputPath` (PNG). `animation`: `frameSize`, `frametime`, `frames`, `interpolate`; `gui`: `type`, `border`, `stretchInner`. `minecraftVersion` / `resourcePackVersion` select the target. Fields belonging to the other mode are `INVALID_ARGUMENT`, including false values. `outputPath` writes an explicit `.mcmeta` file with optional `force` / `mkdir`; without `outputPath`, the result includes `mcmetaText` and writes nothing (`force` / `mkdir` require a path). Results include `mode`, `width`, `height`, `versionChecked`, `version`, `target`, `warnings`, and either `output` or `mcmetaText`.
+
+```json
+{"mode":"gui","inputPath":"panel.png","type":"nine_slice","border":4,"stretchInner":true,"resourcePackVersion":"42"}
+```
+
+## Compare PNG changes
+
+```sh
+mc-asset compare before.png after.png --json
+mc-asset compare before.png after.png --output diff.png --scale 4
+mc-asset compare before.png after.png --stdout --json > diff.png
+```
+
+Only same-size PNGs are accepted; different dimensions raise `INVALID_ARGUMENT`. Without `--output` or `--stdout`, the command returns a report and writes nothing. With `--stdout`, PNG bytes go to stdout and the report goes to stderr. `--output` and `--stdout` are mutually exclusive.
+
+The report contains `width`, `height`, `totalPixels`, `rawChangedPixels`, `visibleChangedPixels`, `rawBounds`, and `visibleBounds`. Raw differences compare decoded RGBA channels, including hidden RGB under alpha zero. Visible differences use the existing flatten composition rules but ignore RGB when both pixels have alpha zero. Bounds are zero-based `{x,y,width,height}` rectangles in original-image coordinates, including the last changed pixel; no differences means `null`.
+
+The diagnostic PNG marks visible changes magenta (`255,0,255,255`), raw-only changes cyan (`0,255,255,255`), and unchanged pixels transparent (`0,0,0,0`). It is a diagnostic marker image, not the modified asset. `--scale` is an integer from 1 to 16, default 1, and uses nearest sampling without changing report statistics. Image output, including scaling, must have a longest edge of at most 1024 pixels or raises `RESOURCE_LIMIT_EXCEEDED`; it is never automatically downscaled. Report-only comparisons retain the existing PNG decoder limits.
+
+Both sources remain unchanged. An explicit output must end in `.png`; source aliases and symbolic-link outputs or parents are refused. Existing targets require `--force`; missing parent directories require `--mkdir`. These flags require a file output path. Every output is checked before any file or stdout artifact bytes are emitted.
+
+### compare_assets
+
+Pass `beforePath` and `afterPath` for two same-size PNGs. `image` is `none` (default, report only) or `diff`. `scale` is an integer from 1 to 16, default 1. `outputPath` is accepted only with `image: "diff"`; it writes an explicit `.png`, with optional `force` and `mkdir`. Without `outputPath`, diff mode returns a standard `image/png` image content block alongside the JSON report; Base64 is not duplicated in text. `force` and `mkdir` require `outputPath`.
+
+The report and diagnostic colors, original-coordinate bounds, 1024-pixel scaled-image limit, source protection, and errors follow the PNG comparison rules above. No source is rewritten.
+
+```json
+{"beforePath":"before.png","afterPath":"after.png","image":"diff","scale":4}
+```

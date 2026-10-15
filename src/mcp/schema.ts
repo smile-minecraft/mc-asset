@@ -36,6 +36,8 @@ export const MCP_TOOL_NAMES = [
 	"inspect_asset",
 	"optimize_asset",
 	"model_asset",
+	"mcmeta_asset",
+	"compare_assets",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -141,8 +143,22 @@ export const optimizeAssetInput = {
 		.array(z.string().min(1))
 		.min(1)
 		.max(256)
+		.optional()
 		.describe(
-			"PNG files to optimize (1 to 256 explicit paths; no globs, no directories). Never written.",
+			"PNG files to optimize (1 to 256 explicit paths; no globs, no directories). Mutually exclusive with inputDir. Never written.",
+		),
+	inputDir: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"Directory containing PNG files to optimize (up to 4096 PNGs). Mutually exclusive with inputPaths.",
+		),
+	recursive: z
+		.boolean()
+		.optional()
+		.describe(
+			"When scanning inputDir, recursively include subdirectories (default false).",
 		),
 	mode: z
 		.enum(OPTIMIZE_MODES)
@@ -437,13 +453,14 @@ export const MODEL_MODES = [
 	"create",
 	"apply",
 	"export",
+	"preview",
 ] as const;
 
 export const modelAssetInput = {
 	mode: z
 		.enum(MODEL_MODES)
 		.describe(
-			"inspect and validate are read-only; create and apply produce a model document; export places a model and optional bindings.",
+			"inspect and validate are read-only; create and apply produce a model document; export places a model and optional bindings; preview renders a diagnostic three-view PNG.",
 		),
 	inputPath: z
 		.string()
@@ -505,17 +522,115 @@ export const modelAssetInput = {
 		.describe(
 			"export: explicit .json path for the blockstate (needs binding.blockstate).",
 		),
+	size: z
+		.literal(64)
+		.or(z.literal(128))
+		.or(z.literal(256))
+		.optional()
+		.describe(
+			"preview only: panel edge in pixels, one of 64, 128, or 256 (default 64).",
+		),
+	outputPngPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"preview only: explicit .png path. When omitted nothing is written and the image is returned as a standard image block.",
+		),
+};
+
+export const compareAssetsInput = {
+	beforePath: z.string().min(1),
+	afterPath: z.string().min(1),
+	image: z.enum(["none", "diff"]).optional(),
+	scale: z.number().int().min(1).max(16).optional(),
+	outputPath: z.string().min(1).optional(),
+	force: z.boolean().optional(),
+	mkdir: z.boolean().optional(),
+};
+export type CompareAssetsInput = z.infer<
+	z.ZodObject<typeof compareAssetsInput>
+>;
+
+export const mcmetaAssetInput = {
+	mode: z
+		.enum(["animation", "gui"])
+		.describe("animation writes an animation section; gui a gui.scaling one."),
+	inputPath: z.string().min(1).describe("PNG path; read only, never written."),
+	frameSize: z
+		.string()
+		.min(1)
+		.optional()
+		.describe("animation: frame size N or WxH (required)."),
+	frametime: z
+		.number()
+		.int()
+		.min(1)
+		.optional()
+		.describe("animation: ticks per frame, default 1."),
+	frames: z
+		.array(
+			z.union([
+				z.number().int().min(0),
+				z.object({
+					index: z.number().int().min(0),
+					time: z.number().int().min(1).optional(),
+				}),
+			]),
+		)
+		.optional()
+		.describe(
+			"animation: playback order of indices and/or {index,time}; repeats and partial lists are valid. Omitted means all frames in order.",
+		),
+	interpolate: z.boolean().optional().describe("animation: blend frames."),
+	type: z
+		.enum(["stretch", "tile", "nine_slice"])
+		.optional()
+		.describe("gui: scaling type (required)."),
+	border: z
+		.union([
+			z.number().int().min(0),
+			z.object({
+				left: z.number().int().min(0),
+				top: z.number().int().min(0),
+				right: z.number().int().min(0),
+				bottom: z.number().int().min(0),
+			}),
+		])
+		.optional()
+		.describe("gui nine_slice: border N or per-side object (required there)."),
+	stretchInner: z
+		.boolean()
+		.optional()
+		.describe("gui nine_slice only: stretch the inner bands."),
+	minecraftVersion: minecraftVersionField,
+	resourcePackVersion: resourcePackVersionField,
+	outputPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"Explicit .mcmeta path. When omitted nothing is written and the document text is returned.",
+		),
+	force: z
+		.boolean()
+		.optional()
+		.describe("Replace an existing outputPath file as a whole."),
+	mkdir: z.boolean().optional().describe("Create missing parent directories."),
 };
 
 export const NEW_MCP_TOOL_NAMES = ["optimize_asset", "model_asset"] as const;
 export type OptimizeAssetInput = z.infer<
 	z.ZodObject<typeof optimizeAssetInput>
 >;
+export type McmetaAssetInput = z.infer<z.ZodObject<typeof mcmetaAssetInput>>;
 export type ModelAssetInput = z.infer<z.ZodObject<typeof modelAssetInput>>;
 
 export const TOOL_INPUT_SCHEMAS = {
 	optimize_asset: optimizeAssetInput,
 	model_asset: modelAssetInput,
+	mcmeta_asset: mcmetaAssetInput,
+	compare_assets: compareAssetsInput,
 	analyze_asset: {
 		path: z.string().min(1).describe("Raster image path (PNG, JPEG, WebP)."),
 		profile: profileField,
@@ -705,7 +820,23 @@ export const TOOL_INPUT_SCHEMAS = {
 			.string()
 			.min(1)
 			.describe("Raster image or .mcpx path to quantize."),
-		colors: z.number().describe("Target distinct color count."),
+		colors: z.number().optional().describe("Target distinct color count."),
+		palette: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("Explicit palette source (builtin material id or .mcpx path)."),
+		keepColors: z
+			.array(
+				z.object({
+					r: z.number().int().min(0).max(255),
+					g: z.number().int().min(0).max(255),
+					b: z.number().int().min(0).max(255),
+					a: z.number().int().min(0).max(255),
+				}),
+			)
+			.optional()
+			.describe("Reserved RGBA colors kept byte-identical."),
 		selection: z
 			.string()
 			.min(1)

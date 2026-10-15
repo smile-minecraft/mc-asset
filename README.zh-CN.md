@@ -119,7 +119,7 @@ bun run build
 ## 面向 AI Agent
 
 - [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt)：给 Agent 的项目精简索引。
-- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份信息的单文件版本，涵盖安装、二十三个 MCP 工具、批处理操作、错误模型与限制。
+- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份信息的单文件版本，涵盖安装、二十五个 MCP 工具、批处理操作、错误模型与限制。
 - [`docs/cli-surface.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.zh-CN.md)：已冻结的 CLI 命令、批处理操作规范与状态码注册表。
 - [`docs/mcpx-format.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.zh-CN.md)：可编辑的多图层 `.mcpx` 与 `.grid` 格式语法与规范。
 - [`docs/mcp-guide.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.zh-CN.md)：注册方式、每个 MCP 工具一份原样捕获，以及错误模型。
@@ -277,7 +277,9 @@ mc-asset cleanup quantized.png \
 
 ### 实践 4：材质梯度衍生（`variant` 与 `recolor`）
 
-把一份源文件展开成多种材质，或整份改成单一材质：
+把一份源文件展开成多种材质，或整份改成单一材质。来源可以是可编辑的
+`.mcpx`，也可以是扁平 PNG（PNG 没有调色板角色信息，像素按整数明度分段
+映射，不会虚构图层角色）：
 
 ```sh
 mc-asset variant sword.mcpx \
@@ -376,12 +378,13 @@ mc-asset gui-scale ./textures/gui/dialog.png \
 
 ### 实践 9：无损 PNG 优化与 Java 模型（`optimize` 与 `model`）
 
-`optimize` 把 PNG 重新编码成能精确表示相同像素的最小编码；没有更小的就保留源文件。它不会改写输入文件，输出方式从 `--output`、`--output-dir`、`--stdout`、`--dry-run` 择一。
+`optimize` 把 PNG 重新编码成能精确表示相同像素的最小编码；没有更小的就保留源文件。接受明确的 PNG 路径清单（最多 256 文件）或整包目录（`--input-dir`，最多 4096 文件，可选 `--recursive` 保留相对目录结构）。它不会改写输入文件，输出方式从 `--output`、`--output-dir`、`--stdout`、`--dry-run` 择一。
 
 ```sh
 mc-asset optimize ./gem.png --dry-run
 # ok optimize input=./gem.png output=- status=optimized source=184 result=102 mode=rgba
 mc-asset optimize ./gem.png ./sword.png --output-dir ./optimized --mkdir
+mc-asset optimize --input-dir ./textures --recursive --output-dir ./optimized --mkdir
 ```
 
 `model` 处理 Java 方块／物品模型 JSON（只支持长方体 `elements`）。创建模型、用类型化操作编辑，再对资源包验证：
@@ -396,11 +399,20 @@ mc-asset validate-pack ./pack --resource-pack-version 75
 
 `model apply` 接收 `--operations`，全部应用成功或一个都不应用；`model export` 会放置模型，加上 `--binding` 时还会在旁边写出物品定义与 blockstate。检查范围是结构与引用是否有效。没有任何 Minecraft 客户端渲染过结果，所以外观与游戏内行为都未验证。
 
+`model preview` 从长方体 `elements` 画出固定的诊断图：三个正方形面板横向排列（`front` 是北面、`right` 是东面、`top` 是上面且北方在上），每个面板边长为 `--size`（64、128 或 256，默认 64）：
+
+```sh
+mc-asset model preview ./pack/assets/mypack/models/block/ruby.json \
+  --pack ./pack --size 64 --output ./ruby-preview.png --resource-pack-version 75
+```
+
+`--output` 与 `--stdout` 必须恰好一个。报告带面板名称与坐标、输入范围、`coverage` 与 `warnings`。缺失的贴图以固定棋盘格呈现并发出警告；元素旋转、非 1/256 坐标、半透明面与无法解析的贴图列为 `partial` 的 coverage。`display` 变换与游戏光照不会应用：这是诊断视图，不是游戏渲染器。
+
 ---
 
 ## MCP 服务器
 
-`mc-asset mcp` 会启动一个 stdio MCP 服务器，底层和 CLI 是同一个核心，所以调用工具和执行对应命令会得到相同结果。它提供 23 个工具。
+`mc-asset mcp` 会启动一个 stdio MCP 服务器，底层和 CLI 是同一个核心，所以调用工具和执行对应命令会得到相同结果。它提供 25 个工具。
 
 ### 提供的 MCP 工具
 
@@ -417,18 +429,20 @@ mc-asset validate-pack ./pack --resource-pack-version 75
 | `build_asset` | 将 `.mcpx` 源码构建为 PNG 字节或重新序列化的源码，可选附加批处理操作。 |
 | `transform_asset` | 对位图或 `.mcpx` 输入应用单个几何操作（flip、rotate、crop、pad、resize、translate）。 |
 | `scale_gui_asset` | 按 mcmeta 的 stretch/tile/nine_slice 规则缩放 GUI 贴图；仅输出 PNG。 |
-| `quantize_asset` | 将不同颜色数缩减至指定数量。 |
+| `quantize_asset` | 将不同颜色数缩减至指定数量或指定调色板，并可保留指定 RGBA 色。 |
 | `cleanup_asset` | 检测或修复像素瑕疵（`isolated`、`noise`、`cluster`、`fringe`、`outlier`、`hole`、`aa`）。 |
 | `palette_asset` | 只读调色板 `extract`/`inspect` 报告（唯一颜色、分布、角色、对比度）。 |
 | `material_asset` | 对内置材质集提供只读 `list`/`show` 报告。 |
 | `tile_asset` | 接缝、边缘重复与亮度分析，可选输出平铺预览 PNG。 |
 | `generate_asset` | 确定性程序化贴图生成（pattern、size、palette、seed）。 |
 | `preview_asset` | `ascii`/`palette-map` 报告，以及 `scale` 与 `nine-slice` 辅助 PNG。 |
+| `mcmeta_asset` | 从 PNG 生成动画或 GUI 缩放设置。 |
 | `animate_asset` | 对动画帧组提供 `pack`/`unpack`/`reorder`/`resize`/`validate`/`preview`。 |
 | `validate_pack_asset` | 只读整包扫描：命名空间、模型、贴图、图集、版本对应。 |
 | `inspect_asset` | 只读 `structure`（图层、区域、颜色用量、重叠）或 `view`（合成 PNG 图块加 metadata）；输入为 `inputPath`。 |
-| `optimize_asset` | 无损地把 PNG 重新编码成能精确表示像素的最小编码（或保留源文件）；逐文件报告、`dryRun`、显式的 `outputPath`／`outputDir`。 |
-| `model_asset` | Java 方块／物品模型 JSON：`inspect`、`validate`、`create`、`apply`、`export`（可生成物品定义与 blockstate）。报告结构与引用是否有效，不是渲染后的外观。 |
+| `optimize_asset` | 无损地把 PNG 重新编码成能精确表示像素的最小编码（或保留源文件）；逐文件报告、`dryRun`、显式的 `outputPath`／`outputDir`，或全目录扫描（`inputDir`、`recursive`，4096 文件上限）。 |
+| `model_asset` | Java 方块／物品模型 JSON：`inspect`、`validate`、`create`、`apply`、`export`（可生成物品定义与 blockstate），以及 `preview`（经 `size`／`outputPngPath` 生成固定的诊断三视图 PNG）。报告结构与引用是否有效，不是渲染后的外观。 |
+| `compare_assets` | 比较两张同尺寸 PNG；回报原始 RGBA 与可见差异数、差异框，并可生成诊断标记图。 |
 
 `inspect_asset` 有两种模式：`structure` 报告图层、区域、色彩用量与重叠；`view` 把合成后的画布以 PNG 图像块返回，可选 `crop` 与 `scale`（1–16）。边长超过 1024px 的 view 会被拒绝并提示改用裁剪，不会自动缩小。`apply_asset_operations` 可以带可选的 `feedback` 对象（见[实践 7](#实践-7批处理编辑与视觉反馈build-与-apply_asset_operations)）；不带时结果完全不变。[`docs/mcp-guide.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.zh-CN.md) 为每个工具附上一次实际调用的捕获。
 
@@ -498,7 +512,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | | `render <grid>` | 将 ASCII 网格（`.grid`）编译为 PNG 和/或 `.mcpx`。 |
 | | `build [source]` | 编译 `.mcpx` 源文件或标准输入（`--stdin`）为 PNG。 |
 | **空间几何变换** | `transform <input>` | 几何操作：`--flip`、`--rotate`、`--crop`、`--pad`、`--resize`、`--translate`。 |
-| **色彩与清理** | `quantize <input>` | 颜色缩减至指定数量（`--colors <N>`）。 |
+| **色彩与清理** | `quantize <input>` | 颜色缩减至指定数量（`--colors <N>`）或指定调色板（`--palette`），可用 `--keep-color` 保留指定色。 |
 | | `cleanup <input>` | 清理多余噪点与孤立像素（`--fix isolated,noise,outlier`）。 |
 | | `palette extract` | 从图像中提取调色板。 |
 | | `palette inspect` | 深入分析调色板分布与明暗对比。 |
@@ -516,14 +530,48 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | | `animate resize` | 批量缩放帧尺寸。 |
 | | `animate validate`| 依据 `.mcmeta` 校验帧数与布局。 |
 | | `animate preview` | 预览动画播放效果。 |
+| | `mcmeta animation\|gui` | 依据 PNG 尺寸生成 `.mcmeta` 动画或 GUI 缩放配置（`--output`、`--stdout`）。 |
 | **校验与诊断** | `analyze <image>` | 只读结构与色彩数值报告。 |
 | | `inspect <input>` | 只读结构报告或合成视图（`--mode structure\|view`、`--crop`、`--scale`）。 |
 | | `validate <asset>` | 单文件素材规范核验（可附加 `.mcmeta`）。 |
 | | `validate-pack <path>`| 资源包全目录关联与完整性核验。 |
-| **优化与模型** | `optimize <input...>` | 无损地把 PNG 重新编码成能精确表示像素的最小编码，或保留源字节（`--output`、`--output-dir`、`--stdout`、`--dry-run`、`--mode`、`--ancillary`）。 |
+| | `compare <before> <after>` | 比较两张同尺寸 PNG；回报原始 RGBA 与可见差异数及可选的诊断 PNG（`--output`、`--stdout`、`--scale`）。 |
+| **优化与模型** | `optimize <input...>` 或 `--input-dir <dir>` | 无损地把 PNG 重新编码成能精确表示像素的最小编码，或保留源字节（`--output`、`--output-dir`、`--stdout`、`--dry-run`、`--mode`、`--ancillary`、`--recursive`）。 |
 | | `model inspect\|validate <file>` | 只读报告 Java 方块／物品模型 JSON（结构、UV、旋转、display、引用）。 |
 | | `model create\|apply\|export` | 创建、编辑或放置 Java 模型（长方体 `elements`）及其物品定义与 blockstate。 |
+| | `model preview <file>` | 固定的诊断三视图 PNG（`front`、右侧、`top` 面板，`--size 64\|128\|256`，`--output` 或 `--stdout`）；不支持的内容列为 partial，绝非游戏渲染。 |
 | **Agent 接口** | `mcp` | 启动 stdio MCP 服务器。 |
+
+### 生成动画与 GUI 设置（mcmeta）
+
+从 PNG 生成动画或 GUI 缩放设置：
+
+```sh
+mc-asset mcmeta animation sheet.png --frame-size 16 --frametime 2 --frames '[0,{"index":1,"time":4},0]' --minecraft-version 1.21.2 --output sheet.png.mcmeta
+mc-asset mcmeta gui panel.png --type nine_slice --border 4 --stretch-inner --resource-pack-version 42 --stdout
+```
+
+动画必须指定 `--frame-size <N|WxH>`，帧只支持单排或单列，尺寸必须整除 PNG；不接受网格。`frametime` 默认 1，`frames` 接受索引或 `{index,time}` 对象，可重复或只播放部分帧；省略时依序播放全部帧。时間必须是正整数，索引不得越界；`--interpolate` 启用插值。GUI 必须指定 `--type <stretch|tile|nine_slice>`，tile 与 nine_slice 以 PNG 尺寸作设计尺寸。nine_slice 必须指定 `--border <N|json>`，四边 left、top、right、bottom 为非负整数，中央必须保留正面积；只有 nine_slice 接受 `--stretch-inner`。
+
+CLI 必须明确选择 `--output <path.mcmeta>` 或 `--stdout` 其中之一，不猜同名路径。已存在的目标需要 `--force`，它会整个文件替换，不保留其他区段；`--mkdir` 允许建立缺少的父目录。来源 PNG 与无关的同名设置不变，输入别名与符号链接会被拒绝。输出只含指定区段，以固定键顺序的紧凑 JSON 加一个结尾换行生成。
+
+版本选项 `--minecraft-version` 与 `--resource-pack-version` 只能选一个。GUI scaling 需要 pack format 16.0，stretch_inner 需要 42.0；不相容会在输出前回报 `ARGUMENT_CONFLICT`。未指定版本，或版本在 12.0 到 97.1 之外，会回报 `versionChecked: false` 与 `VERSION_NOT_CHECKED`，但不会跳过 GUI 最低版本限制。动画依据文档格式及历史在表内标示已检查，并非逐版本游戏客户端实测。来源见[材质动画与历史](https://minecraft.wiki/w/Resource_pack#Texture_animation)（interpolate 在 14w25a 加入，早于支持表）、[GUI scaling](https://www.minecraft.net/en-us/article/minecraft-snapshot-23w31a) 与 [pack format](https://minecraft.wiki/w/Pack_format)。这些检查确认设置结构与已知版本相容性，不代表已验证游戏内外观或行为。
+
+### 比较 PNG 的变化（compare）
+
+```sh
+mc-asset compare before.png after.png --json
+mc-asset compare before.png after.png --output diff.png --scale 4
+mc-asset compare before.png after.png --stdout --json > diff.png
+```
+
+只接受尺寸相同的 PNG；尺寸不同返回 `INVALID_ARGUMENT`。未指定 `--output` 或 `--stdout` 时只返回报告，不写文件。使用 `--stdout` 时，PNG 字节写入 stdout，报告写入 stderr。`--output` 与 `--stdout` 不能同时使用。
+
+报告包含 `width`、`height`、`totalPixels`、`rawChangedPixels`、`visibleChangedPixels`、`rawBounds`、`visibleBounds`。原始差异逐一比较解码后的 RGBA 通道，包括 alpha 为零时隐藏的 RGB。可见差异采用现有 flatten 合成规则，但双方 alpha 都为零时忽略 RGB。差异框采用原图坐标，以从零开始的 `{x,y,width,height}` 表示，包含最后一个变化像素；没有差异时为 `null`。
+
+诊断 PNG 用洋红色（`255,0,255,255`）标记可见差异，用青色（`0,255,255,255`）标记仅有原始差异的像素，未变像素为透明（`0,0,0,0`）。该图是诊断标记，不是修改后的素材。`--scale` 接受 1 到 16 的整数，默认为 1，通过 nearest 放大标记图，不改变报告统计。图像放大后的长边不得超过 1024 像素，超限返回 `RESOURCE_LIMIT_EXCEEDED`，不会自动缩小。仅报告模式沿用现有 PNG 解码器限制。
+
+两个源文件都不会被改写。显式输出路径必须以 `.png` 结尾；源文件别名、符号链接目标或父目录都会被拒绝。覆盖现有目标需要 `--force`，创建缺少的父目录需要 `--mkdir`；这两个选项都需要文件输出路径。所有输出先通过检查，才写入文件或发送 stdout 图像字节。
 
 ---
 

@@ -15,7 +15,7 @@ import { parseMcpx } from "../../src/mcpx/index.ts";
 
 const FIXTURES = "tests/cli/fixtures";
 const SWORD_MCPX = join(FIXTURES, "sword.mcpx");
-const PNG_FIXTURE = join(FIXTURES, "px-8x8.png");
+const JPG_FIXTURE = join(FIXTURES, "px-8x8.jpg");
 
 interface SpawnResult {
 	code: number;
@@ -248,13 +248,13 @@ describe("variant wiring via spawn", () => {
 		}
 	}, 30_000);
 
-	test("non-mcpx source is rejected", async () => {
+	test("unsupported source format is rejected", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-va-"));
 		try {
 			const outDir = join(dir, "out");
 			const result = await runCli([
 				"variant",
-				PNG_FIXTURE,
+				JPG_FIXTURE,
 				"--materials",
 				"iron",
 				"--output-dir",

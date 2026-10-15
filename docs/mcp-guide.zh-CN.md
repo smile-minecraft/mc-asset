@@ -5,13 +5,13 @@
 ## 目录
 
 - [安装与注册服务器](#安装与注册服务器)
-- [二十三个工具](#二十三个工具)
+- [工具](#工具)
 - [失败时如何返回](#失败时如何返回)
 - [限制与缺口](#限制与缺口)
 
 ---
 
-`mc-asset mcp` 会启动 stdio MCP 服务器：stdout 只输出 MCP JSON-RPC，诊断信息走 stderr，stdin 关闭时进程退出。已冻结的接口（二十三个工具名称、各自的输入，以及读写契约）记录在 `docs/mcp-surface.zh-CN.md`，输入字段则冻结在 `src/mcp/schema.ts`。本指南涵盖注册方式、每个工具一份捕获（图片字节在注明处截短显示，不作原样引用）、错误模型与限制。
+`mc-asset mcp` 会启动 stdio MCP 服务器：stdout 只输出 MCP JSON-RPC，诊断信息走 stderr，stdin 关闭时进程退出。已冻结的接口（二十五个工具名称、各自的输入，以及读写契约）记录在 `docs/mcp-surface.zh-CN.md`，输入字段则冻结在 `src/mcp/schema.ts`。本指南涵盖注册方式、每个工具一份捕获（图片字节在注明处截短显示，不作原样引用）、错误模型与限制。
 
 服务器直接挂在 Core 上，所以每个工具都跑与 CLI 命令相同的引擎。像素级的创作，通过 ASCII Grid 文档、批处理操作数组，或内联返回的可编辑 `.mcpx` 源码来完成；刻意不提供 `set_pixel` 工具。
 
@@ -98,7 +98,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 以下捕获通过 MCP 客户端 SDK 在一个演示工作目录中执行，其中所有路径都相对于该目录，只有 `inspect_asset` 的结构捕获直接指向仓库内的 fixture `tests/cli/fixtures/sword.mcpx`。原有七个工具的捕获取自已安装的版本，后续新增的工具则取自本地源码服务器——两者执行的是同一份服务器代码。
 
-## 二十三个工具
+## 工具
 
 | 工具索引 | | |
 |---|---|---|
@@ -109,7 +109,8 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | [`palette_asset`](#palette_asset) | [`material_asset`](#material_asset) | [`tile_asset`](#tile_asset) |
 | [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
-| [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | |
+| [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | [`mcmeta_asset`](#mcmeta_asset) |
+| [`compare_assets`](#compare_assets) | | |
 
 ### analyze_asset
 
@@ -208,7 +209,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 ### recolor_asset
 
-用一个内置材质 id，给 `.mcpx` 源码的每个图层重新着色；可选的 `region` 可把写入限定在单个区域。`material` 为必填。
+用一个内置材质 id，给 `.mcpx` 源码的每个图层重新着色，或以同样方式重映射扁平 PNG；可选的 `region` 可把写入限定在单个区域。`material` 为必填。PNG 没有调色板角色信息，像素按整数明度分段映射到目标调色板（96 以下为暗部、96 到 159 为中间、160 以上为亮部），不会虚构图层角色，全透明像素保持字节不变。JPEG 与 WebP 仍会被拒绝（`INVALID_ARGUMENT`），缺失区域沿用既有的 `REGION_NOT_FOUND` 错误。
 
 调用：
 
@@ -224,7 +225,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 ### create_variants
 
-把一份 `.mcpx` 源码展开到显式指定的 `outputDir` 下，每种材质生成一份 PNG 加一份 `.mcpx`，每份都从原始源码开始。同一次调用中重复列出同一材质，会报告 `ARGUMENT_CONFLICT`。
+把一份 `.mcpx` 源码或扁平 PNG 展开到显式指定的 `outputDir` 下，每种材质生成一份 PNG 加一份 `.mcpx`，每份都从原始源码开始，因此材质顺序不影响结果。同一次调用中重复列出同一材质，会报告 `ARGUMENT_CONFLICT`。
 
 调用：
 
@@ -304,7 +305,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 ### quantize_asset
 
-把位图或 `.mcpx` 减色到指定的颜色数，另可指定选择范围。结果会报告 `colors`、`colorCount` 与 `modifiedPixels`。
+把位图或 `.mcpx` 减色到指定的颜色数（`colors`），或映射到指定调色板 `palette`（内置材质名或 `.mcpx` 路径）；两者恰给一个（并用是 `ARGUMENT_CONFLICT`，都没给是 `INVALID_ARGUMENT`）。`keepColors`（RGBA 对象）保持不变；配合 `palette` 时必须是调色板中的项，配合 `colors` 时每层只把选择范围内实际出现的不重复保留色计入预算。可选的选择范围会把处理限制在选中像素。调色板文件不会被任何输出路径覆盖。结果会报告 `colors` 或 `palette`、`colorCount`、`modifiedPixels` 与规范化后的 `keepColors`；写出的 `.mcpx` 沿用画布原有的板，而非输入声明的板。输出路径和以往一样可用任何扩展名。所有输出目标会在第一次写入前一起检查：输入或调色板文件的别名、符号链接目标、符号链接父目录、已存在的文件，都会让整个调用被拒绝（过去会跟随符号链接）。写入本身是逐文件原子写入，不是事务；磁盘中途失败时，先前的输出可能已经写好。
 
 调用：
 
@@ -482,7 +483,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 ### optimize_asset
 
-无损地把显式指定的 PNG 文件重新编码成能精确表示像素的最小编码；没有更小的编码时保留源字节。它只读输入、绝不改写输入，只写入显式指定的新 `outputPath`（单个输入）或已有的 `outputDir`。`dryRun` 会算出完整报告但不写任何文件。只有一个输入且没给输出字段时，结果会内嵌 `pngBase64`。`mode` 默认 `auto`；指定模式会强制该编码，无法精确表示像素时报告 `OPTIMIZE_MODE_NOT_EXACT`。`ancillary` 默认 `preserve`；`strip` 会丢弃所有元数据块并列出它们。
+无损地把显式指定的 PNG 文件或 PNG 目录重新编码成能精确表示像素的最小编码；没有更小的编码时保留源字节。它接受显式的 `inputPaths`（1 至 256 个文件）或 `inputDir`（最多 4096 个 PNG，可选 `recursive`）二选一。它只读输入、绝不改写输入，只写入显式指定的新 `outputPath`（单个显式输入）或已有的 `outputDir`。在目录模式下，按 UTF-8 字节顺序遍历相对路径并在 `outputDir` 下保留相对结构，严格检查预算上限（256 MiB 源文件大小、16,777,216 解码像素），拒绝符号链接与互含／别名目录，并跳过非 PNG 文件（不复制 `.mcmeta` 等）。`dryRun` 会算出完整报告但不写任何文件。只有一个显式输入且没给输出字段时，结果会内嵌 `pngBase64`。`mode` 默认 `auto`；指定模式会强制该编码，无法精确表示像素时报告 `OPTIMIZE_MODE_NOT_EXACT`。`ancillary` 默认 `preserve`；`strip` 会丢弃所有元数据块并列出它们。多文件写入为逐文件原子提交而非跨文件事务：写入中途失败时已写入的文件保留，错误 details 报告 `completed`、`failedTarget` 与 `notStarted`。
 
 调用：
 
@@ -528,6 +529,20 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 `apply` 接收类型化的 `operations`，全部应用成功或一个都不应用。`export` 使用 `binding.item` 时需要明确的版本，且资源包格式在 46.0 以上（否则报告 `MODEL_UNSUPPORTED_VERSION`）。没有提供原版资源树时，`minecraft` 命名空间的引用会记为跳过的 coverage，而不是被解析。
 
+调用（把该模型预览为诊断三视图 PNG）：
+
+```json
+{"mode":"preview","inputPath":"pack/assets/mypack/models/block/ruby.json","packPath":"pack","size":64,"resourcePackVersion":"75"}
+```
+
+结果（本机 MCP 文本块的实际响应；资源包内没有该贴图，所以各面以固定棋盘格呈现，coverage 为 `partial`）：
+
+```text
+{"command":"model","mode":"preview","path":"assets/mypack/models/block/ruby.json","size":64,"version":{"packFormat":"75.0","rules":"verified","rulesReason":"verified-release"},"image":{"width":192,"height":64},"panels":[{"name":"front","x":0,"y":0,"width":64,"height":64},{"name":"right","x":64,"y":0,"width":64,"height":64},{"name":"top","x":128,"y":0,"width":64,"height":64}],"range":{"min":[0,0,0],"max":[16,16,16],"pixelsPerUnit":3},"coverage":{"status":"partial","skipped":[{"kind":"texture","reason":"missing","target":"mypack:block/ruby"}]},"warnings":[{"code":"MODEL_PREVIEW_TEXTURE_MISSING","level":"warning","message":"Texture mypack:block/ruby could not be resolved (missing).","target":"mypack:block/ruby"}],"unapplied":["display","lighting"]}
+```
+
+没有 `outputPngPath` 时，PNG 以标准图片块附在该报告旁返回。有 `outputPngPath` 时写出文件，文字部分只返回报告。预览图输出路径字段名为 `outputPngPath`，与其他会输出 PNG 的工具一致；模型的 `.json` 输出仍用既有的 `outputPath`。三个面板固定是 `front`（北面）、右侧（东面）与 `top`（上面，北方在上）；每个面板边长为 `size`。只画轴对齐的长方体且坐标为精确 1/256 倍数；`size` 只接受 64、128 或 256（默认 64）。这是诊断视图：`display` 变换与游戏光照不会应用，游戏客户端也没有验证过外观。
+
 ## 失败时如何返回
 
 工具失败时会设置 `isError: true`，内容是放在 `content[0].text` 中的 JSON 字符串：
@@ -557,11 +572,60 @@ isError: true
 - **没有逐像素工具。** 不存在 `set_pixel`；像素工作要通过 ASCII Grid、批处理操作数组或内联的 `.mcpx` 文本来做。
 - **只接受显式路径，不覆盖，不建目录。** 目标已存在是 `OUTPUT_EXISTS`，缺少上级目录是 `FILESYSTEM_ERROR`。错误消息仍会提到 `--force`／`--mkdir`，但通过 MCP 无法传入这两个标志，请改用新路径，或自行创建目录。
 - **省略输出路径会内联产物。** 没有输出路径时，结果会带 `pngBase64`（PNG）或 `mcpxText`（`.mcpx`），而不写入文件。这是逐个产物决定的：只给 `outputPngPath` 会写出 PNG，并仍在结果中内联 `.mcpx` 文本。
-- **与 CLI 完全对等。** 二十三个工具覆盖素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证（含依赖／原版解析与 GUI 精灵图缩放）；版本目标设置通过 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 传入。
+- **与 CLI 完全对等。** 二十五个工具覆盖素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证（含依赖／原版解析与 GUI 精灵图缩放）；版本目标设置通过 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 传入。
 - **查看与附图都是图片块，不另存副本。** `inspect_asset` 的 `view` 与 `apply_asset_operations` 的附图都不会再以 `pngBase64` 重复一份 PNG；字节走标准的 `type: "image"`、`mimeType: "image/png"` 块。查看缩放默认 1；长边自动放大（缩放前不足 128 才向 128 放大，上限 16）只适用于附图。超过 1024px 边长一律是 `RESOURCE_LIMIT_EXCEEDED`，不会默默缩图。
-- **模型只检查结构与引用，不检查外观。** `model_asset` 与 `validate_pack_asset` 验证 JSON 结构、UV 与旋转范围、display 变换，以及被引用的模型与贴图是否存在。没有任何 Minecraft 客户端渲染过模型，所以模型在游戏里的外观与行为都未验证。只支持长方体 `elements`。
+- **模型只检查结构与引用，不检查外观。** `model_asset` 与 `validate_pack_asset` 验证 JSON 结构、UV 与旋转范围、display 变换，以及被引用的模型与贴图是否存在。没有任何 Minecraft 客户端渲染过模型，所以模型在游戏里的外观与行为都未验证。只支持长方体 `elements`。`preview` 模式的 `model_asset` 是诊断视图，不是游戏渲染器。
 - **`optimize_asset` 以像素比对确认无损。** 结果解码后的像素与源文件相同，字节则不同。结果在游戏客户端里的外观未经检查。
 - **`validate_asset` 只检查单个 PNG。** 资源包级与图集感知的验证，请用 `validate_pack_asset`。
 - **确定性只验证过演示输入。** 相同输入加相同参数，对演示用的 `px-8x8.png`／`sword.mcpx`／`v04-anim-frames/` 与一个干净的资源包产生了相同结果。其他输入与选项（WebP、`WxH` 尺寸、`region`、`atomic: false`、`animate` 的 `resize`）也演练过，但没有重跑确认输出是否一致。
 - **运行时。** MCP 路径只使用 `node:` 导入，所以打包后的 `dist` 可在纯 Node 下运行；CI 的 `node` job 使用 Node 22。需要 Node.js 22 或更新，`engines` 字段已声明 `>=22`。
 - **尚未实测**：`mcmetaPath`、JPEG 输入、没有捕获的 `mode` 分支（`palette` 的 `inspect`、`material` 的 `show`、`preview` 的 `palette-map`／`scale`／`nine-slice`、`animate` 的 `unpack`／`reorder`／`validate`／`preview`），以及捕获的 `INVALID_ARGUMENT` 与已演练的 `OUTPUT_EXISTS`／`FILESYSTEM_ERROR` 之外的任何错误路径。
+
+## 生成 mcmeta 设置
+
+从 PNG 生成动画或 GUI 缩放设置：
+
+```sh
+mc-asset mcmeta animation sheet.png --frame-size 16 --frametime 2 --frames '[0,{"index":1,"time":4},0]' --minecraft-version 1.21.2 --output sheet.png.mcmeta
+mc-asset mcmeta gui panel.png --type nine_slice --border 4 --stretch-inner --resource-pack-version 42 --stdout
+```
+
+动画必须指定 `--frame-size <N|WxH>`，帧只支持单排或单列，尺寸必须整除 PNG；不接受网格。`frametime` 默认 1，`frames` 接受索引或 `{index,time}` 对象，可重复或只播放部分帧；省略时依序播放全部帧。时間必须是正整数，索引不得越界；`--interpolate` 启用插值。GUI 必须指定 `--type <stretch|tile|nine_slice>`，tile 与 nine_slice 以 PNG 尺寸作设计尺寸。nine_slice 必须指定 `--border <N|json>`，四边 left、top、right、bottom 为非负整数，中央必须保留正面积；只有 nine_slice 接受 `--stretch-inner`。
+
+CLI 必须明确选择 `--output <path.mcmeta>` 或 `--stdout` 其中之一，不猜同名路径。已存在的目标需要 `--force`，它会整个文件替换，不保留其他区段；`--mkdir` 允许建立缺少的父目录。来源 PNG 与无关的同名设置不变，输入别名与符号链接会被拒绝。输出只含指定区段，以固定键顺序的紧凑 JSON 加一个结尾换行生成。
+
+版本选项 `--minecraft-version` 与 `--resource-pack-version` 只能选一个。GUI scaling 需要 pack format 16.0，stretch_inner 需要 42.0；不相容会在输出前回报 `ARGUMENT_CONFLICT`。未指定版本，或版本在 12.0 到 97.1 之外，会回报 `versionChecked: false` 与 `VERSION_NOT_CHECKED`，但不会跳过 GUI 最低版本限制。动画依据文档格式及历史在表内标示已检查，并非逐版本游戏客户端实测。来源见[材质动画与历史](https://minecraft.wiki/w/Resource_pack#Texture_animation)（interpolate 在 14w25a 加入，早于支持表）、[GUI scaling](https://www.minecraft.net/en-us/article/minecraft-snapshot-23w31a) 与 [pack format](https://minecraft.wiki/w/Pack_format)。这些检查确认设置结构与已知版本相容性，不代表已验证游戏内外观或行为。
+
+### mcmeta_asset
+
+指定 `mode`（`animation` 或 `gui`）与 `inputPath`（PNG）。 `animation`: `frameSize`, `frametime`, `frames`, `interpolate`; `gui`: `type`, `border`, `stretchInner`. 指定版本可用 `minecraftVersion` 或 `resourcePackVersion`。另一种模式的字段（即使为 false）会返回 `INVALID_ARGUMENT`。`outputPath` 明确指定 `.mcmeta`，另可用 `force`、`mkdir`；省略路径则返回 `mcmetaText`，不写文件。`force`、`mkdir` 必须搭配路径。结果含 `mode`、`width`、`height`、`versionChecked`、`version`、`target`、`warnings`，以及 `output` 或 `mcmetaText`。
+
+```json
+{"mode":"gui","inputPath":"panel.png","type":"nine_slice","border":4,"stretchInner":true,"resourcePackVersion":"42"}
+```
+
+## 比较 PNG 的变化
+
+```sh
+mc-asset compare before.png after.png --json
+mc-asset compare before.png after.png --output diff.png --scale 4
+mc-asset compare before.png after.png --stdout --json > diff.png
+```
+
+只接受尺寸相同的 PNG；尺寸不同返回 `INVALID_ARGUMENT`。未指定 `--output` 或 `--stdout` 时只返回报告，不写文件。使用 `--stdout` 时，PNG 字节写入 stdout，报告写入 stderr。`--output` 与 `--stdout` 不能同时使用。
+
+报告包含 `width`、`height`、`totalPixels`、`rawChangedPixels`、`visibleChangedPixels`、`rawBounds`、`visibleBounds`。原始差异逐一比较解码后的 RGBA 通道，包括 alpha 为零时隐藏的 RGB。可见差异采用现有 flatten 合成规则，但双方 alpha 都为零时忽略 RGB。差异框采用原图坐标，以从零开始的 `{x,y,width,height}` 表示，包含最后一个变化像素；没有差异时为 `null`。
+
+诊断 PNG 用洋红色（`255,0,255,255`）标记可见差异，用青色（`0,255,255,255`）标记仅有原始差异的像素，未变像素为透明（`0,0,0,0`）。该图是诊断标记，不是修改后的素材。`--scale` 接受 1 到 16 的整数，默认为 1，通过 nearest 放大标记图，不改变报告统计。图像放大后的长边不得超过 1024 像素，超限返回 `RESOURCE_LIMIT_EXCEEDED`，不会自动缩小。仅报告模式沿用现有 PNG 解码器限制。
+
+两个源文件都不会被改写。显式输出路径必须以 `.png` 结尾；源文件别名、符号链接目标或父目录都会被拒绝。覆盖现有目标需要 `--force`，创建缺少的父目录需要 `--mkdir`；这两个选项都需要文件输出路径。所有输出先通过检查，才写入文件或发送 stdout 图像字节。
+
+### compare_assets
+
+通过 `beforePath`、`afterPath` 指定两张同尺寸 PNG。`image` 为 `none`（默认，仅报告）或 `diff`；`scale` 是 1 到 16 的整数，默认为 1。只有 `image: "diff"` 可使用 `outputPath`，将图像写入显式 `.png` 路径，可搭配 `force`、`mkdir`。diff 模式未提供 `outputPath` 时，返回 JSON 报告与标准 `image/png` 图像块，不在文本中重复 Base64。`force`、`mkdir` 均需要 `outputPath`。
+
+报告、标记颜色、原图坐标差异框、放大后 1024 像素限制、源文件保护与错误均遵循上面的 PNG 比较规则。源文件不会被改写。
+
+```json
+{"beforePath":"before.png","afterPath":"after.png","image":"diff","scale":4}
+```

@@ -1,6 +1,6 @@
 import { McAssetError } from "../core/errors.ts";
 import { isBuiltinMaterialId } from "../core/material.ts";
-import { recolorLayer } from "../core/recolor.ts";
+import { recolorLayer, recolorRolelessCanvas } from "../core/recolor.ts";
 import { encodePng } from "../io/png.ts";
 import {
 	assertMinecraftOutputPath,
@@ -72,8 +72,18 @@ export async function runRecolor(
 			options.region === undefined || options.region === ""
 				? undefined
 				: options.region;
+		const isMcpx = inputPath.toLowerCase().endsWith(".mcpx");
+		const isPng = inputPath.toLowerCase().endsWith(".png");
+		if (!isMcpx && !isPng) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				"recolor reads an editable .mcpx or .png source.",
+				{ input: inputPath },
+			);
+		}
+		const inPlaceKind = options.inPlace === true && isMcpx ? "build" : "import";
 		const targets = resolveArtifactTargets({
-			command: "build",
+			command: inPlaceKind,
 			output: options.output,
 			stdout: options.stdout,
 			source: options.source,
@@ -84,24 +94,24 @@ export async function runRecolor(
 		if (options.output !== undefined && options.output !== "") {
 			assertMinecraftOutputPath(profile, options.output);
 		}
-		if (!inputPath.toLowerCase().endsWith(".mcpx")) {
-			throw new McAssetError(
-				"INVALID_ARGUMENT",
-				"recolor reads an editable .mcpx source.",
-				{ input: inputPath },
-			);
-		}
 		const loaded = await loadEditableCanvas(inputPath);
 		const canvas = loaded.canvas;
 		const warnings: WarningNote[] = loaded.warnings;
 		const selection = resolveCommandSelection(canvas, options.selection, false);
 		const before = snapshotLayerBytes(canvas);
 		let pixelsChanged = 0;
-		for (const layer of canvas.layers) {
-			const report = recolorLayer(canvas, layer.id, options.material, {
+		if (isMcpx) {
+			for (const layer of canvas.layers) {
+				const report = recolorLayer(canvas, layer.id, options.material, {
+					...(regionId !== undefined ? { regionId } : {}),
+				});
+				pixelsChanged += report.pixelsChanged;
+			}
+		} else {
+			const report = recolorRolelessCanvas(canvas, options.material, {
 				...(regionId !== undefined ? { regionId } : {}),
 			});
-			pixelsChanged += report.pixelsChanged;
+			pixelsChanged = report.pixelsChanged;
 		}
 		// Selection (and region-external pixels already skipped by the
 		// engine) return to their input bytes; the count below describes

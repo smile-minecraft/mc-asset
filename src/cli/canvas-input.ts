@@ -164,3 +164,43 @@ export function restoreUnselectedPixels(
 	}
 	return changed;
 }
+
+/**
+ * Deep structural copy of a PixelCanvas: width, height, layers, regions, palette, metadata.
+ * Pixel buffers and region masks are freshly cloned Uint8Arrays.
+ */
+export function cloneCanvas(canvas: PixelCanvas): PixelCanvas {
+	return {
+		version: canvas.version,
+		width: canvas.width,
+		height: canvas.height,
+		...(canvas.palette !== undefined
+			? {
+					palette: {
+						entries: canvas.palette.entries.map((entry) => ({
+							...entry,
+							color: { ...entry.color },
+							...(entry.metadata !== undefined
+								? { metadata: { ...entry.metadata } }
+								: {}),
+						})),
+					},
+				}
+			: {}),
+		metadata: { ...canvas.metadata },
+		regions: canvas.regions.map((region) => ({
+			...region,
+			mask: new Uint8Array(region.mask),
+			...(region.metadata !== undefined
+				? { metadata: { ...region.metadata } }
+				: {}),
+		})),
+		layers: canvas.layers.map((layer) => ({
+			...layer,
+			pixels: new Uint8Array(layer.pixels),
+			...(layer.metadata !== undefined
+				? { metadata: { ...layer.metadata } }
+				: {}),
+		})),
+	};
+}
