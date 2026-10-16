@@ -178,9 +178,6 @@ const showcasePaths = readdirSync(docsAssets, {
 	.filter((path) => path.endsWith(".png"))
 	.sort();
 
-/** Total size of the 25 showcase files before they were optimized. */
-const ORIGINAL_SHOWCASE_BYTES = 2_764_911;
-
 /** Size of an RGBA8 PNG whose IDAT uses stored (uncompressed) deflate blocks. */
 function storedEncodingSize(width: number, height: number): number {
 	const raw = height * (1 + width * 4);
@@ -341,20 +338,25 @@ export const PNG_COMPRESS_CASES: PngCase[] = [
 		},
 	})),
 	{
-		// The showcase files are already optimized, so the original corpus
-		// size is pinned: the 25 files measured 2,764,911 bytes when they
-		// were encoded without compression.
-		name: "25 showcase files re-encode to at most 20 percent of the original corpus",
+		// The showcase files are already optimized (palette or grayscale
+		// storage), while encodePng always writes RGBA8, so a re-encode is
+		// expected to be larger than the file itself. The bound is the
+		// stored (uncompressed) encoding size instead: it catches a
+		// regression that inflates output without pinning the corpus size.
+		name: "showcase re-encodes stay within 20 percent of the stored corpus size",
 		run: (check) => {
-			check.equal(showcasePaths.length, 25, "fixed showcase corpus size");
+			check.ok(showcasePaths.length > 0, "showcase corpus is not empty");
 			let encodedBytes = 0;
+			let storedBytes = 0;
 			for (const path of showcasePaths) {
 				const source = new Uint8Array(readFileSync(`${docsAssets}${path}`));
-				encodedBytes += encodePng(decodePng(source).canvas).length;
+				const canvas = decodePng(source).canvas;
+				encodedBytes += encodePng(canvas).length;
+				storedBytes += storedEncodingSize(canvas.width, canvas.height);
 			}
 			check.ok(
-				encodedBytes * 5 <= ORIGINAL_SHOWCASE_BYTES,
-				`showcase total ${encodedBytes} must be <= 20% of ${ORIGINAL_SHOWCASE_BYTES}`,
+				encodedBytes * 5 <= storedBytes,
+				`showcase total ${encodedBytes} must be <= 20% of stored ${storedBytes}`,
 			);
 		},
 	},
