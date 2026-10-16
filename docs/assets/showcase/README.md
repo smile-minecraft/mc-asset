@@ -3,12 +3,12 @@
 Every file in this directory was produced by **mc-asset itself**.
 No external image tools were used. All procedural sources use fixed seeds, so
 the full set below is reproducible end to end. The showcase sources are
-deliberately chosen so each effect stays visible at README display size:
+chosen so each effect stays visible at README display size:
 high-detail noise for pixelize, a 64-band gradient for quantize, and a
 hand-built brick block for tiling.
 
-The hand-drawn sprites (items, the tiling block, the animation frames, and the
-GUI frame) follow the vanilla style rules in the repository's
+The hand-drawn sprites (items, tiling blocks, animation frames, and
+GUI frames) follow the vanilla style rules in the repository's
 `minecraft-pixel-art` skill (`skills/minecraft-pixel-art/`): 16×16, light
 from the top left, outlines in each material's own dark shades, 8–12 opaque
 colors per item, dark seams on the bottom and right of block elements, and
@@ -17,7 +17,8 @@ original designs rather than traces of vanilla textures.
 Conventions used in the commands: `OUT=docs/assets/showcase`,
 `SCRATCH=/tmp/showcase` (throwaway intermediates only; nothing is read from
 outside mc-asset). All upscales are nearest-neighbor (`transform
---resize-mode nearest` or `preview --scale`) to keep pixels crisp.
+--resize-mode nearest` or `preview --scale`) to keep pixels crisp, and every
+final PNG is passed through `mc-asset optimize`.
 
 ## File list
 
@@ -42,6 +43,16 @@ outside mc-asset). All upscales are nearest-neighbor (`transform
 | `gui/dialog.grid` / `gui/dialog.png.mcmeta` | 16×16 ASCII grid + mcmeta | Hand-authored vanilla-style GUI frame with a 4px `nine_slice` border |
 | `gui/dialog.png` | 64×64 | The frame, ×4 nearest |
 | `gui/nine-slice.png` / `gui/stretch.png` | 192×128 each | `gui-scale` to 48×32 with and without the mcmeta, ×4 nearest |
+| `blocks/<stone,dirt,planks>.grid` | 16×16 ASCII grids | Hand-authored stone, dirt, and oak-planks block faces: tile sources |
+| `blocks.png` | 384×128 | The three block faces packed into one horizontal strip (48×16), ×8 nearest |
+| `blocks-wall.png` | 256×256 | 4×4 repeat of the planks face (64px wall, ×4 nearest) |
+| `potion-variants.png` | 240×80 | `items/potion.grid` recolored into crystal, gold, and iron, packed into a strip (48×16), ×5 nearest |
+| `compare-diff.png` | 128×128 | `compare` of the iron and gold potion variants (16×16 diagnostic), ×8 nearest |
+| `gui/button.grid` / `gui/button.png.mcmeta` | 16×16 ASCII grid + mcmeta | Hand-authored vanilla-style button with a 3px `nine_slice` border |
+| `gui/button.png` | 64×64 | The button, ×4 nearest |
+| `gui/button-nine-slice.png` / `gui/button-stretch.png` | 192×64 each | `gui-scale` to 48×16 with and without the mcmeta, ×4 nearest |
+| `model-shrine.json` | Java model spec | Five-cuboid stepped shrine block referencing `bricks`, `planks`, `stone`, and `ore` |
+| `model-preview.png` | 384×128 | Three-view diagnostic PNG (`front`, `right`, `top`, `--size 128`) from `model preview` |
 
 ## 1. Pixelize before / after
 
@@ -49,7 +60,7 @@ Base: `clustered-noise`, 128px, seed 7, palette `crystal` — a high-detail
 swatch whose finest cells are 4px wide. The before is a ×2 nearest upscale;
 the after goes through `pixelize` (preset `block`) down to 16px and back up
 ×16, so the 4px clusters merge into visibly coarser blocks. Size 32 was
-tried first but rejected: 128/32 = 4 aligns exactly with the 4px cells, so
+tried first and dropped: 128/32 = 4 aligns with the 4px cells, so
 the round trip came back byte-identical to the before.
 
 ```sh
@@ -243,22 +254,120 @@ mc-asset gui-scale $SCRATCH/dialog.png --size 48x32 --output $SCRATCH/dialog-str
 mc-asset preview $SCRATCH/dialog-stretch.png --scale 4 --output $OUT/gui/stretch.png
 ```
 
+## 10. Block faces and plank wall
+
+Three hand-authored 16×16 block faces in `blocks/`: `stone` (soft
+low-contrast clusters in four grays), `dirt` (warm brown granules with 2px
+pebbles and zero isolated noise pixels), and `planks` (four 4-row boards with
+a dark seam on the 4th row, staggered vertical board-end joints, and horizontal
+wood grain). `tile` reports `seam=h:0.006781 v:0.004298` for stone,
+`h:0.002900 v:0.001236` for dirt, and `h:0.046277 v:0.001672` for planks (the
+horizontal score comes from the dark board seams meeting the lit top edges of
+the next board). The three faces are packed into one strip with `animate pack`
+and shown ×8; the planks face also gets a 4×4 wall preview (64px wall, ×4).
+
+```sh
+i=1
+for block in stone dirt planks; do
+  mc-asset render $OUT/blocks/$block.grid --source $SCRATCH/blocks/$i-$block.mcpx --mkdir
+  i=$((i + 1))
+done
+mc-asset animate pack --frames-dir $SCRATCH/blocks --layout horizontal \
+  --output $SCRATCH/blocks-48x16.png
+mc-asset preview $SCRATCH/blocks-48x16.png --scale 8 --output $OUT/blocks.png
+mc-asset render $OUT/blocks/planks.grid --output $SCRATCH/planks16.png
+mc-asset tile $SCRATCH/planks16.png --preview 4x4 --output $SCRATCH/planks-wall64.png
+mc-asset preview $SCRATCH/planks-wall64.png --scale 4 --output $OUT/blocks-wall.png
+```
+
+## 11. Potion variants and compare
+
+Source: `items/potion.grid` (section 6). The glass rim (`outline` and `custom`),
+the glass body (`custom`), the wooden cork (`custom`), and the white glint
+(`accent`) stay fixed, while the liquid inside uses `shadow`, `base`, `light`,
+and `highlight` roles. `variant` recolors the liquid into crystal, gold, and
+iron; `animate pack` packs them in name order (`crystal`, `gold`, `iron`) at
+×5. `compare` of the iron and gold variants reports 72 changed pixels (the
+liquid silhouette, bounds `x:3 y:7 w:10 h:8`, with the 2px white glint
+untouched); the diagnostic PNG marks them in magenta on transparency, shown ×8.
+
+```sh
+mc-asset render $OUT/items/potion.grid --source $SCRATCH/potion.mcpx
+mc-asset variant $SCRATCH/potion.mcpx \
+  --materials crystal,gold,iron \
+  --output-dir $SCRATCH/potion-variants --mkdir
+mc-asset animate pack --frames-dir $SCRATCH/potion-variants --layout horizontal \
+  --output $SCRATCH/potion-variants-48x16.png
+mc-asset preview $SCRATCH/potion-variants-48x16.png --scale 5 --output $OUT/potion-variants.png
+mc-asset compare $SCRATCH/potion-variants/potion_iron.png $SCRATCH/potion-variants/potion_gold.png \
+  --output $SCRATCH/compare-diff-16.png
+mc-asset preview $SCRATCH/compare-diff-16.png --scale 8 --output $OUT/compare-diff.png
+```
+
+## 12. Button nine-slice
+
+Source: `gui/button.grid`, a hand-authored 16×16 raised button — a 1px black
+outline with cut corners, a 1px white bevel on the top and left, a 1px
+`#555555` bevel on the bottom and right, and a flat `#C6C6C6` fill — plus
+`gui/button.png.mcmeta`, which declares `nine_slice` with a 3px border that
+holds the outline, the bevel, and one fill pixel. Narrower frame than the
+section-9 dialog (2px all round instead of 3px). `gui-scale` takes it to
+48×16 once with the mcmeta and once without (plain stretch); all three are
+shown ×4.
+
+```sh
+mc-asset render $OUT/gui/button.grid --output $SCRATCH/button.png
+mc-asset preview $SCRATCH/button.png --scale 4 --output $OUT/gui/button.png
+mc-asset gui-scale $SCRATCH/button.png --mcmeta $OUT/gui/button.png.mcmeta \
+  --size 48x16 --output $SCRATCH/button-nine-slice.png
+mc-asset preview $SCRATCH/button-nine-slice.png --scale 4 --output $OUT/gui/button-nine-slice.png
+mc-asset gui-scale $SCRATCH/button.png --size 48x16 --output $SCRATCH/button-stretch.png
+mc-asset preview $SCRATCH/button-stretch.png --scale 4 --output $OUT/gui/button-stretch.png
+```
+
+## 13. Java block model three-view preview
+
+Source: `model-shrine.json`, a five-cuboid stepped shrine model (`bricks` base
+plinth, `planks` pillar, north `ore` emblem, `stone` upper cap, and top `ore`
+beacon) built against a scratch pack holding the rendered block textures from
+sections 4, 5, and 10. Validated with `model validate` and rendered as a
+384×128 three-panel diagnostic image (`front`, `right`, `top`, `--size 128`)
+with `model preview`.
+
+```sh
+mkdir -p $SCRATCH/pack/assets/mypack/textures/block
+mc-asset render $OUT/blocks/stone.grid --output $SCRATCH/pack/assets/mypack/textures/block/stone.png
+mc-asset render $OUT/blocks/planks.grid --output $SCRATCH/pack/assets/mypack/textures/block/planks.png
+mc-asset render $OUT/tile-source.grid --output $SCRATCH/pack/assets/mypack/textures/block/bricks.png
+mc-asset render $OUT/anim/frame-3.grid --output $SCRATCH/pack/assets/mypack/textures/block/ore.png
+mc-asset model create --spec $OUT/model-shrine.json \
+  --output $SCRATCH/pack/assets/mypack/models/block/shrine.json --mkdir --resource-pack-version 75
+mc-asset model validate $SCRATCH/pack/assets/mypack/models/block/shrine.json \
+  --pack $SCRATCH/pack --resource-pack-version 75
+mc-asset model preview $SCRATCH/pack/assets/mypack/models/block/shrine.json \
+  --pack $SCRATCH/pack --size 128 --output $OUT/model-preview.png --resource-pack-version 75
+```
+
 ## Verification (spot checks)
 
 ```sh
 mc-asset analyze $OUT/pixelize-after.png      # 256x256, 7 colors, solid
 mc-asset analyze $OUT/quantize-before.png     # 256x256, 64 colors, solid
 mc-asset analyze $OUT/quantize-after.png      # 256x256, 8 colors, solid
-mc-asset analyze $OUT/variants.png           # 560x80, cutout
+mc-asset analyze $OUT/variants.png            # 560x80, cutout
 mc-asset analyze $OUT/tile-pattern.png        # 128x128, 7 colors, solid
 mc-asset analyze $OUT/tile-preview.png        # 256x256, 7 colors, solid
 mc-asset analyze $OUT/anim-sheet.png          # 64x256, 8 colors, solid
 mc-asset preview $OUT/items.png --ascii       # ASCII readout: non-blank artwork
+mc-asset analyze $OUT/blocks.png              # 384x128, 15 colors, solid
+mc-asset analyze $OUT/blocks-wall.png         # 256x256, 5 colors, solid
+mc-asset analyze $OUT/potion-variants.png     # 240x80, 19 colors, cutout
+mc-asset analyze $OUT/compare-diff.png        # 128x128, 2 colors, cutout
+mc-asset analyze $OUT/gui/button.png          # 64x64, 5 colors, cutout
+mc-asset analyze $OUT/model-preview.png       # 384x128, 24 colors, cutout
 ```
 
-Size note: the 256×256 display files are ~256KB each. That is the known
-standing exception — the deterministic encoder writes these uncompressed —
-and it applies to `pixelize-before.png`, `pixelize-after.png`,
-`quantize-before.png`, `quantize-after.png`, and `tile-preview.png`, as
-well as the two strips `items.png` (~220KB) and `variants.png` (~180KB).
-All other files stay under 100KB.
+Size note: every showcase PNG is losslessly re-encoded with `mc-asset optimize`
+into indexed, grayscale, or compressed RGBA storage, so each file stays between
+97 bytes and 1.1 KB (`mc-asset optimize --input-dir docs/assets/showcase --recursive --dry-run`
+reports `unchanged` for all 29 PNGs).

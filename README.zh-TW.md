@@ -9,57 +9,74 @@
 
 ![mc-asset banner](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/banner.png)
 
-專為 Minecraft Java Edition 資源包打造的像素原生 2D 素材引擎與確定性 CLI／MCP 工具鏈，給人類創作者和 AI Coding Agent 使用。
+`mc-asset` 是 Minecraft Java 版資源包的貼圖工具，提供命令列（CLI）和 MCP 兩種用法，創作者和 AI 助手都能直接使用。
 
-語言模型沒辦法用眼睛擺像素，所以 `mc-asset` 把做貼圖這件事變成文字和指令：用字元網格畫圖、把參考圖像素化、生成可平鋪的紋理、打包動畫圖集、驗證整個資源包。這些都能在終端機裡做，也能透過 MCP 呼叫。相同的輸入和種子，永遠得到相同的位元組。
+語言模型沒辦法用眼睛擺像素，所以 `mc-asset` 把做貼圖這件事變成文字和指令：用字元網格畫圖、把參考圖縮成像素風、產生可平鋪的紋理、打包動畫圖集、預覽方塊模型、檢查整個資源包。這些都能在終端機裡做，也能透過 MCP 呼叫。相同的輸入和種子，產生的檔案內容完全相同。
 
 ![劍、鎬、蘋果、藥水、藍寶石與鑰匙，每個都是原版風格的 16×16 像素圖](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/items.png)
 
-*六個 16×16 物品，每個都寫成文字網格，再由 `mc-asset render` 算繪（×6 顯示），畫法依照 [`minecraft-pixel-art`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/minecraft-pixel-art) skill 的原版風格規則。網格原始檔在 [`docs/assets/showcase/items/`](https://github.com/smile-minecraft/mc-asset/tree/main/docs/assets/showcase/items)。*
+*六個 16×16 物品，每個都寫成文字網格，再由 `mc-asset render` 繪製（×6 顯示），畫法依照 [`minecraft-pixel-art`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/minecraft-pixel-art) skill 的原版風格規則。網格原始檔在 [`docs/assets/showcase/items/`](https://github.com/smile-minecraft/mc-asset/tree/main/docs/assets/showcase/items)。*
 
 ---
 
 ## 目錄
 
+- [功能一覽](#功能一覽)
 - [核心特點](#核心特點)
 - [成果展示](#成果展示)
 - [安裝指南](#安裝指南)
-- [給 AI Agent](#給-ai-agent)
+- [給 AI 助手](#給-ai-助手)
 - [快速上手](#快速上手)
 - [常用操作實務](#常用操作實務)
 - [MCP 伺服器](#mcp-伺服器)
 - [CLI 指令一覽表](#cli-指令一覽表)
-- [批次像素修訂操作（`--operations`）](#批次像素修訂操作--operations)
+- [批次像素修改（`--operations`）](#批次像素修改--operations)
 - [系統架構與可靠性保證](#系統架構與可靠性保證)
 - [開發者指令](#開發者指令)
 - [授權條款](#授權條款)
 
 ---
 
+## 功能一覽
+
+- 用文字網格畫貼圖（`render`）
+- 把參考圖縮成像素風（`pixelize`）、減少顏色（`quantize`）
+- 一鍵換材質變體（`variant`）
+- 產生可平鋪的紋理（`generate`、`tile`）
+- 打包動畫圖集、產生 `.mcmeta`（`animate`、`mcmeta`）
+- 介面貼圖縮放（`gui-scale`）
+- 比對兩張圖的差異（`compare`）
+- 檢查單張貼圖或整個資源包（`validate`、`validate-pack`）
+- 無損壓縮 PNG（`optimize`）
+- 建立、檢查、預覽 Java 方塊模型（`model`）
+- 以 MCP 伺服器提供給 AI 助手使用（`mcp`）
+
+---
+
 ## 核心特點
 
-- **文字進，貼圖出。** 貼圖可以寫成字元網格（`.grid`）或可編輯的多圖層來源（`.mcpx`），再建置成 PNG。格式見 [`docs/mcpx-format.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.zh-TW.md)。
-- **位元組可重現。** 沒有未給種子的隨機，顏色合成只用整數，所以每次執行、以及 Bun 和 Node 之間，產出的 PNG 與 `.mcpx` 都完全相同。
-- **一個引擎，兩種入口。** CLI 和 stdio MCP 伺服器呼叫同一個核心，Agent 拿到的結果和 shell 腳本完全一樣。
-- **輸出可以直接解析。** `--json` 一律回傳 `{ success, result, error }` 信封並附上穩定的錯誤碼，日誌不會混進 stdout 的資料。
-- **不會意外寫檔。** 輸出路徑都要明確指定，覆寫既有檔案要加 `--force`，每個檔案都先寫暫存檔再原子改名。
+- **文字進，貼圖出。** 貼圖可以寫成字元網格（`.grid`）或可編輯的多圖層原始檔（`.mcpx`），再轉成 PNG。格式見 [`docs/mcpx-format.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.zh-TW.md)。
+- **輸出完全一致。** 不使用未指定種子的隨機數，顏色合成只用整數運算，因此每次執行、以及在 Bun 和 Node 之間，產出的 PNG 與 `.mcpx` 內容都完全相同。
+- **一個核心，兩種用法。** CLI 和 stdio MCP 伺服器共用同一個核心，AI 助手拿到的結果和 shell 腳本完全一樣。
+- **統一的回傳格式。** `--json` 一律回傳 `{ success, result, error }` 與固定的錯誤碼，日誌不會混進 stdout 的資料。
+- **不會意外改檔。** 輸出路徑都要明確指定，覆寫既有檔案要加 `--force`；每個檔案都先寫入暫存檔，完成後再改成正式檔名。
 
 ---
 
 ## 成果展示
 
-以下圖片全部由 mc-asset 本身產出，程序化來源都使用固定 seed，整組可重現。對應指令見 [`docs/assets/showcase/README.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/README.md)。
+以下圖片全部由 `mc-asset` 本身產出，程式生成的紋理都使用固定種子，整組皆可重現。對應指令見 [`docs/assets/showcase/README.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/README.md)。
 
-| 像素化（Pixelize） | 色彩量化（Quantize） |
+| 像素化（Pixelize） | 減少顏色（Quantize） |
 |---|---|
 | ![pixelize 前](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-before.png) → ![pixelize 後](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-after.png) | ![quantize 前](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-before.png) → ![quantize 後](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-after.png) |
-| 高細節參考圖（128px，×2 顯示）縮到 16px（×16 顯示）：顆粒變粗，形狀收斂成整齊的像素格。 | 64 色漸層壓到 8 色（皆為 ×4 顯示）：顏色數變少，出現明顯的色階。 |
+| 高細節參考圖（128px，×2 顯示）縮到 16px（×16 顯示）：顆粒變粗，形狀收斂成整齊的像素格。 | 64 色漸層壓到 8 色（皆為 ×4 顯示）：顏色數變少，出現清楚的色階。 |
 
-**材質變體**：把本頁開頭那把劍展開成全部七種內建材質（`copper`、`crystal`、`gold`、`iron`、`oxidized_copper`、`stone`、`wood`，×5 顯示）。它的調色盤替每個顏色標了角色，所以劍身和護手換上新色階，最深的外框、白色反光、木頭握柄和護手上的寶石維持原色：
+**材質變體**：把本頁開頭那把劍展開成全部七種內建材質（`copper`、`crystal`、`gold`、`iron`、`oxidized_copper`、`stone`、`wood`，×5 顯示）。調色盤替每個顏色標了角色，所以劍身和護手換上新色階，最深的外框、白色反光、木頭握柄和護手上的寶石維持原色：
 
 ![換成七種材質的劍](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variants.png)
 
-**程序化紋理**：每種 `generate` 圖樣各一張 16px 樣本，使用固定 seed（×4 顯示）：
+**程式生成的紋理**：每種 `generate` 圖樣各一張 16px 樣本，使用固定種子（×4 顯示）：
 
 | `noise` | `clustered-noise` | `stripes` | `checker` | `gradient` |
 |:-:|:-:|:-:|:-:|:-:|
@@ -67,13 +84,29 @@
 | `brick` | `spots` | `veins` | `cracks` | `grain` |
 | ![brick](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/brick.png) | ![spots](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/spots.png) | ![veins](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/veins.png) | ![cracks](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/cracks.png) | ![grain](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/patterns/grain.png) |
 
-**無縫平鋪**：一張 16px 的磚塊方塊貼圖（左，×8 顯示）與它鋪成的 4×4 牆面（右，×4 顯示）；灰縫在每條邊上都接得起來：
+**無縫平鋪**：一張 16px 的磚塊方塊貼圖（左，×8 顯示）與它鋪成的 4×4 牆面（右，×4 顯示）；磚縫在每條邊上都接得起來：
 
 ![平鋪來源](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-pattern.png) ![4x4 平鋪牆面](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-preview.png)
+
+**方塊貼圖**：石頭、泥土、橡木木板三張 16×16 貼圖（×8 顯示），四邊都能無縫銜接。右邊是木板鋪成的 4×4 牆面（×4 顯示）：
+
+![三張方塊貼圖](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/blocks.png) ![4x4 木板牆面](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/blocks-wall.png)
 
 **動畫圖集**：發光礦石方塊的四張影格，打包成一條直向圖集（×4 顯示），也就是 Minecraft 搭配 `.mcmeta` 動畫讀取的排列方式：
 
 ![動畫圖集](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/anim-sheet.png)
+
+**藥水變體與比對**：把藥水換成 `crystal`、`gold`、`iron` 三種材質（×5 顯示），玻璃瓶身維持原色、只有瓶內藥水跟著換色。用 `compare` 比對鐵與金版本，找出瓶內 72 個變動的藥水像素，在診斷圖上以洋紅色標出（×8 顯示）：
+
+![換成三種材質的藥水](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/potion-variants.png) ![兩個藥水變體的比對診斷圖](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/compare-diff.png)
+
+**按鈕九宮格**：一張 16px 的按鈕外框（左，×4 顯示），放大到 48×16 的九宮格結果（中，×4 顯示）與直接拉伸的結果（右，×4 顯示）；九宮格的角落和斜面保持俐落，直接拉伸則會糊掉：
+
+![按鈕原圖](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/button.png) ![按鈕九宮格結果](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/button-nine-slice.png) ![按鈕拉伸結果](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/button-stretch.png)
+
+**Java 模型三視圖預覽**：由五個長方體組成的階梯祭壇方塊模型（[`model-shrine.json`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/model-shrine.json)），使用上方展示過的磚塊、木板、石頭和發光礦石貼圖。透過 `mc-asset model preview --size 128` 從三個方向各看一次：正面（北，`front`）、側面（東，`right`）、上方（`top`）：
+
+![Java 方塊模型的三視圖預覽](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/model-preview.png)
 
 ---
 
@@ -116,26 +149,26 @@ bun run build
 
 ---
 
-## 給 AI Agent
+## 給 AI 助手
 
-- [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt)：給 Agent 的專案精簡索引。
-- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份資訊的單檔版本，涵蓋安裝、二十五個 MCP 工具、批次操作、錯誤模型與限制。
-- [`docs/cli-surface.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.zh-TW.md)：已凍結的 CLI 指令、批次操作規格與狀態碼註冊表。
+- [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt)：給 AI 助手的專案精簡索引。
+- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份資訊的單檔版本，涵蓋安裝、25 個 MCP 工具、批次操作、錯誤模型與限制。
+- [`docs/cli-surface.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.zh-TW.md)：已凍結的 CLI 指令、批次操作規格與狀態碼對照表。
 - [`docs/mcpx-format.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.zh-TW.md)：可編輯的多圖層 `.mcpx` 與 `.grid` 格式語法與規範。
-- [`docs/mcp-guide.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.zh-TW.md)：註冊方式、每個 MCP 工具一份原樣擷取，以及錯誤模型。
-- [`docs/mcp-surface.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-surface.zh-TW.md)：已凍結的 MCP 介面——工具名稱、輸入與讀寫契約。
+- [`docs/mcp-guide.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.zh-TW.md)：註冊方式、每個 MCP 工具的實際呼叫紀錄，以及錯誤模型。
+- [`docs/mcp-surface.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-surface.zh-TW.md)：已凍結的 MCP 介面——工具名稱、輸入參數與讀寫規則。
 - [`AGENTS.md`](https://github.com/smile-minecraft/mc-asset/blob/main/AGENTS.md)：修改本專案時必須遵守的規則。
 
 ### Agent Skills
 
-本專案在 [`skills/`](https://github.com/smile-minecraft/mc-asset/tree/main/skills) 附上兩個 [Agent Skill](https://skills.sh/)，可以用 skills CLI 安裝：
+本專案在 [`skills/`](https://github.com/smile-minecraft/mc-asset/tree/main/skills) 附上兩個給 AI 助手使用的 [Agent Skill](https://skills.sh/)，可以用 skills CLI 安裝：
 
 ```sh
 npx skills add smile-minecraft/mc-asset
 ```
 
-- [`mc-asset`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/mc-asset)：用這套工具畫圖的流程（撰寫 → 算繪 → 預覽 → 量測 → 驗證）、CLI 與 MCP 的指令對照，以及調色盤角色如何決定換色結果。
-- [`minecraft-pixel-art`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/minecraft-pixel-art)：物品、方塊、GUI 與動畫的原版風格規則，包括調色盤與色相偏移色階、依材質上色的外框、左上光源、平鋪，以及一份常見錯誤的審查清單。
+- [`mc-asset`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/mc-asset)：用這套工具畫圖的流程（撰寫 → 繪製 → 預覽 → 量測 → 驗證）、CLI 與 MCP 的指令對照，以及調色盤角色如何決定換色結果。
+- [`minecraft-pixel-art`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/minecraft-pixel-art)：物品、方塊、GUI 與動畫的原版風格規則，包括調色盤與色相偏移色階、依材質上色的外框、左上光源、平鋪，以及一份常見錯誤的檢查清單。
 
 只想裝其中一個時，加上 `--skill mc-asset` 或 `--skill minecraft-pixel-art`。
 
@@ -181,7 +214,7 @@ W = #FFFFFFFF
 EOF
 ```
 
-將文字網格算繪為 PNG 材質，並同步儲存可重複編輯的 `.mcpx` 原始檔：
+把文字網格轉成 PNG 貼圖，並同時存一份可重複編輯的 `.mcpx` 原始檔：
 
 ```sh
 mc-asset render /tmp/mc-asset-demo/gem.grid \
@@ -190,9 +223,9 @@ mc-asset render /tmp/mc-asset-demo/gem.grid \
 # ok render profile=generic applied=0 output=/tmp/mc-asset-demo/gem.png source=/tmp/mc-asset-demo/gem.mcpx
 ```
 
-算繪出來的 `gem.png`（×8 顯示）：
+繪製出來的 `gem.png`（×8 顯示）：
 
-![算繪出的寶石](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quickstart-gem.png)
+![繪製出的寶石](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quickstart-gem.png)
 
 檢查它的顏色和透明度：
 
@@ -223,7 +256,7 @@ mc-asset validate /tmp/mc-asset-demo/gem.png --profile minecraft:item
 
 ## 常用操作實務
 
-### 實務 1：參考圖像素化（`pixelize`）
+### 實務 1：把參考圖縮成像素風（`pixelize`）
 
 把高解析度參考圖轉成 16×16 的物品貼圖。同一張圖、同一個預設，永遠得到同樣的像素：
 
@@ -235,12 +268,12 @@ mc-asset pixelize reference.png \
   --output item_texture.png
 ```
 
-- `--preset item` 設定 16 色上限，並啟用裁切、背景、主體、邊緣與色塊（cluster）階段。
+- `--preset item` 設定 16 色上限，並啟用裁切、去背、主體、邊緣與色塊整理階段。
 - 其他預設：`block`、`gui`、`particle`、`generic`。
 
-### 實務 2：程序化材質生成與接縫處理（`generate` 與 `tile`）
+### 實務 2：生成紋理與無縫平鋪（`generate` 與 `tile`）
 
-用固定種子生成石材紋理，再檢查它能不能無縫平鋪：
+用固定種子產生石材紋理，再檢查它能不能無縫平鋪：
 
 ```sh
 mc-asset generate noise \
@@ -260,7 +293,7 @@ mc-asset tile stone.png \
   --output stone_preview.png
 ```
 
-### 實務 3：色彩量化與像素清理（`quantize` 與 `cleanup`）
+### 實務 3：減少顏色與清理雜訊（`quantize` 與 `cleanup`）
 
 把貼圖減到 8 色，再清掉減色後留下的零星像素：
 
@@ -275,11 +308,9 @@ mc-asset cleanup quantized.png \
 
 這兩類修正可能改變透明度，連帶改變貼圖需要的渲染階段（render pass），所以沒加 `--allow-render-pass-change` 時 `cleanup` 會拒絕執行。
 
-### 實務 4：材質階級衍生（`variant` 與 `recolor`）
+### 實務 4：換材質變體（`variant` 與 `recolor`）
 
-把一份來源展開成多種材質，或整份改成單一材質。來源可以是可編輯的
-`.mcpx`，也可以是扁平 PNG（PNG 沒有調色盤角色資訊，像素依整數明度分段
-對應，不會虛構圖層角色）：
+把一份原始檔展開成多種材質，或整份改成單一材質。輸入可以是可編輯的 `.mcpx`，也可以是一般 PNG（PNG 沒有調色盤角色資訊，像素會按整數明度分段對應，不會憑空猜測圖層角色）：
 
 ```sh
 mc-asset variant sword.mcpx \
@@ -293,7 +324,7 @@ mc-asset recolor sword.mcpx --material gold --output sword_gold.png
 
 ### 實務 5：動畫圖集打包（`animate`）
 
-把一整個資料夾的影格打包成垂直圖集，再對照它的 `.mcmeta` 檢查：
+把一整個資料夾的影格打包成直向圖集，再對照它的 `.mcmeta` 檢查：
 
 ```sh
 mc-asset animate pack \
@@ -304,7 +335,7 @@ mc-asset animate pack \
 mc-asset validate ./textures/fire.png --mcmeta ./textures/fire.png.mcmeta
 ```
 
-### 實務 6：資源包完整性校驗（`validate-pack`）
+### 實務 6：檢查整個資源包（`validate-pack`）
 
 掃描整個資源包：缺少的貼圖、錯誤的命名空間、沒被引用的貼圖、損壞的模型參照，以及循環參照。`--minecraft-version` 決定要對照哪一版的資源包格式：
 
@@ -336,7 +367,7 @@ mc-asset build /tmp/mc-asset-demo/gem.mcpx \
 
 ![套用前的寶石](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quickstart-gem.png) → ![套用後的寶石](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/batch-edit-gem.png)
 
-透過 MCP，`apply_asset_operations` 會跑同一批操作，還能把改動的部分畫給你看：
+透過 MCP，`apply_asset_operations` 會跑同一批操作，還能把改動的部分畫出來回傳：
 
 ```json
 {
@@ -350,7 +381,7 @@ mc-asset build /tmp/mc-asset-demo/gem.mcpx \
 }
 ```
 
-帶上 `feedback` 後，結果維持原有欄位，另外附上一個 PNG 圖片區塊（裁切到改動範圍，依 `scale` 放大 1–16 倍），以及 `diff` 摘要（`raw`、`composited`、`structural`、`outsideSelectionUnchanged`）。編輯若沒有造成可見變化，會回傳 `noVisibleChange` 而不附圖片。Agent 不必取回整張畫布就能看到自己改了什麼。輸出路徑和 CLI 那次不同，因為 MCP 工具從不覆寫既有檔案。
+帶上 `feedback` 後，回傳結果除了原本的欄位，還會多一個 PNG 圖片區塊（裁切到改動範圍，依 `scale` 放大 1–16 倍），以及 `diff` 摘要（`raw`、`composited`、`structural`、`outsideSelectionUnchanged`）。若編輯沒有造成可見變化，則回傳 `noVisibleChange` 而不附圖片。AI 助手不必取回整張畫布就能看到自己改了什麼。這裡的輸出路徑和 CLI 不同，是因為 MCP 工具不會覆寫既有檔案。
 
 ### 實務 8：GUI 九宮格縮放（`gui-scale`）
 
@@ -376,9 +407,9 @@ mc-asset gui-scale ./textures/gui/dialog.png \
 
 三張皆為 ×4 顯示。有 mcmeta 時，切角和 2px 斜面 1:1 複製，寬度不變；直接拉伸則會讓斜面粗細不一，切角也糊掉。
 
-### 實務 9：無損 PNG 最佳化與 Java 模型（`optimize` 與 `model`）
+### 實務 9：無損壓縮 PNG 與 Java 方塊模型（`optimize` 與 `model`）
 
-`optimize` 把 PNG 重新編碼成能精確表示相同像素的最小編碼；沒有更小的就保留來源。接受明確的 PNG 路徑清單（最多 256 檔）或整包目錄（`--input-dir`，最多 4096 檔，可選 `--recursive` 保留相對目錄結構）。它不會改寫輸入檔，輸出方式從 `--output`、`--output-dir`、`--stdout`、`--dry-run` 擇一。
+`optimize` 把 PNG 重新編碼成像素完全相同但檔案最小的結果；若沒有更小的編碼，就保留原檔。可傳入明確的 PNG 路徑清單（最多 256 檔）或整個目錄（`--input-dir`，最多 4096 檔，可加 `--recursive` 保留相對目錄結構）。它不會改寫輸入檔，輸出方式從 `--output`、`--output-dir`、`--stdout`、`--dry-run` 擇一。
 
 ```sh
 mc-asset optimize ./gem.png --dry-run
@@ -387,68 +418,70 @@ mc-asset optimize ./gem.png ./sword.png --output-dir ./optimized --mkdir
 mc-asset optimize --input-dir ./textures --recursive --output-dir ./optimized --mkdir
 ```
 
-`model` 處理 Java 方塊／物品模型 JSON（只支援長方體 `elements`）。建立模型、用型別化操作編輯，再對資源包驗證：
+`model` 用來處理 Java 方塊與物品模型 JSON（支援長方體 `elements`）。建立模型、用型別化操作修改，再對資源包檢查：
 
 ```sh
-mc-asset model create --spec ./spec.json \
-  --output ./pack/assets/mypack/models/block/ruby.json --mkdir --resource-pack-version 75
-mc-asset model validate ./pack/assets/mypack/models/block/ruby.json \
+mc-asset model create --spec ./docs/assets/showcase/model-shrine.json \
+  --output ./pack/assets/mypack/models/block/shrine.json --mkdir --resource-pack-version 75
+mc-asset model validate ./pack/assets/mypack/models/block/shrine.json \
   --pack ./pack --resource-pack-version 75
 mc-asset validate-pack ./pack --resource-pack-version 75
 ```
 
-`model apply` 接收 `--operations`，全部套用成功或一個都不套用；`model export` 會放置模型，加上 `--binding` 時還會在旁邊寫出物品定義與 blockstate。檢查範圍是結構與引用是否有效。沒有任何 Minecraft 用戶端渲染過結果，所以外觀與遊戲內行為都未驗證。
+`model apply` 接收 `--operations`，整批套用成功或全部不套用；`model export` 會輸出模型檔，加上 `--binding` 時還會在對應路徑一併寫出物品定義與 blockstate。檢查範圍是 JSON 結構與貼圖參照是否有效，不會啟動 Minecraft 用戶端，因此不涵蓋遊戲內的實際打光與動態行為。
 
-`model preview` 從長方體 `elements` 畫出固定的診斷圖：三個正方形面板橫向排列（`front` 是北面、`right` 是東面、`top` 是上面且北方在上），每個面板邊長為 `--size`（64、128 或 256，預設 64）：
+`model preview` 從長方體 `elements` 繪製固定的診斷圖：三個正方形面板橫向排列（`front` 是北面、`right` 是東面、`top` 是頂面且北方朝上），每個面板邊長為 `--size`（64、128 或 256，預設 64）：
 
 ```sh
-mc-asset model preview ./pack/assets/mypack/models/block/ruby.json \
-  --pack ./pack --size 64 --output ./ruby-preview.png --resource-pack-version 75
+mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
+  --pack ./pack --size 128 --output ./shrine-preview.png --resource-pack-version 75
 ```
 
-`--output` 與 `--stdout` 必須恰好一個。報告帶面板名稱與座標、輸入範圍、`coverage` 與 `warnings`。缺失的貼圖以固定棋盤格呈現並發出警告；元素旋轉、非 1/256 座標、半透明面與無法解析的貼圖列為 `partial` 的 coverage。`display` 變換與遊戲光照不會套用：這是診斷視圖，不是遊戲渲染器。
+![Java 方塊模型的三視圖預覽](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/model-preview.png)
+
+`--output` 與 `--stdout` 必須二選一。報告包含面板名稱與座標、輸入範圍、`coverage` 與 `warnings`。找不到貼圖時會畫成固定棋盤格並發出警告；元素旋轉、非 1/256 座標、半透明面與無法解析的貼圖會列為 `partial`。`display` 變換與遊戲內光照不會套用，這張圖是結構診斷視圖，不是遊戲畫面。
 
 ---
 
 ## MCP 伺服器
 
-`mc-asset mcp` 會啟動一個 stdio MCP 伺服器，底層和 CLI 是同一個核心，所以呼叫工具和執行對應指令會得到相同結果。它提供 25 個工具。
+`mc-asset mcp` 會啟動一個 stdio MCP 伺服器，底層和 CLI 共用同一個核心，因此 AI 助手呼叫工具和在終端機執行指令會得到相同結果。伺服器共提供 25 個工具。
 
 ### 提供的 MCP 工具
 
 | 工具名稱 | 功能說明 |
 |---|---|
-| `analyze_asset` | 唯讀分析：尺寸、調色盤分布、預測透明度類別、像素畫特徵啟發式指標。 |
-| `pixelize_asset` | 將點陣圖（PNG/JPEG/WebP）降採樣為像素圖案，回傳 PNG 位元組或 `.mcpx` 原始碼。 |
-| `render_pixel_asset` | 算繪內嵌 ASCII 網格或 `.grid` 檔案，支援套用批次修訂操作。 |
-| `apply_asset_operations`| 對 `.mcpx` 原始碼進行原子批次像素/圖層/區域修訂。 |
-| `recolor_asset` | 將材質套用至內建材質階梯（如 `iron`、`gold`、`stone` 等）。 |
-| `create_variants` | 依多種材質將單一素材批量衍生至指定目錄中。 |
-| `validate_asset` | 比對單一材質與 `.mcmeta` 是否符合 Minecraft 規範。 |
-| `import_asset` | 將點陣圖輸入（PNG/JPEG/WebP）解碼至像素畫布，可選擇套用批次修訂操作。 |
-| `build_asset` | 將 `.mcpx` 原始碼建置為 PNG 位元組或重新序列化的原始碼，可選擇套用批次修訂操作。 |
-| `transform_asset` | 對點陣圖或 `.mcpx` 輸入套用單一幾何操作（flip、rotate、crop、pad、resize、translate）。 |
-| `scale_gui_asset` | 依 mcmeta 的 stretch/tile/nine_slice 規則縮放 GUI 貼圖；只輸出 PNG。 |
-| `quantize_asset` | 將相異色彩數縮減至指定數量或指定調色盤，並可保留指定 RGBA 色。 |
-| `cleanup_asset` | 偵測或修復像素瑕疵（`isolated`、`noise`、`cluster`、`fringe`、`outlier`、`hole`、`aa`）。 |
-| `palette_asset` | 唯讀調色盤 `extract`/`inspect` 報告（相異色彩、分布、角色、對比）。 |
-| `material_asset` | 對內建材質集提供唯讀 `list`/`show` 報告。 |
+| `analyze_asset` | 唯讀分析：尺寸、調色盤分布、透明度分類與像素畫指標。 |
+| `pixelize_asset` | 把點陣圖（PNG/JPEG/WebP）縮成像素風，回傳 PNG 或 `.mcpx` 原始檔。 |
+| `render_pixel_asset` | 繪製內嵌 ASCII 網格或 `.grid` 檔案，可同時套用批次修改。 |
+| `apply_asset_operations`| 對 `.mcpx` 原始檔整批修改像素、圖層與區域。 |
+| `recolor_asset` | 將貼圖換成內建材質色階（如 `iron`、`gold`、`stone` 等）。 |
+| `create_variants` | 將單一素材一次展開成多種材質變體並寫入目錄。 |
+| `validate_asset` | 檢查單張貼圖與 `.mcmeta` 是否符合 Minecraft 規範。 |
+| `import_asset` | 將點陣圖（PNG/JPEG/WebP）讀入像素畫布，可同時套用批次修改。 |
+| `build_asset` | 將 `.mcpx` 原始檔轉成 PNG 或重新序列化的 `.mcpx`，可同時套用批次修改。 |
+| `transform_asset` | 對點陣圖或 `.mcpx` 套用單一幾何操作（flip、rotate、crop、pad、resize、translate）。 |
+| `scale_gui_asset` | 依 mcmeta 的 stretch/tile/nine_slice 規則縮放 GUI 貼圖，輸出 PNG。 |
+| `quantize_asset` | 將顏色數減到指定數量或對齊指定調色盤，並可保留指定的 RGBA 顏色。 |
+| `cleanup_asset` | 偵測或清除像素瑕疵（`isolated`、`noise`、`cluster`、`fringe`、`outlier`、`hole`、`aa`）。 |
+| `palette_asset` | 唯讀調色盤 `extract`/`inspect` 報告（顏色清單、分布、角色、明暗對比）。 |
+| `material_asset` | 唯讀列出（`list`）或檢視（`show`）內建材質色階。 |
 | `tile_asset` | 接縫、邊緣重複與亮度分析，可選擇輸出平鋪預覽 PNG。 |
-| `generate_asset` | 決定性程序化材質生成（pattern、size、palette、seed）。 |
-| `preview_asset` | `ascii`/`palette-map` 報告，以及 `scale` 與 `nine-slice` 輔助 PNG。 |
-| `mcmeta_asset` | 從 PNG 產生動畫或 GUI 縮放設定。 |
-| `animate_asset` | 對動畫幀組提供 `pack`/`unpack`/`reorder`/`resize`/`validate`/`preview`。 |
-| `validate_pack_asset` | 唯讀整包掃描：命名空間、模型、材質、圖集、版本對應。 |
-| `inspect_asset` | 唯讀 `structure`（圖層、區域、色彩用量、重疊）或 `view`（合成 PNG 圖塊加 metadata）；輸入為 `inputPath`。 |
-| `optimize_asset` | 無損地把 PNG 重新編碼成能精確表示像素的最小編碼（或保留來源）；逐檔報告、`dryRun`、明確的 `outputPath`／`outputDir`，或全目錄掃描（`inputDir`、`recursive`，4096 檔上限）。 |
-| `model_asset` | Java 方塊／物品模型 JSON：`inspect`、`validate`、`create`、`apply`、`export`（可產生物品定義與 blockstate），以及 `preview`（經 `size`／`outputPngPath` 產生固定的診斷三視圖 PNG）。回報結構與引用是否有效，不是渲染後的外觀。 |
-| `compare_assets` | 比較兩張同尺寸 PNG；回報原始 RGBA 與可見差異數、差異框，並可產生診斷標記圖。 |
+| `generate_asset` | 用固定種子產生程式生成的紋理（pattern、size、palette、seed）。 |
+| `preview_asset` | `ascii`/`palette-map` 文字報告，以及 `scale` 與 `nine-slice` 輔助預覽 PNG。 |
+| `mcmeta_asset` | 依 PNG 尺寸產生動畫或 GUI 縮放設定。 |
+| `animate_asset` | 對動畫影格組執行 `pack`、`unpack`、`reorder`、`resize`、`validate`、`preview`。 |
+| `validate_pack_asset` | 唯讀掃描整個資源包：命名空間、模型、貼圖、圖集與目標版本。 |
+| `inspect_asset` | 唯讀 `structure`（圖層、區域、顏色用量、重疊）或 `view`（合成 PNG 圖塊加摘要資訊）；輸入為 `inputPath`。 |
+| `optimize_asset` | 無損壓縮 PNG（若無更小編碼則保留原檔）；支援單檔、多檔、目錄掃描（`inputDir`、`recursive`，上限 4096 檔）與 `dryRun`。 |
+| `model_asset` | Java 方塊／物品模型 JSON：`inspect`、`validate`、`create`、`apply`、`export`（含物品定義與 blockstate），以及 `preview`（產生三視圖診斷 PNG）。 |
+| `compare_assets` | 比對兩張同尺寸 PNG；回報原始 RGBA 與可見差異像素數、差異範圍框，並可輸出診斷標記圖。 |
 
-`inspect_asset` 有兩種模式：`structure` 回報圖層、區域、色彩用量與重疊；`view` 把合成後的畫布以 PNG 圖片區塊回傳，可選 `crop` 與 `scale`（1–16）。邊長超過 1024px 的 view 會被拒絕並提示改用裁切，不會自動縮小。`apply_asset_operations` 可以帶選填的 `feedback` 物件（見[實務 7](#實務-7批次編輯與視覺回饋build-與-apply_asset_operations)）；不帶時結果完全不變。[`docs/mcp-guide.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.zh-TW.md) 為每個工具附上一次實際呼叫的擷取。
+`inspect_asset` 有兩種模式：`structure` 回報圖層、區域、顏色用量與重疊；`view` 把合成後的畫布以 PNG 圖片區塊回傳，可選 `crop` 與 `scale`（1–16）。邊長超過 1024px 的 view 會被拒絕並提示改用裁切，不會自動縮小。`apply_asset_operations` 可以帶選填的 `feedback` 物件（見[實務 7](#實務-7批次編輯與視覺回饋build-與-apply_asset_operations)）；不帶時結果完全不變。[`docs/mcp-guide.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.zh-TW.md) 收錄了每個工具實際呼叫的輸入與回傳範例。
 
 ### 設定方式
 
-每個用戶端執行的都是同一個 stdio 指令：`npx -y mc-asset mcp`。各用戶端的設定檔位置可能隨版本改變，找不到時請查該用戶端的文件。
+每個用戶端執行的都是同一個 stdio 指令：`npx -y mc-asset mcp`。各用戶端的設定檔位置可能隨版本調整，找不到時請查閱該用戶端的文件。
 
 #### Claude Code
 
@@ -508,41 +541,41 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 | 分類 | 指令 | 說明 |
 |---|---|---|
-| **來源輸入與建置** | `import <image>` | 解碼 PNG/JPEG/WebP 並寫入 PNG 或 `.mcpx`。 |
-| | `render <grid>` | 將 ASCII 網格（`.grid`）編譯為 PNG 或 `.mcpx`。 |
-| | `build [source]` | 編譯 `.mcpx` 原始檔或標準輸入（`--stdin`）為 PNG。 |
-| **空間幾何變形** | `transform <input>` | 幾何操作：`--flip`、`--rotate`、`--crop`、`--pad`、`--resize`、`--translate`。 |
-| **色彩與像素清理** | `quantize <input>` | 顏色縮減至指定數量（`--colors <N>`）或指定調色盤（`--palette`），可用 `--keep-color` 保留指定色。 |
-| | `cleanup <input>` | 清理多餘雜訊像素（`--fix isolated,noise,outlier`）。 |
-| | `palette extract` | 從圖中擷取調色盤。 |
-| | `palette inspect` | 調色盤分布與明暗對比深入分析。 |
-| | `material list` | 列出系統內建 Minecraft 材質。 |
+| **來源輸入與建置** | `import <image>` | 讀取 PNG/JPEG/WebP 並轉成 PNG 或 `.mcpx`。 |
+| | `render <grid>` | 將字元網格（`.grid`）繪製成 PNG 或 `.mcpx`。 |
+| | `build [source]` | 將 `.mcpx` 原始檔或標準輸入（`--stdin`）轉成 PNG。 |
+| **幾何變形** | `transform <input>` | 幾何操作：`--flip`、`--rotate`、`--crop`、`--pad`、`--resize`、`--translate`。 |
+| **色彩與清理** | `quantize <input>` | 把顏色減到指定數量（`--colors <N>`）或對齊調色盤（`--palette`），可用 `--keep-color` 保留指定色。 |
+| | `cleanup <input>` | 清除孤立與雜訊像素（`--fix isolated,noise,outlier`）。 |
+| | `palette extract` | 從圖片擷取調色盤。 |
+| | `palette inspect` | 分析調色盤分布、角色與明暗對比。 |
+| | `material list` | 列出內建的 Minecraft 材質。 |
 | | `material show` | 檢視特定材質的色階定義。 |
 | | `recolor <source>` | 依內建材質重新上色。 |
-| | `variant <source>` | 衍生多材質變體至 `--output-dir`。 |
-| **程序生成與平鋪** | `generate <pattern>` | 確定性程序化紋理生成（支援 `--seed <int>`）。 |
-| | `tile <input>` | 接縫瑕疵檢測與自動無縫化修正。 |
+| | `variant <source>` | 一次衍生多種材質變體到 `--output-dir`。 |
+| **紋理生成與平鋪** | `generate <pattern>` | 用固定種子（`--seed <int>`）產生程式生成的紋理。 |
+| | `tile <input>` | 檢查接縫分數與自動修補邊緣。 |
 | | `preview <input>` | 多模式預覽：`--ascii`、`--palette-map`、`--scale <N>`、`--nine-slice`。 |
-| | `gui-scale <input>` | 依 mcmeta stretch/tile/nine_slice 規則縮放 GUI 貼圖至 `--size <N\|WxH>`。 |
-| **動畫與圖集** | `animate pack` | 將各影格目錄打包為連續貼圖集。 |
-| | `animate unpack` | 將動畫連續貼圖拆解為單格圖檔。 |
-| | `animate reorder` | 重排影格播放順序。 |
+| | `gui-scale <input>` | 依 mcmeta stretch/tile/nine_slice 規則把 GUI 貼圖縮放到 `--size <N\|WxH>`。 |
+| **動畫與圖集** | `animate pack` | 將影格資料夾打包成動畫圖集。 |
+| | `animate unpack` | 將動畫圖集拆成單張影格。 |
+| | `animate reorder` | 調整影格播放順序。 |
 | | `animate resize` | 批次縮放影格尺寸。 |
-| | `animate validate`| 依 `.mcmeta` 檢查影格數與排版規格。 |
-| | `animate preview` | 預覽動畫播放效果。 |
+| | `animate validate`| 對照 `.mcmeta` 檢查影格數與排列方式。 |
+| | `animate preview` | 預覽動畫序列。 |
 | | `mcmeta animation\|gui` | 依 PNG 尺寸產生 `.mcmeta` 動畫或 GUI 縮放設定（`--output`、`--stdout`）。 |
-| **檢查與校驗** | `analyze <image>` | 唯讀結構與色彩數值報告。 |
+| **檢查與比對** | `analyze <image>` | 唯讀分析尺寸、顏色分布與透明度。 |
 | | `inspect <input>` | 唯讀結構報告或合成檢視（`--mode structure\|view`、`--crop`、`--scale`）。 |
-| | `validate <asset>` | 單一檔案素材規範檢核（可附加 `.mcmeta`）。 |
-| | `validate-pack <path>`| 資源包全目錄關聯與結構檢查。 |
-| | `compare <before> <after>` | 比較兩張同尺寸 PNG；回報原始 RGBA 與可見差異數及選用的診斷 PNG（`--output`、`--stdout`、`--scale`）。 |
-| **最佳化與模型** | `optimize <input...>` 或 `--input-dir <dir>` | 無損地把 PNG 重新編碼成能精確表示像素的最小編碼，或保留來源位元組（`--output`、`--output-dir`、`--stdout`、`--dry-run`、`--mode`、`--ancillary`、`--recursive`）。 |
-| | `model inspect\|validate <file>` | 唯讀報告 Java 方塊／物品模型 JSON（結構、UV、旋轉、display、引用）。 |
-| | `model create\|apply\|export` | 建立、編輯或放置 Java 模型（長方體 `elements`）及其物品定義與 blockstate。 |
-| | `model preview <file>` | 固定的診斷三視圖 PNG（`front`、右側、`top` 面板，`--size 64\|128\|256`，`--output` 或 `--stdout`）；不支援的內容列為 partial，絕非遊戲渲染。 |
-| **Agent 介面** | `mcp` | 啟動 stdio MCP 伺服器。 |
+| | `validate <asset>` | 檢查單張貼圖與 `.mcmeta` 是否合規。 |
+| | `validate-pack <path>`| 檢查整個資源包目錄的參照與結構。 |
+| | `compare <before> <after>` | 比對兩張同尺寸 PNG；回報原始 RGBA 與可見差異像素數，並可輸出診斷 PNG（`--output`、`--stdout`、`--scale`）。 |
+| **壓縮與模型** | `optimize <input...>` 或 `--input-dir <dir>` | 無損壓縮 PNG（若無更小編碼則保留原檔；支援 `--output`、`--output-dir`、`--stdout`、`--dry-run`、`--mode`、`--ancillary`、`--recursive`）。 |
+| | `model inspect\|validate <file>` | 唯讀檢查 Java 方塊／物品模型 JSON（結構、UV、旋轉、display、貼圖參照）。 |
+| | `model create\|apply\|export` | 建立、修改或匯出 Java 模型（長方體 `elements`）及其物品定義與 blockstate。 |
+| | `model preview <file>` | 繪製三視圖診斷 PNG（`front`、`right`、`top` 面板，`--size 64\|128\|256`，`--output` 或 `--stdout`）。 |
+| **AI 助手介面** | `mcp` | 啟動 stdio MCP 伺服器。 |
 
-### 產生動畫與 GUI 設定（mcmeta）
+### 產生動畫與 GUI 設定（`mcmeta`）
 
 從 PNG 產生動畫或 GUI 縮放設定：
 
@@ -551,13 +584,17 @@ mc-asset mcmeta animation sheet.png --frame-size 16 --frametime 2 --frames '[0,{
 mc-asset mcmeta gui panel.png --type nine_slice --border 4 --stretch-inner --resource-pack-version 42 --stdout
 ```
 
-動畫必須指定 `--frame-size <N|WxH>`，影格只支援單排或單列，尺寸必須整除 PNG；不接受網格。`frametime` 預設 1，`frames` 接受索引或 `{index,time}` 物件，可重複或只播放部分影格；省略時依序播放全部影格。時間必須是正整數，索引不得越界；`--interpolate` 啟用插值。GUI 必須指定 `--type <stretch|tile|nine_slice>`，tile 與 nine_slice 以 PNG 尺寸作設計尺寸。nine_slice 必須指定 `--border <N|json>`，四邊 left、top、right、bottom 為非負整數，中央必須保留正面積；只有 nine_slice 接受 `--stretch-inner`。
+- **動畫（`animation`）**
+  - 必填：`--frame-size <N|WxH>`。影格只支援單排或單列，且尺寸必須整除 PNG（不接受網格排列）。
+  - 選填：`--frametime <int>`（預設 `1`）、`--frames <json>`（接受整數索引或 `{index,time}` 物件；省略時依序播放全部影格，時間須為正整數且索引不得越界）、`--interpolate`（啟用補間插值）。
+- **GUI（`gui`）**
+  - 必填：`--type <stretch|tile|nine_slice>`。`tile` 與 `nine_slice` 以 PNG 尺寸為設計尺寸；選 `nine_slice` 時還必須指定 `--border <N|json>`（`left`、`top`、`right`、`bottom` 為非負整數，中央區域須保留正面積）。
+  - 選填：`--stretch-inner`（僅 `nine_slice` 可用）。
+- **輸出與版本檢查**
+  - 輸出必須從 `--output <path.mcmeta>` 與 `--stdout` 二選一；覆寫既有檔案需加 `--force`（會替換整個檔案），建立父目錄需加 `--mkdir`。
+  - `--minecraft-version` 與 `--resource-pack-version` 二選一：GUI 縮放需要 pack format `16.0`、`stretch_inner` 需要 `42.0`，版本不符時回報 `ARGUMENT_CONFLICT`。未指定版本或超出 `12.0`–`97.1` 會回報 `versionChecked: false`（`VERSION_NOT_CHECKED`），但仍會檢查 GUI 最低版本限制（參考：[Texture animation](https://minecraft.wiki/w/Resource_pack#Texture_animation)、[GUI scaling](https://www.minecraft.net/en-us/article/minecraft-snapshot-23w31a)、[Pack format](https://minecraft.wiki/w/Pack_format)）。
 
-CLI 必須明確選擇 `--output <path.mcmeta>` 或 `--stdout` 其中之一，不猜同名路徑。已存在的目標需要 `--force`，它會整檔替換，不保留其他區段；`--mkdir` 允許建立缺少的父目錄。來源 PNG 與無關的同名設定不變，輸入別名與符號連結會被拒絕。輸出只含指定區段，以固定鍵順序的緊湊 JSON 加一個結尾換行產生。
-
-版本選項 `--minecraft-version` 與 `--resource-pack-version` 只能選一個。GUI scaling 需要 pack format 16.0，stretch_inner 需要 42.0；不相容會在輸出前回報 `ARGUMENT_CONFLICT`。未指定版本，或版本在 12.0 到 97.1 之外，會回報 `versionChecked: false` 與 `VERSION_NOT_CHECKED`，但不會跳過 GUI 最低版本限制。動畫依文件格式及歷史在表內標示已檢查，並非逐版遊戲用戶端實測。來源見[材質動畫與歷史](https://minecraft.wiki/w/Resource_pack#Texture_animation)（interpolate 在 14w25a 加入，早於支援表）、[GUI scaling](https://www.minecraft.net/en-us/article/minecraft-snapshot-23w31a) 與 [pack format](https://minecraft.wiki/w/Pack_format)。這些檢查確認設定結構與已知版本相容性，不代表已驗證遊戲內外觀或行為。
-
-### 比較 PNG 的變動（compare）
+### 比對 PNG 差異（`compare`）
 
 ```sh
 mc-asset compare before.png after.png --json
@@ -565,19 +602,15 @@ mc-asset compare before.png after.png --output diff.png --scale 4
 mc-asset compare before.png after.png --stdout --json > diff.png
 ```
 
-只接受尺寸相同的 PNG；尺寸不同會回報 `INVALID_ARGUMENT`。沒有 `--output` 或 `--stdout` 時只回報告，不寫檔。使用 `--stdout` 時，PNG 位元組送到 stdout，報告送到 stderr。`--output` 與 `--stdout` 不能並用。
+比對兩張同尺寸的 PNG（尺寸不同會回報 `INVALID_ARGUMENT`）。不加 `--output` 或 `--stdout` 時只回傳報告、不寫檔；加上 `--output <path.png>` 或 `--stdout`（兩者二選一）時會輸出診斷標記圖，用洋紅色（`255,0,255,255`）標示可見差異、青色（`0,255,255,255`）標示透明像素下隱藏的 RGB 差異，未變動的像素則保持透明（`0,0,0,0`）。`--scale`（`1`–`16`，預設 `1`）可用最近鄰放大標記圖，放大後長邊若超過 1024px 會回報 `RESOURCE_LIMIT_EXCEEDED`。
 
-報告包含 `width`、`height`、`totalPixels`、`rawChangedPixels`、`visibleChangedPixels`、`rawBounds`、`visibleBounds`。原始差異逐一比較解碼後的 RGBA 通道，包含 alpha 為零時隱藏的 RGB。可見差異沿用既有 flatten 合成規則，但雙方 alpha 都是零時忽略 RGB。差異框以原圖座標表示為從零起算的 `{x,y,width,height}`，包含最後一個變動像素；沒有差異時為 `null`。
-
-診斷 PNG 用洋紅色（`255,0,255,255`）標示可見差異，用青色（`0,255,255,255`）標示只有原始差異的像素，未變像素為透明（`0,0,0,0`）。這張圖是診斷標記，不是修改後的素材。`--scale` 接受 1 到 16 的整數，預設 1，只以 nearest 放大標記圖，不改報告統計。影像含放大後的長邊不得超過 1024 像素，超限回報 `RESOURCE_LIMIT_EXCEEDED`，不會自動縮圖。只回報告時沿用既有 PNG 解碼器限制。
-
-兩個來源都不會改寫。明確輸出路徑必須以 `.png` 結尾；來源別名、符號連結目標或父目錄都會被拒絕。覆寫既有目標需要 `--force`，建立缺少的父目錄需要 `--mkdir`；這兩個旗標都需要檔案輸出路徑。所有輸出都會先通過預檢，才寫入檔案或送出 stdout 影像位元組。
+報告包含 `width`、`height`、`totalPixels`、`rawChangedPixels`、`visibleChangedPixels`、`rawBounds` 與 `visibleBounds`（從 0 起算的 `{x,y,width,height}`，無差異時為 `null`）。兩個來源檔都不會被改寫；覆寫既有目標需加 `--force`，建立父目錄需加 `--mkdir`。
 
 ---
 
-## 批次像素修訂操作（`--operations`）
+## 批次像素修改（`--operations`）
 
-在 `import`、`render` 與 `build` 指令中，可透過 `--operations <path>` 或 `--operations -`（stdin）傳入批次像素操作：
+在 `import`、`render` 與 `build` 指令中，可透過 `--operations <path>` 或 `--operations -`（stdin）傳入批次修改操作：
 
 ```json
 [
@@ -589,11 +622,11 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 ]
 ```
 
-- **原子性保證**：全有或全無。批次中任一項操作失敗（例如座標超出畫布），所有變更均會自動回滾（Rollback）。
-- **顏色表示法**：支援 `transparent`、`#RRGGBB` 或 `#RRGGBBAA`。
-- **操作種類**：共 25 種，除了 9 個像素操作（`setPixel`、`clearPixel`、`drawLine`、`drawRect`、`fillRect`、`floodFill`、`ellipse`、`polygonFill`、`strokeMask`），還有圖層、區域、`stampRect` 與 `regionFromSelection`。完整參數表見 [`docs/cli-surface.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.zh-TW.md)。
-- **精簡繪圖形狀**：`ellipse` 吃 `rect` 加 `color` 加 `mode`（`fill`／`outline`）；`polygonFill` 吃整數 `[x, y]` 的 `points` 加 `color`，最多 4096 點，不收自交、不收孔洞；`strokeMask` 吃 `layerId` 加 `source` 選取加 `color`，另可拿 `selection` 當寫入裁剪。4097 點會在座標映射前以 `RESOURCE_LIMIT_EXCEEDED` 退回；自交環會以 `SELF_INTERSECTING_POLYGON` 退回。
-- **選取範圍**：像素操作可帶選填的 `selection`；選到空集合會以 `EMPTY_SELECTION` 拒絕寫入並整批回滾。
+- **整批成功或整批復原**：批次中只要有任何一項操作失敗（例如座標超出畫布），整批修改都會復原，不會留下改一半的結果。
+- **顏色寫法**：支援 `transparent`、`#RRGGBB` 或 `#RRGGBBAA`。
+- **操作種類**：共 25 種，包含 9 個像素操作（`setPixel`、`clearPixel`、`drawLine`、`drawRect`、`fillRect`、`floodFill`、`ellipse`、`polygonFill`、`strokeMask`），以及圖層、區域、`stampRect` 與 `regionFromSelection`。完整參數表見 [`docs/cli-surface.zh-TW.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.zh-TW.md)。
+- **幾何繪圖**：`ellipse` 接受 `rect`、`color` 與 `mode`（`fill`／`outline`）；`polygonFill` 接受整數 `[x, y]` 的 `points` 與 `color`（最多 4096 點，超過回報 `RESOURCE_LIMIT_EXCEEDED`；不支援自交與鏤空，自交多邊形回報 `SELF_INTERSECTING_POLYGON`）；`strokeMask` 接受 `layerId`、`source` 選取範圍與 `color`，也可搭配 `selection` 限制寫入範圍。
+- **選取範圍**：像素操作可帶選填的 `selection`；若選取結果為空集合，會以 `EMPTY_SELECTION` 拒絕寫入並復原整批操作。
 
 ---
 
@@ -609,34 +642,34 @@ mc-asset compare before.png after.png --stdout --json > diff.png
                  │                                 │
      ┌───────────▼───────────┐         ┌───────────▼───────────┐
      │     CLI Interface     │         │   Native MCP Server   │
-     │  (終端命令列與自動化)    │         │     (AI Agent 橋接)   │
+     │  (終端命令列與自動化)    │         │    (AI 助手橋接介面)   │
      └───────────────────────┘         └───────────────────────┘
 ```
 
-### 確定性保證機制
+### 為什麼每次執行結果都一樣
 
-1. **位元組層級一致的 PNG 編碼**：採用固定的 deflate 壓縮等級與濾波策略（`src/io/png.ts`），搭配純整數顏色合成計算。檔案絕不包含系統時間戳記或主機環境中繼資料。
-2. **種子約束的虛擬亂數生成器**：程序化紋理生成完全依賴整數 xorshift32 PRNG，並由 `--seed` 嚴格初始化。
-3. **跨執行環境一致性**：在 Bun 與 Node.js 環境下執行時，產生的二進位位元組在 `scripts/compare-runtime.mjs` 比對矩陣所涵蓋的命令上，均能達成逐位元組（Byte-for-byte）完全吻合。
+1. **固定的 PNG 編碼**：使用固定的 deflate 壓縮參數與濾波策略（`src/io/png.ts`），顏色合成全部使用整數運算，且檔案內不寫入系統時間戳記或主機資訊。
+2. **固定種子的亂數**：程式生成的紋理全部使用整數 `xorshift32` 亂數產生器，由 `--seed` 初始化。
+3. **Bun 與 Node 輸出一致**：在 Bun 與 Node.js 下執行時，`scripts/compare-runtime.mjs` 測試涵蓋的所有指令都會產出內容完全相同的檔案。
 
-### 檔案系統與 I/O 通道安全
+### 檔案寫入與輸出通道安全
 
-- **原子寫入**：寫入時先在目標目錄建立專屬暫存檔（`.tmp-<pid>-<counter>-<randomhex>-<原檔名>`），完成後以原子置換（Rename）提交，絕不殘留半寫入的壞檔。
-- **路徑衝突防護**：路徑皆經過正規化、Unicode NFC 及大小寫摺疊比對。若輸出路徑與輸入別名衝突且未宣告 `--in-place`，或存在重複的目標路徑，系統會在寫入任何位元組前立即中斷。
-- **通道分工隔離**：
-  - 未使用 `--stdout` 時：人類可讀日誌輸出至 stdout。加上 `--json` 時，標準 JSON 信封輸出至 stdout，日誌則轉移至 stderr。
-  - 使用 `--stdout` 時：產出的成品檔案二進位位元組獨佔 stdout，JSON 信封與日誌強制轉移至 stderr。
+- **安全寫檔**：寫入時會先在目標目錄建立暫存檔（`.tmp-<pid>-<counter>-<randomhex>-<原檔名>`），寫完後再改成正式檔名，中途失敗也不會留下損壞的半成品。
+- **防止誤蓋來源檔**：所有路徑都會先展開並統一大小寫與 Unicode NFC 格式。若輸出路徑指到輸入檔本身（且未加 `--in-place`），或同時指定了重複的輸出路徑，會在寫入任何資料前直接中止。
+- **stdout 與 stderr 分流**：
+  - 未加 `--stdout` 時：一般訊息輸出到 stdout；加上 `--json` 時，JSON 結果輸出到 stdout，一般訊息改送到 stderr。
+  - 加上 `--stdout` 時：產出的二進位檔案內容獨佔 stdout，JSON 結果與一般訊息都送到 stderr。
 
 ### 狀態碼對照表（Exit Codes）
 
-| 代碼 | 類別 | 意義說明 |
+| 代碼 | 類別 | 說明 |
 |---|---|---|
 | **0** | Success | 操作順利完成。 |
-| **1** | Internal Error | 引擎未預期之內部例外（`INTERNAL_ERROR`）。 |
-| **2** | Invalid Invocation | 語法錯誤、參數互斥、缺少必填引數（`INVALID_ARGUMENT`）。 |
-| **3** | Validation Failure | 工具執行正常，但素材或資源包未通過 Minecraft 規格檢核（`VALIDATION_FAILED`）。 |
+| **1** | Internal Error | 未預期的內部錯誤（`INTERNAL_ERROR`）。 |
+| **2** | Invalid Invocation | 語法錯誤、選項衝突或缺少必填參數（`INVALID_ARGUMENT`）。 |
+| **3** | Validation Failure | 工具執行成功，但貼圖或資源包未通過 Minecraft 規範檢查（`VALIDATION_FAILED`）。 |
 | **4** | Filesystem Error | 輸出檔案已存在且未加 `--force`、目錄不存在且未加 `--mkdir`，或無法讀取輸入檔。 |
-| **5** | Unsupported / Limit | 不支援的檔案類型，或超出尺寸與資源上限。 |
+| **5** | Unsupported / Limit | 不支援的檔案格式，或超過尺寸與資源上限。 |
 
 ---
 
@@ -652,10 +685,10 @@ bun run test:typecheck
 # 執行程式碼檢查（Linter）
 bun run lint
 
-# 打包 Node 發行成品
+# 打包 Node 發行檔案
 bun run build
 
-# 驗證 Bun 與 Node 跨執行環境二進位位元組一致性
+# 檢查 Bun 與 Node 產出的檔案內容是否完全一致
 node scripts/compare-runtime.mjs
 
 # 檢查文件連結、錨點與多餘的版本號

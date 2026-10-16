@@ -6,7 +6,7 @@ n = #4F3818FF role=custom
 K = #7C5A2CFF role=custom
 k = #A8804AFF role=custom
 P = #3E5C92FF role=outline
-p = #8FB4DEFF role=light
+p = #8FB4DEFF role=custom
 q = #E4F0FBFF role=custom
 Q = #C3D8EEFF role=custom
 D = #5E1E82FF role=shadow

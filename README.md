@@ -9,18 +9,19 @@
 
 ![mc-asset banner](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/banner.png)
 
-A pixel-native 2D asset engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs, built for human creators and AI coding agents.
+`mc-asset` is a texture and model tool for Minecraft Java Edition resource packs, built for both creators and AI agents over the command line (CLI) or MCP.
 
-Language models can't place pixels by eye, so `mc-asset` turns texture work into text and commands. Draw a sprite as a character grid, pixelize reference art, generate tiling textures, pack animation sheets, and validate a whole resource pack, from a shell or over MCP. The same input and seed always produce the same bytes.
+Language models can't place pixels by eye, so `mc-asset` turns texture work into text and commands: draw a sprite as a character grid, pixelize reference art, generate tiling textures, pack animation sheets, preview cuboid models, and validate a whole resource pack, from a shell or over MCP. The same input and seed always produce identical files.
 
 ![A sword, pickaxe, apple, potion, sapphire, and key, each a 16×16 sprite in the vanilla style](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/items.png)
 
-*Six 16×16 items, each written as a text grid and rendered by `mc-asset render` (shown ×6), drawn to the vanilla style rules in the [`minecraft-pixel-art`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/minecraft-pixel-art) skill. The grids are in [`docs/assets/showcase/items/`](https://github.com/smile-minecraft/mc-asset/tree/main/docs/assets/showcase/items).*
+*Six 16×16 items, each written as a text grid and drawn by `mc-asset render` (shown ×6), following the vanilla style rules in the [`minecraft-pixel-art`](https://github.com/smile-minecraft/mc-asset/tree/main/skills/minecraft-pixel-art) skill. The grids are in [`docs/assets/showcase/items/`](https://github.com/smile-minecraft/mc-asset/tree/main/docs/assets/showcase/items).*
 
 ---
 
 ## Contents
 
+- [What It Does](#what-it-does)
 - [Highlights](#highlights)
 - [Showcase](#showcase)
 - [Installation](#installation)
@@ -36,19 +37,35 @@ Language models can't place pixels by eye, so `mc-asset` turns texture work into
 
 ---
 
+## What It Does
+
+- Draw textures from text character grids (`render`)
+- Downsample reference art into pixel art (`pixelize`) and reduce colors (`quantize`)
+- Fan one sprite out into material variants (`variant`)
+- Generate and seam-check tiling textures (`generate`, `tile`)
+- Pack animation sprite sheets and write `.mcmeta` files (`animate`, `mcmeta`)
+- Scale GUI sprites with nine-slice borders (`gui-scale`)
+- Compare two PNGs pixel by pixel (`compare`)
+- Validate a single texture or a whole resource pack (`validate`, `validate-pack`)
+- Losslessly compress PNGs (`optimize`)
+- Create, validate, and preview Java block models (`model`)
+- Expose all capabilities to AI agents over an MCP server (`mcp`)
+
+---
+
 ## Highlights
 
 - **Text in, texture out.** Sprites are character grids (`.grid`) or editable multi-layer sources (`.mcpx`) that build to PNG. See [`docs/mcpx-format.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.md).
-- **Reproducible bytes.** No unseeded randomness and integer-only color blending, so PNG and `.mcpx` output is identical run to run and between Bun and Node.
-- **One engine, two front ends.** The CLI and the stdio MCP server call the same core, so an agent gets exactly what a shell script gets.
-- **Output you can parse.** `--json` returns one `{ success, result, error }` envelope with a stable error code, and logs never mix into data on stdout.
-- **No surprise writes.** Every output path is explicit, existing files need `--force`, and each file lands through a temp file and an atomic rename.
+- **Identical output.** No unseeded randomness and integer-only color blending, so PNG and `.mcpx` output is identical run to run and between Bun and Node.
+- **One engine, two front ends.** The CLI and the stdio MCP server call the same core, so an agent gets the exact same result as a shell script.
+- **Uniform JSON output.** `--json` always returns `{ success, result, error }` with a stable error code, and logs never mix into stdout data.
+- **No surprise writes.** Every output path is explicit, existing files need `--force`, and each file is written to a temp file before being renamed into place.
 
 ---
 
 ## Showcase
 
-Every image below is produced by mc-asset itself, with fixed seeds for the procedural sources, so the whole set is reproducible. The commands live in [`docs/assets/showcase/README.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/README.md).
+Every image below is produced by `mc-asset` itself, with fixed seeds for the generated textures, so the whole set is reproducible. The commands live in [`docs/assets/showcase/README.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/README.md).
 
 | Pixelize | Quantize |
 |---|---|
@@ -59,7 +76,7 @@ Every image below is produced by mc-asset itself, with fixed seeds for the proce
 
 ![the sword recolored into seven materials](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variants.png)
 
-**Procedural patterns** — every `generate` pattern as a 16px swatch from a fixed seed (shown ×4):
+**Generated patterns** — every `generate` pattern as a 16px swatch from a fixed seed (shown ×4):
 
 | `noise` | `clustered-noise` | `stripes` | `checker` | `gradient` |
 |:-:|:-:|:-:|:-:|:-:|
@@ -71,9 +88,25 @@ Every image below is produced by mc-asset itself, with fixed seeds for the proce
 
 ![tile source](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-pattern.png) ![4x4 tiled wall](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/tile-preview.png)
 
+**Block textures** — stone, dirt, and oak planks as 16×16 textures (left, ×8) that tile cleanly across all four edges. On the right is a 4×4 wall of the planks texture (×4):
+
+![three block faces](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/blocks.png) ![4x4 planks wall](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/blocks-wall.png)
+
 **Animation sheet** — four frames of a glowing ore block packed into one vertical strip (×4), the layout Minecraft reads with an `.mcmeta` animation:
 
 ![animation sprite sheet](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/anim-sheet.png)
+
+**Potion variants and compare** — the potion recolored into `crystal`, `gold`, and `iron` (×5) while the glass bottle, wooden cork, and white glint keep their colors; `compare` of the iron and gold variants finds 72 changed liquid pixels, marked in magenta on the diagnostic (×8):
+
+![the potion recolored into three materials](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/potion-variants.png) ![compare diagnostic of two potion variants](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/compare-diff.png)
+
+**Button nine-slice** — a 16px button frame (left, ×4) scaled to 48×16 with nine-slice (middle, ×4) and with plain stretch (right, ×4); the nine-slice keeps the corners and bevels crisp while the stretch smears them:
+
+![button source](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/button.png) ![button nine-slice result](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/button-nine-slice.png) ![button stretched result](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/gui/button-stretch.png)
+
+**Java model three-view preview** — a five-cuboid stepped shrine model ([`model-shrine.json`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/assets/showcase/model-shrine.json)) using the brick, planks, stone, and glowing ore textures shown above. `model preview --size 128` looks at it three times: from the front (north, `front`), from the side (east, `right`), and from above (`top`):
+
+![three-view diagnostic preview of a stepped shrine block model](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/model-preview.png)
 
 ---
 
@@ -218,38 +251,6 @@ mc-asset validate /tmp/mc-asset-demo/gem.png --profile minecraft:item
 # alpha: predicted cutout (opaque=119 transparent=137 partial=0)
 # profile: predicted profile minecraft:item prefers the items atlas without mipmaps.
 ```
-
-### Recipe 9: Lossless PNG Optimization & Java Models (`optimize` & `model`)
-
-`optimize` re-encodes PNGs into the smallest encoding that holds the same pixels exactly, or keeps the source when nothing is smaller. It takes explicit PNG paths (up to 256 files) or a whole directory (`--input-dir`, up to 4096 PNGs, optional `--recursive`, preserving relative paths). It never rewrites its inputs; pick `--output`, `--output-dir`, `--stdout`, or `--dry-run`.
-
-```sh
-mc-asset optimize ./gem.png --dry-run
-# ok optimize input=./gem.png output=- status=optimized source=184 result=102 mode=rgba
-mc-asset optimize ./gem.png ./sword.png --output-dir ./optimized --mkdir
-mc-asset optimize --input-dir ./textures --recursive --output-dir ./optimized --mkdir
-```
-
-`model` works on Java block/item model JSON (cuboid `elements` only). Create a model, edit it with typed operations, and validate it against a pack:
-
-```sh
-mc-asset model create --spec ./spec.json \
-  --output ./pack/assets/mypack/models/block/ruby.json --mkdir --resource-pack-version 75
-mc-asset model validate ./pack/assets/mypack/models/block/ruby.json \
-  --pack ./pack --resource-pack-version 75
-mc-asset validate-pack ./pack --resource-pack-version 75
-```
-
-`model apply` takes `--operations` and applies all of them or none; `model export` places the model and, with `--binding`, writes an item definition and a blockstate next to it. The checks cover structure and reference validity. No Minecraft client renders the result, so appearance and in-game behavior are not verified.
-
-`model preview` renders a fixed diagnostic image from cuboid `elements`: three square panels side by side (`front` = north face, `right` = east face, `top` = up face with north at the top), each `--size` pixels (64, 128, or 256; default 64):
-
-```sh
-mc-asset model preview ./pack/assets/mypack/models/block/ruby.json \
-  --pack ./pack --size 64 --output ./ruby-preview.png --resource-pack-version 75
-```
-
-Exactly one of `--output` or `--stdout` is required. The report carries panel names and coordinates, the input range, `coverage`, and `warnings`. A missing texture renders as a fixed checkerboard with a warning; element rotation, non-1/256 coordinates, translucent faces, and unresolvable textures are listed as `partial` coverage. `display` transforms and game lighting are not applied: this is a diagnostic view, not a game renderer.
 
 ---
 
@@ -409,6 +410,40 @@ mc-asset gui-scale ./textures/gui/dialog.png \
 
 All three are shown ×4. With the mcmeta the cut corners and the 2px bevels copy 1:1 and keep their width; the plain stretch thickens the bevels unevenly and smears the corners.
 
+### Recipe 9: Lossless PNG Optimization & Java Models (`optimize` & `model`)
+
+`optimize` re-encodes PNGs into the smallest encoding that holds the same pixels exactly, or keeps the source when nothing is smaller. It takes explicit PNG paths (up to 256 files) or a whole directory (`--input-dir`, up to 4096 PNGs, optional `--recursive`, preserving relative paths). It never rewrites its inputs; pick `--output`, `--output-dir`, `--stdout`, or `--dry-run`.
+
+```sh
+mc-asset optimize ./gem.png --dry-run
+# ok optimize input=./gem.png output=- status=optimized source=184 result=102 mode=rgba
+mc-asset optimize ./gem.png ./sword.png --output-dir ./optimized --mkdir
+mc-asset optimize --input-dir ./textures --recursive --output-dir ./optimized --mkdir
+```
+
+`model` works on Java block/item model JSON (cuboid `elements` only). Create a model, edit it with typed operations, and validate it against a pack:
+
+```sh
+mc-asset model create --spec ./docs/assets/showcase/model-shrine.json \
+  --output ./pack/assets/mypack/models/block/shrine.json --mkdir --resource-pack-version 75
+mc-asset model validate ./pack/assets/mypack/models/block/shrine.json \
+  --pack ./pack --resource-pack-version 75
+mc-asset validate-pack ./pack --resource-pack-version 75
+```
+
+`model apply` takes `--operations` and applies all of them or none; `model export` places the model and, with `--binding`, writes an item definition and a blockstate next to it. The checks cover structure and reference validity. No Minecraft client renders the result, so appearance and in-game behavior are not verified.
+
+`model preview` renders a fixed diagnostic image from cuboid `elements`: three square panels side by side (`front` = north face, `right` = east face, `top` = up face with north at the top), each `--size` pixels (64, 128, or 256; default 64):
+
+```sh
+mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
+  --pack ./pack --size 128 --output ./shrine-preview.png --resource-pack-version 75
+```
+
+![three-view diagnostic preview of a stepped shrine block model](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/model-preview.png)
+
+Exactly one of `--output` or `--stdout` is required. The report carries panel names and coordinates, the input range, `coverage`, and `warnings`. A missing texture renders as a fixed checkerboard with a warning; element rotation, non-1/256 coordinates, translucent faces, and unresolvable textures are listed as `partial` coverage. `display` transforms and game lighting are not applied: this is a diagnostic view, not a game renderer.
+
 ---
 
 ## MCP Server
@@ -545,18 +580,17 @@ Add to `opencode.json` or `opencode.jsonc`:
 
 ### Generate animation and GUI metadata (`mcmeta`)
 
-Generate an animation or GUI scaling document from a PNG:
-
 ```sh
 mc-asset mcmeta animation sheet.png --frame-size 16 --frametime 2 --frames '[0,{"index":1,"time":4},0]' --minecraft-version 1.21.2 --output sheet.png.mcmeta
 mc-asset mcmeta gui panel.png --type nine_slice --border 4 --stretch-inner --resource-pack-version 42 --stdout
 ```
 
-Animation requires `--frame-size <N|WxH>` and a single row or column of equal-sized frames that divide the PNG exactly; grids are rejected. `frametime` defaults to 1. `frames` accepts indices or `{index,time}` objects, including repeated or partial sequences; omitted means all frames in order. Times are positive integers and indices must be in range. `--interpolate` enables interpolation. GUI requires `--type <stretch|tile|nine_slice>`; tile and nine_slice use the PNG dimensions as design dimensions. Nine_slice requires `--border <N|json>` (four nonnegative sides: left, top, right, bottom) with a positive center. Only nine_slice accepts `--stretch-inner`.
-
-CLI requires exactly one explicit `--output <path.mcmeta>` or `--stdout`; it never guesses a sibling name. Existing outputs require `--force`, which replaces the entire file and preserves no other sections. `--mkdir` permits missing parent directories. Inputs and unrelated sibling metadata remain unchanged; aliases and symbolic links are refused. Output is compact JSON with fixed key order and one trailing newline, containing only the requested section.
-
-Use one of `--minecraft-version` or `--resource-pack-version`. GUI scaling requires pack format 16.0; stretch_inner requires 42.0. An incompatible target is `ARGUMENT_CONFLICT` before output. With no target, or a target outside 12.0 through 97.1, `versionChecked` is false with `VERSION_NOT_CHECKED`; this does not bypass GUI minimum versions. Animation is marked checked within that table based on the documented format and its history; this is not a per-release game-client test. See [texture animation and its history](https://minecraft.wiki/w/Resource_pack#Texture_animation) (interpolate added in 14w25a, before the supported release table), [GUI scaling](https://www.minecraft.net/en-us/article/minecraft-snapshot-23w31a), and [pack formats](https://minecraft.wiki/w/Pack_format). These checks establish metadata structure and known version compatibility, not appearance or behavior in a game client.
+- **`animation`**
+  - Required: `--frame-size <N|WxH>` (a single row or column of equal frames dividing the PNG; grids are not accepted).
+  - Optional: `--frametime <int>` (default `1`), `--frames <json>` (frame indices or `{index,time}` objects with positive integer times), `--interpolate`.
+- **`gui`**
+  - Required: `--type <stretch|tile|nine_slice>`; `nine_slice` also requires `--border <N|json>` with non-negative `left`, `top`, `right`, `bottom` and a positive center.
+  - Optional: `--stretch-inner` (`nine_slice` only). GUI scaling requires pack format `16.0` (`stretch_inner` requires `42.0`); see [`docs/cli-surface.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.md) for version gates and output options.
 
 ### Compare PNG changes (`compare`)
 
@@ -566,13 +600,7 @@ mc-asset compare before.png after.png --output diff.png --scale 4
 mc-asset compare before.png after.png --stdout --json > diff.png
 ```
 
-Only same-size PNGs are accepted; different dimensions raise `INVALID_ARGUMENT`. Without `--output` or `--stdout`, the command returns a report and writes nothing. With `--stdout`, PNG bytes go to stdout and the report goes to stderr. `--output` and `--stdout` are mutually exclusive.
-
-The report contains `width`, `height`, `totalPixels`, `rawChangedPixels`, `visibleChangedPixels`, `rawBounds`, and `visibleBounds`. Raw differences compare decoded RGBA channels, including hidden RGB under alpha zero. Visible differences use the existing flatten composition rules but ignore RGB when both pixels have alpha zero. Bounds are zero-based `{x,y,width,height}` rectangles in original-image coordinates, including the last changed pixel; no differences means `null`.
-
-The diagnostic PNG marks visible changes magenta (`255,0,255,255`), raw-only changes cyan (`0,255,255,255`), and unchanged pixels transparent (`0,0,0,0`). It is a diagnostic marker image, not the modified asset. `--scale` is an integer from 1 to 16, default 1, and uses nearest sampling without changing report statistics. Image output, including scaling, must have a longest edge of at most 1024 pixels or raises `RESOURCE_LIMIT_EXCEEDED`; it is never automatically downscaled. Report-only comparisons retain the existing PNG decoder limits.
-
-Both sources remain unchanged. An explicit output must end in `.png`; source aliases and symbolic-link outputs or parents are refused. Existing targets require `--force`; missing parent directories require `--mkdir`. These flags require a file output path. Every output is checked before any file or stdout artifact bytes are emitted.
+Compares two same-size PNGs and reports `rawChangedPixels`, `visibleChangedPixels`, `rawBounds`, and `visibleBounds`. With `--output` or `--stdout` (`--scale 1..16`, longest edge at most 1024px), it writes a diagnostic marker PNG where visible changes are magenta (`255,0,255,255`), raw-only alpha-zero RGB changes are cyan (`0,255,255,255`), and unchanged pixels are transparent.
 
 ---
 
