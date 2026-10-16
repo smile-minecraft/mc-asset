@@ -5,10 +5,11 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodePng } from "../../src/io/png.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
  * minecraft:gui / minecraft:particle profile and pixelize gui/particle
- * preset spawn coverage. Inputs reuse the shared 8x8 fixture (no Mojang
+ * preset in-process coverage. Inputs reuse the shared 8x8 fixture (no Mojang
  * assets); assertions stay on CLI behavior (profile accepted, PNG-only
  * gate, preset parse/print/determinism) rather than art values.
  */
@@ -16,17 +17,11 @@ import { decodePng } from "../../src/io/png.ts";
 const FIXTURES = "tests/cli/fixtures";
 const PNG = join(FIXTURES, "px-8x8.png");
 
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
-
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function combined(result: SpawnResult): string {
+function combined(result: CliResult): string {
 	return stdoutText(result) + result.stderr;
 }
 
@@ -34,18 +29,8 @@ function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -53,7 +38,7 @@ async function listAllFiles(dir: string): Promise<string[]> {
 	return [...entries].sort();
 }
 
-describe("gui and particle profiles via spawn", () => {
+describe("gui and particle profiles in process", () => {
 	test("--profile minecraft:gui and minecraft:particle shape reports", async () => {
 		for (const profile of ["minecraft:gui", "minecraft:particle"]) {
 			const result = await runCli([

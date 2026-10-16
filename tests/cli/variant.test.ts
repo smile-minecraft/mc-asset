@@ -6,28 +6,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodePng } from "../../src/io/png.ts";
 import { parseMcpx } from "../../src/mcpx/index.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
- * variant spawn coverage: one .mcpx source fans out to one PNG plus one
- * .mcpx per --materials entry under the explicit --output-dir.
+ * variant in-process coverage: one .mcpx source fans out to one PNG plus
+ * one .mcpx per --materials entry under the explicit --output-dir.
  * Fixture: tests/cli/fixtures/sword.mcpx (self-made 4x4 pattern).
+ * Commands run in the test process through the shared runner instead of
+ * spawning a subprocess per call.
  */
 
 const FIXTURES = "tests/cli/fixtures";
 const SWORD_MCPX = join(FIXTURES, "sword.mcpx");
 const JPG_FIXTURE = join(FIXTURES, "px-8x8.jpg");
 
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
-
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function combined(result: SpawnResult): string {
+function combined(result: CliResult): string {
 	return stdoutText(result) + result.stderr;
 }
 
@@ -35,18 +32,8 @@ function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function runCli(args: string[], stdin?: string): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: stdin === undefined ? "ignore" : Buffer.from(stdin, "utf-8"),
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -54,7 +41,7 @@ async function listAllFiles(dir: string): Promise<string[]> {
 	return [...entries].sort();
 }
 
-describe("variant wiring via spawn", () => {
+describe("variant wiring in process", () => {
 	test("two materials produce four named files with readable contents", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-va-"));
 		try {

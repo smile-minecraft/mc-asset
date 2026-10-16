@@ -17,24 +17,21 @@ import {
 	replaceLayerPixels,
 } from "../../src/core/canvas.ts";
 import { decodePng, encodePng } from "../../src/io/png.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
- * tile spawn coverage. Inputs are generated at runtime with the frozen
- * PNG codec (no Mojang assets): a 2x2 black/white checker matching the
- * v03 worked example, plus solid canvases for the guard matrix.
+ * tile in-process coverage. Inputs are generated at runtime with the
+ * frozen PNG codec (no Mojang assets): a 2x2 black/white checker matching
+ * the v03 worked example, plus solid canvases for the guard matrix.
+ * Commands run in the test process through the shared runner instead of
+ * spawning a subprocess per call.
  */
 
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
-
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function combined(result: SpawnResult): string {
+function combined(result: CliResult): string {
 	return stdoutText(result) + result.stderr;
 }
 
@@ -42,18 +39,8 @@ function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -112,7 +99,7 @@ async function writeSolid(
 	return path;
 }
 
-function parseJsonStdout(result: SpawnResult): {
+function parseJsonStdout(result: CliResult): {
 	success: boolean;
 	result?: Record<string, unknown>;
 	error?: { code: string };
@@ -124,7 +111,7 @@ function parseJsonStdout(result: SpawnResult): {
 	};
 }
 
-describe("tile wiring via spawn", () => {
+describe("tile wiring in process", () => {
 	test("report mode writes zero files and prints the human line", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-tile-"));
 		try {

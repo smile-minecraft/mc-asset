@@ -4,39 +4,25 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodePng } from "../../src/io/png.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 const FIXTURES = "tests/cli/fixtures";
 const JPG = join(FIXTURES, "px-8x8.jpg");
 const WEBP = join(FIXTURES, "px-lossless.webp");
 
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
-
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function combined(result: SpawnResult): string {
+function combined(result: CliResult): string {
 	return stdoutText(result) + result.stderr;
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
-describe("editable raster intake (PNG/JPEG/WebP) via spawn", () => {
+describe("editable raster intake (PNG/JPEG/WebP) in process", () => {
 	test("transform accepts jpeg and webp", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-er-"));
 		try {

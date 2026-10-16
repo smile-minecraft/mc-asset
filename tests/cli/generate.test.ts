@@ -7,22 +7,19 @@ import { join } from "node:path";
 import { getMaterialPalette } from "../../src/core/material.ts";
 import { decodePng } from "../../src/io/png.ts";
 import { parseMcpx } from "../../src/mcpx/index.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
- * generate spawn coverage: deterministic pattern synthesis from a builtin
- * material palette or an .mcpx [palette], with the shared output guards.
- * No Mojang assets: palettes come from builtin materials or self-made .mcpx.
+ * generate in-process coverage: deterministic pattern synthesis from a
+ * builtin material palette or an .mcpx [palette], with the shared output
+ * guards. No Mojang assets: palettes come from builtin materials or
+ * self-made .mcpx. Commands run in the test process through the shared
+ * runner instead of spawning a subprocess per call.
  */
 
 const FIXTURES = "tests/cli/fixtures";
 const SWORD_MCPX = join(FIXTURES, "sword.mcpx");
 const RASTER_PNG = join(FIXTURES, "px-8x8.png");
-
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
 
 interface JsonEnvelope {
 	success: boolean;
@@ -30,11 +27,11 @@ interface JsonEnvelope {
 	error?: { code?: string; message?: string; details?: unknown };
 }
 
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function parseJsonStdout(result: SpawnResult): JsonEnvelope {
+function parseJsonStdout(result: CliResult): JsonEnvelope {
 	return JSON.parse(stdoutText(result)) as JsonEnvelope;
 }
 
@@ -42,18 +39,8 @@ function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -107,7 +94,7 @@ function bigPaletteMcpx(count: number): string {
 	return lines.join("\n");
 }
 
-describe("generate wiring via spawn", () => {
+describe("generate wiring in process", () => {
 	test("missing --size/--palette/--seed are INVALID_ARGUMENT with zero files", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-gen-"));
 		try {

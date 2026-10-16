@@ -9,19 +9,14 @@ import {
 	replaceLayerPixels,
 } from "../../src/core/canvas.ts";
 import { decodePng, encodePng } from "../../src/io/png.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
- * gui-scale spawn coverage. Sprites are generated at runtime with the
+ * gui-scale in-process coverage. Sprites are generated at runtime with the
  * frozen PNG codec (no Mojang assets): stretch defaults, tile repeats,
  * nine_slice corners/inner geometry, version gating of stretch_inner,
  * and the error paths.
  */
-
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
 
 interface JsonEnvelope {
 	success: boolean;
@@ -29,26 +24,16 @@ interface JsonEnvelope {
 	error?: { code?: string; message?: string; details?: unknown };
 }
 
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function parseJsonStdout(result: SpawnResult): JsonEnvelope {
+function parseJsonStdout(result: CliResult): JsonEnvelope {
 	return JSON.parse(stdoutText(result)) as JsonEnvelope;
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -101,7 +86,7 @@ function pixelOf(
 	];
 }
 
-describe("gui-scale via spawn", () => {
+describe("gui-scale in process", () => {
 	test("missing mcmeta stretches with nearest mapping", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-gui-"));
 		try {

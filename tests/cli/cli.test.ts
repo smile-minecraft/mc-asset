@@ -11,6 +11,7 @@ import {
 import { errorEnvelope, successEnvelope } from "../../src/cli/envelope.ts";
 import { atomicWriteFile } from "../../src/cli/filesystem.ts";
 import { McAssetError } from "../../src/core/errors.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 import { type CaseCheck, CLI_CASES } from "./cli-cases.ts";
 
 const check: CaseCheck = {
@@ -223,53 +224,57 @@ async function listTempFiles(dir: string): Promise<string[]> {
 	return entries.filter((name) => name.startsWith(".tmp-"));
 }
 
-// CLI behavior below needs real subprocesses, so it stays in this bun:test
-// entry on purpose: the node:test mirror (cli.node.ts) only runs the pure
-// cases above, keeping the dual entrypoint green on both runtimes.
+// Real subprocesses below only cover the true entry wiring
+// (`src/cli/index.ts` exit codes and stream routing); every other behavior
+// runs in process through the shared runner. The node:test mirror
+// (cli.node.ts) only runs the pure cases above, keeping the dual entrypoint
+// green on both runtimes.
 
-describe("cli program smoke via spawn", () => {
+function runCliInEntry(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
+}
+
+async function runEntryProcess(args: string[]): Promise<CliResult> {
+	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stdout, stderr, code] = await Promise.all([
+		new Response(proc.stdout).arrayBuffer(),
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	return { code, stdout: new Uint8Array(stdout), stderr };
+}
+
+describe("cli entry wiring via spawn", () => {
 	test("--help exits 0 and lists commands", async () => {
-		const proc = Bun.spawn(["bun", "src/cli/index.ts", "--help"], {
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-		const [out, err, code] = await Promise.all([
-			new Response(proc.stdout).text(),
-			new Response(proc.stderr).text(),
-			proc.exited,
-		]);
-		expect(code).toBe(0);
-		expect(out + err).toContain("stub");
+		const result = await runEntryProcess(["--help"]);
+		expect(result.code).toBe(0);
+		expect(
+			Buffer.from(result.stdout).toString("utf-8") + result.stderr,
+		).toContain("stub");
 	}, 30_000);
 
 	test("--version exits 0", async () => {
-		const proc = Bun.spawn(["bun", "src/cli/index.ts", "--version"], {
-			stdout: "pipe",
-			stderr: "pipe",
-		});
-		const [out, code] = await Promise.all([
-			new Response(proc.stdout).text(),
-			proc.exited,
-		]);
-		expect(code).toBe(0);
-		expect(out.trim().length).toBeGreaterThan(0);
+		const result = await runEntryProcess(["--version"]);
+		expect(result.code).toBe(0);
+		expect(
+			Buffer.from(result.stdout).toString("utf-8").trim().length,
+		).toBeGreaterThan(0);
 	}, 30_000);
+});
 
+describe("cli program smoke in process", () => {
 	test("stub without --output/--stdout is OUTPUT_REQUIRED with no files", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-cli-"));
 		try {
 			const before = await listAllFiles(dir);
-			const proc = Bun.spawn(["bun", "src/cli/index.ts", "stub"], {
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			const [out, err, code] = await Promise.all([
-				new Response(proc.stdout).text(),
-				new Response(proc.stderr).text(),
-				proc.exited,
-			]);
-			expect(code).toBe(2);
-			expect(out + err).toContain("OUTPUT_REQUIRED");
+			const result = await runCliInEntry(["stub"]);
+			expect(result.code).toBe(2);
+			expect(
+				Buffer.from(result.stdout).toString("utf-8") + result.stderr,
+			).toContain("OUTPUT_REQUIRED");
 			expect(await listAllFiles(dir)).toEqual(before);
 		} finally {
 			await rm(dir, { recursive: true, force: true });
@@ -277,20 +282,12 @@ describe("cli program smoke via spawn", () => {
 	}, 30_000);
 
 	test("stub --json --stdout keeps stdout as pure artifact bytes", async () => {
-		const proc = Bun.spawn(
-			["bun", "src/cli/index.ts", "stub", "--json", "--stdout"],
-			{ stdout: "pipe", stderr: "pipe" },
-		);
-		const [stdoutBytes, stderrText, code] = await Promise.all([
-			new Response(proc.stdout).arrayBuffer(),
-			new Response(proc.stderr).text(),
-			proc.exited,
-		]);
-		expect(code).toBe(0);
-		const artifact = Buffer.from(stdoutBytes).toString("utf-8");
+		const result = await runCliInEntry(["stub", "--json", "--stdout"]);
+		expect(result.code).toBe(0);
+		const artifact = Buffer.from(result.stdout).toString("utf-8");
 		expect(artifact.length).toBeGreaterThan(0);
 		expect(artifact).not.toContain("success");
-		const envelope = JSON.parse(stderrText) as {
+		const envelope = JSON.parse(result.stderr) as {
 			success: boolean;
 			result: unknown;
 		};
@@ -301,23 +298,14 @@ describe("cli program smoke via spawn", () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-cli-"));
 		try {
 			const target = join(dir, "stub-out.bin");
-			const first = Bun.spawn(
-				["bun", "src/cli/index.ts", "stub", "--output", target],
-				{ stdout: "pipe", stderr: "pipe" },
-			);
-			expect(await first.exited).toBe(0);
+			const first = await runCliInEntry(["stub", "--output", target]);
+			expect(first.code).toBe(0);
 			expect(await readFile(target, "utf-8")).toContain("stub-ok");
-			const second = Bun.spawn(
-				["bun", "src/cli/index.ts", "stub", "--output", target],
-				{ stdout: "pipe", stderr: "pipe" },
-			);
-			const [secondOut, secondErr, secondCode] = await Promise.all([
-				new Response(second.stdout).text(),
-				new Response(second.stderr).text(),
-				second.exited,
-			]);
-			expect(secondCode).toBe(4);
-			expect(secondOut + secondErr).toContain("OUTPUT_EXISTS");
+			const second = await runCliInEntry(["stub", "--output", target]);
+			expect(second.code).toBe(4);
+			expect(
+				Buffer.from(second.stdout).toString("utf-8") + second.stderr,
+			).toContain("OUTPUT_EXISTS");
 		} finally {
 			await rm(dir, { recursive: true, force: true });
 		}

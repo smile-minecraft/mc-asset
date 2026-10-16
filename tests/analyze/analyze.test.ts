@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { addLayer, createCanvas, setPixel } from "../../src/core/canvas.ts";
 import { encodePng } from "../../src/io/png.ts";
+import { runCliInProcess } from "../support/cli-runner.ts";
 import { ANALYZE_CASES, type CaseCheck } from "./analyze-cases.ts";
 
 const check: CaseCheck = {
@@ -23,9 +24,10 @@ describe("analyze engine pure cases", () => {
 	}
 });
 
-// CLI behavior needs real subprocesses, so it stays in this bun:test entry
-// on purpose: the node:test mirror (analyze.node.ts) only runs the pure
-// cases above, keeping the dual entrypoint green on both runtimes.
+// CLI behavior runs in process through the shared runner, so it stays in
+// this bun:test entry on purpose: the node:test mirror (analyze.node.ts)
+// only runs the pure cases above, keeping the dual entrypoint green on both
+// runtimes.
 
 function makePngBytes(): Uint8Array {
 	const canvas = createCanvas(2, 2);
@@ -43,24 +45,16 @@ async function runCli(args: string[]): Promise<{
 	stderr: string;
 	code: number;
 }> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [buffer, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
+	const result = await runCliInProcess(args);
 	return {
-		stdout: Buffer.from(buffer).toString("utf-8"),
-		stdoutBytes: new Uint8Array(buffer),
-		stderr,
-		code,
+		stdout: Buffer.from(result.stdout).toString("utf-8"),
+		stdoutBytes: result.stdout,
+		stderr: result.stderr,
+		code: result.code,
 	};
 }
 
-describe("analyze command via spawn", () => {
+describe("analyze command in process", () => {
 	test("analyze --json reports dimensions, colors, alpha, predicted", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-analyze-"));
 		try {
@@ -117,17 +111,10 @@ describe("analyze command via spawn", () => {
 	test("analyze without input exits 2 with no files created", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-analyze-"));
 		try {
-			const proc = Bun.spawn(["bun", "src/cli/index.ts", "analyze"], {
-				stdout: "pipe",
-				stderr: "pipe",
-			});
-			const [out, err, code] = await Promise.all([
-				new Response(proc.stdout).text(),
-				new Response(proc.stderr).text(),
-				proc.exited,
-			]);
-			expect(code).toBe(2);
-			expect(out + err).toMatch(/argument/i);
+			const result = await runCliInProcess(["analyze"]);
+			const stdout = Buffer.from(result.stdout).toString("utf-8");
+			expect(result.code).toBe(2);
+			expect(stdout + result.stderr).toMatch(/argument/i);
 			const { readdir } = await import("node:fs/promises");
 			expect([...(await readdir(dir))].sort()).toEqual([]);
 		} finally {

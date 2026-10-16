@@ -18,12 +18,15 @@ import {
 } from "../../src/core/canvas.ts";
 import { decodeImage } from "../../src/io/decode.ts";
 import { decodePng, encodePng } from "../../src/io/png.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
- * preview spawn coverage. Inputs are generated at runtime with the frozen
- * PNG codec (no Mojang assets): a 2x2 black/white checker matching the
- * v03 worked example, plus the shared 8x8 fixtures for multi-format
- * intake. The .mcpx case reuses tests/cli/fixtures/sword.mcpx.
+ * preview in-process coverage. Inputs are generated at runtime with the
+ * frozen PNG codec (no Mojang assets): a 2x2 black/white checker matching
+ * the v03 worked example, plus the shared 8x8 fixtures for multi-format
+ * intake. The .mcpx case reuses tests/cli/fixtures/sword.mcpx. Commands
+ * run in the test process through the shared runner instead of spawning a
+ * subprocess per call.
  */
 
 const FIXTURES = "tests/cli/fixtures";
@@ -32,23 +35,17 @@ const PNG_8 = join(FIXTURES, "px-8x8.png");
 const JPG_8 = join(FIXTURES, "px-8x8.jpg");
 const WEBP_8 = join(FIXTURES, "px-lossless.webp");
 
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
-
 interface JsonEnvelope {
 	success: boolean;
 	result?: Record<string, unknown>;
 	error?: { code?: string; message?: string; details?: unknown };
 }
 
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function parseJsonStdout(result: SpawnResult): JsonEnvelope {
+function parseJsonStdout(result: CliResult): JsonEnvelope {
 	return JSON.parse(stdoutText(result)) as JsonEnvelope;
 }
 
@@ -56,18 +53,8 @@ function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -127,7 +114,7 @@ async function writeTransparent(dir: string): Promise<string> {
 	return path;
 }
 
-describe("preview wiring via spawn", () => {
+describe("preview wiring in process", () => {
 	test("no mode is INVALID_ARGUMENT", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-preview-"));
 		try {

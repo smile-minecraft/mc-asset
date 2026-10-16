@@ -12,6 +12,7 @@ import {
 	type McpTextResult,
 } from "../../src/mcp/handlers.ts";
 import { TOOL_INPUT_SCHEMAS } from "../../src/mcp/schema.ts";
+import { runCliInProcess } from "../support/cli-runner.ts";
 import { type CaseCheck, INSPECT_CASES } from "./inspect-cases.ts";
 
 const check: CaseCheck = {
@@ -31,9 +32,10 @@ describe("inspect engine pure cases", () => {
 	}
 });
 
-// CLI behavior needs real subprocesses, so it stays in this bun:test entry
-// on purpose: the node:test mirror (inspect.node.ts) only runs the pure
-// cases above, keeping the dual entrypoint green on both runtimes.
+// CLI behavior runs in process through the shared runner, so it stays in
+// this bun:test entry on purpose: the node:test mirror (inspect.node.ts)
+// only runs the pure cases above, keeping the dual entrypoint green on both
+// runtimes.
 
 function makePngBytes(): Uint8Array {
 	const canvas = createCanvas(4, 4);
@@ -51,16 +53,12 @@ async function runCli(args: string[]): Promise<{
 	stderr: string;
 	code: number;
 }> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { stdout, stderr, code };
+	const result = await runCliInProcess(args);
+	return {
+		stdout: new TextDecoder().decode(result.stdout),
+		stderr: result.stderr,
+		code: result.code,
+	};
 }
 
 function pngMagic(bytes: Uint8Array): boolean {
@@ -82,7 +80,7 @@ function firstText(result: McpTextResult): string {
 	return block.text ?? "{}";
 }
 
-describe("inspect command via spawn", () => {
+describe("inspect command in process", () => {
 	test("inspect --mode structure --json reports layers regions and overlaps", async () => {
 		const { stdout, code } = await runCli([
 			"inspect",

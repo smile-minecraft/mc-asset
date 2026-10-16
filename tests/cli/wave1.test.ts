@@ -14,6 +14,7 @@ import { getPixel } from "../../src/core/canvas.ts";
 import { isPixelSelected, resolveSelection } from "../../src/core/selection.ts";
 import { decodePng } from "../../src/io/png.ts";
 import { parseMcpx } from "../../src/mcpx/index.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -22,32 +23,16 @@ const SWORD_MCPX = join(FIXTURES, "sword.mcpx");
 const OPS_LAYERS = join(FIXTURES, "ops-layers.json");
 const OPS_GEOMETRY = join(FIXTURES, "ops-geometry.json");
 
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
-
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function combined(result: SpawnResult): string {
+function combined(result: CliResult): string {
 	return stdoutText(result) + result.stderr;
 }
 
-async function runCli(args: string[], stdin?: string): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: stdin === undefined ? "ignore" : Buffer.from(stdin, "utf-8"),
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -55,7 +40,7 @@ async function listAllFiles(dir: string): Promise<string[]> {
 	return [...entries].sort();
 }
 
-describe("wave1 wiring via spawn", () => {
+describe("wave1 wiring in process", () => {
 	test("transform --crop writes exact pixels", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-w1-"));
 		try {

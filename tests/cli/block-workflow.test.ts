@@ -5,6 +5,7 @@ import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decodePng } from "../../src/io/png.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
  * Block Texture Workflow end-to-end coverage (v03 design, "Block Texture
@@ -37,23 +38,17 @@ const GOLDEN_FIXED_SHA256 =
 const GOLDEN_FIXED_PIXELS_SHA256 =
 	"428b60eda26ee276ec1ce380f147e7866a0c83293319ebd9adc33f1011cd974a";
 
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
-
 interface JsonEnvelope {
 	success: boolean;
 	result?: Record<string, unknown>;
 	error?: { code?: string; message?: string };
 }
 
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function parseJsonStdout(result: SpawnResult): JsonEnvelope {
+function parseJsonStdout(result: CliResult): JsonEnvelope {
 	return JSON.parse(stdoutText(result)) as JsonEnvelope;
 }
 
@@ -61,18 +56,8 @@ function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -98,7 +83,7 @@ async function generateStoneBase(dir: string, name = "t.png"): Promise<string> {
 	return out;
 }
 
-describe("block texture workflow via spawn", () => {
+describe("block texture workflow in process", () => {
 	test("stone base generation matches the golden digest", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-blockwf-"));
 		try {

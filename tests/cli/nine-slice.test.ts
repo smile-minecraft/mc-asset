@@ -10,19 +10,15 @@ import {
 	replaceLayerPixels,
 } from "../../src/core/canvas.ts";
 import { decodePng, encodePng } from "../../src/io/png.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
- * preview --nine-slice spawn coverage. Inputs are generated at runtime with
- * the frozen PNG codec (no Mojang assets): a 16x16 sprite plus hand-written
- * .mcmeta documents covering the frozen nine_slice shape, its findings, and
- * the error paths.
+ * preview --nine-slice in-process coverage. Inputs are generated at runtime
+ * with the frozen PNG codec (no Mojang assets): a 16x16 sprite plus
+ * hand-written .mcmeta documents covering the frozen nine_slice shape,
+ * its findings, and the error paths. Commands run in the test process
+ * through the shared runner instead of spawning a subprocess per call.
  */
-
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
 
 interface JsonEnvelope {
 	success: boolean;
@@ -30,11 +26,11 @@ interface JsonEnvelope {
 	error?: { code?: string; message?: string; details?: unknown };
 }
 
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function parseJsonStdout(result: SpawnResult): JsonEnvelope {
+function parseJsonStdout(result: CliResult): JsonEnvelope {
 	return JSON.parse(stdoutText(result)) as JsonEnvelope;
 }
 
@@ -42,18 +38,8 @@ function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -129,7 +115,7 @@ function nineSliceDoc(
 	};
 }
 
-describe("preview --nine-slice via spawn", () => {
+describe("preview --nine-slice in process", () => {
 	test("report matches the frozen JSON shape value by value", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-nine-"));
 		try {

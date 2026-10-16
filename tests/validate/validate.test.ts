@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { addLayer, createCanvas, setPixel } from "../../src/core/canvas.ts";
 import { encodePng } from "../../src/io/png.ts";
+import { runCliInProcess } from "../support/cli-runner.ts";
 import { type CaseCheck, VALIDATE_CASES } from "./validate-cases.ts";
 
 const check: CaseCheck = {
@@ -23,9 +24,10 @@ describe("validate engine pure cases", () => {
 	}
 });
 
-// CLI behavior needs real subprocesses, so it stays in this bun:test entry
-// on purpose: the node:test mirror (validate.node.ts) only runs the pure
-// cases above, keeping the dual entrypoint green on both runtimes.
+// CLI behavior runs in process through the shared runner, so it stays in
+// this bun:test entry on purpose: the node:test mirror (validate.node.ts)
+// only runs the pure cases above, keeping the dual entrypoint green on both
+// runtimes.
 
 function makePngBytes(): Uint8Array {
 	const canvas = createCanvas(2, 2);
@@ -42,19 +44,15 @@ async function runCli(args: string[]): Promise<{
 	stderr: string;
 	code: number;
 }> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { stdout, stderr, code };
+	const result = await runCliInProcess(args);
+	return {
+		stdout: new TextDecoder().decode(result.stdout),
+		stderr: result.stderr,
+		code: result.code,
+	};
 }
 
-describe("validate command via spawn", () => {
+describe("validate command in process", () => {
 	test("validate --json passes a clean png without touching it", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-validate-"));
 		try {

@@ -8,6 +8,17 @@ const HARNESS = join(ROOT, "scripts", "compare-runtime.mjs");
 const GRID_FIXTURE = join(ROOT, "tests", "cli", "fixtures", "tiny.grid");
 const MCPX_FIXTURE = join(ROOT, "tests", "cli", "fixtures", "sword.mcpx");
 
+/**
+ * Full-suite opt-in. The comparison below shells out to
+ * scripts/compare-runtime.mjs (needs dist/, about 25 seconds). CI already runs
+ * that harness as its own step, so the default `bun test` keeps only the
+ * three fast checks. Set MC_ASSET_FULL_TESTS=1 (the "test:full" script) to
+ * include the comparison locally.
+ */
+const RUN_FULL_SUITE = /^(1|true|yes)$/i.test(
+	process.env.MC_ASSET_FULL_TESTS ?? "",
+);
+
 describe("runtime equivalence harness (rel-t03)", () => {
 	test("harness script exists and uses only Node builtins", () => {
 		expect(existsSync(HARNESS)).toBe(true);
@@ -34,17 +45,21 @@ describe("runtime equivalence harness (rel-t03)", () => {
 		expect(harness.buffersEqual(Buffer.from(a), Buffer.from(a))).toBe(true);
 	});
 
-	test("bun source CLI and node bundle agree on fixed fixtures", () => {
-		const run = spawnSync("node", [HARNESS], {
-			cwd: ROOT,
-			encoding: "utf-8",
-		});
-		const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
-		if ((run.status ?? 1) !== 0) {
-			throw new Error(`compare-runtime failed:\n${output}`);
-		}
-		for (const label of ["render.png", "render.mcpx", "build.mcpx"]) {
-			expect(output).toContain(label);
-		}
-	}, 120_000);
+	test.skipIf(!RUN_FULL_SUITE)(
+		"bun source CLI and node bundle agree on fixed fixtures",
+		() => {
+			const run = spawnSync("node", [HARNESS], {
+				cwd: ROOT,
+				encoding: "utf-8",
+			});
+			const output = `${run.stdout ?? ""}${run.stderr ?? ""}`;
+			if ((run.status ?? 1) !== 0) {
+				throw new Error(`compare-runtime failed:\n${output}`);
+			}
+			for (const label of ["render.png", "render.mcpx", "build.mcpx"]) {
+				expect(output).toContain(label);
+			}
+		},
+		120_000,
+	);
 });

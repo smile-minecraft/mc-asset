@@ -14,6 +14,7 @@ import { getPixel } from "../../src/core/canvas.ts";
 import { decodePng, flattenCanvas } from "../../src/io/png.ts";
 import { parseMcpx } from "../../src/mcpx/index.ts";
 import { PNG_VECTORS } from "../io/png-cases.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -26,28 +27,15 @@ const OPS_EMPTY = join(FIXTURES, "ops-empty.json");
 const OPS_BAD_COLOR = join(FIXTURES, "ops-bad-color.json");
 const OPS_LINE = join(FIXTURES, "ops-line.json");
 
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
-
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-async function runCli(args: string[], stdin?: string): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: stdin === undefined ? "ignore" : Buffer.from(stdin, "utf-8"),
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[], stdin?: string): Promise<CliResult> {
+	if (stdin === undefined) {
+		return runCliInProcess(args);
+	}
+	return runCliInProcess(args, { stdin: Buffer.from(stdin, "utf-8") });
 }
 
 function pixelsEqual(a: Uint8Array, b: Uint8Array): boolean {
@@ -65,7 +53,7 @@ async function writeVectorPng(dir: string): Promise<string> {
 	return path;
 }
 
-describe("cli write commands via spawn", () => {
+describe("cli write commands in process", () => {
 	test("import decodes PNG and writes PNG plus mcpx", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-cmd-"));
 		try {

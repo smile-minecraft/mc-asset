@@ -15,16 +15,18 @@ import { ensureMcpxText } from "../../src/cli/artifacts.ts";
 import { addLayer, createCanvas, setPixel } from "../../src/core/canvas.ts";
 import { decodePng, encodePng, flattenCanvas } from "../../src/io/png.ts";
 import { PNG_VECTORS } from "../io/png-cases.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 import {
 	makePngBytes,
 	modelJson,
 	writePackFile,
 } from "../validate/pack-fixtures.ts";
 
-// CLI behavior needs real subprocesses, so it stays in this bun:test entry
-// on purpose: there is no node:test mirror for spawn coverage, matching the
-// existing commands/analyze/validate suites. Pure cross-module checks live
-// in conformance-cases.ts with both bun and node entries.
+// CLI behavior runs in process through the shared runner, so it stays in
+// this bun:test entry on purpose: there is no node:test mirror for this
+// coverage, matching the existing commands/analyze/validate suites. Pure
+// cross-module checks live in conformance-cases.ts with both bun and node
+// entries.
 
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 
@@ -32,28 +34,15 @@ const FIXTURES = "tests/cli/fixtures";
 const SWORD_MCPX = join(FIXTURES, "sword.mcpx");
 const TINY_GRID = join(FIXTURES, "tiny.grid");
 
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
-
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-async function runCli(args: string[], stdin?: string): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: stdin === undefined ? "ignore" : Buffer.from(stdin, "utf-8"),
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+async function runCli(args: string[], stdin?: string): Promise<CliResult> {
+	return runCliInProcess(
+		args,
+		stdin === undefined ? undefined : { stdin: Buffer.from(stdin, "utf-8") },
+	);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -244,7 +233,7 @@ async function writeV04NineSliceMcmeta(dir: string): Promise<string> {
 	return path;
 }
 
-describe("conformance: import gaps (t08 spawn缺口補齊)", () => {
+describe("conformance: import gaps", () => {
 	test("import --in-place rewrites the input PNG and reports it", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
 		try {
@@ -1299,7 +1288,7 @@ describe("conformance: V0.2 variant output guards", () => {
 
 describe("conformance: V0.2 rerun determinism", () => {
 	test("transform, quantize, cleanup, and recolor rerun byte-identical", async () => {
-		// Pixelize and variant reruns are already locked in their own spawn
+		// Pixelize and variant reruns are already locked in their own
 		// suites; this case covers the remaining V0.2 write commands.
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-conf-"));
 		try {

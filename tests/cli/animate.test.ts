@@ -20,19 +20,16 @@ import {
 import type { RGBA } from "../../src/core/types.ts";
 import { decodePng } from "../../src/io/png.ts";
 import { parseMcpx } from "../../src/mcpx/index.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
- * animate spawn coverage: pack / unpack / reorder / resize / validate /
+ * animate in-process coverage: pack / unpack / reorder / resize / validate /
  * preview over runtime-built frames directories (no Mojang assets).
  * Frames are small solid 4x4 canvases serialized with the frozen .mcpx
- * pipeline, so every byte on disk comes from this repo.
+ * pipeline, so every byte on disk comes from this repo. Commands run in the
+ * test process through the shared runner instead of spawning a subprocess
+ * per call.
  */
-
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
 
 interface JsonEnvelope {
 	success: boolean;
@@ -40,11 +37,11 @@ interface JsonEnvelope {
 	error?: { code?: string; message?: string; details?: unknown };
 }
 
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function parseJsonStdout(result: SpawnResult): JsonEnvelope {
+function parseJsonStdout(result: CliResult): JsonEnvelope {
 	return JSON.parse(stdoutText(result)) as JsonEnvelope;
 }
 
@@ -72,18 +69,8 @@ function errorDetail(body: JsonEnvelope, key: string): unknown {
 	return details[key];
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -132,7 +119,7 @@ function headPixelOfMcpx(text: string): number[] {
 	return [...layer.pixels.slice(0, 4)];
 }
 
-describe("animate wiring via spawn", () => {
+describe("animate wiring in process", () => {
 	test("pack vertical produces the stacked sheet and reruns byte-identical", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-animate-"));
 		try {

@@ -37,6 +37,7 @@
 	],
 	"scripts": {
 		"test": "bun test",
+		"test:full": "MC_ASSET_FULL_TESTS=1 bun test",
 		"test:typecheck": "tsc --noEmit",
 		"check:docs": "node scripts/check-docs.mjs",
 		"lint": "biome check .",

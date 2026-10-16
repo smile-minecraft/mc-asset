@@ -41,7 +41,7 @@ function add(
 	);
 }
 
-// The candidate search on a 1024x1024 raster takes several seconds, which is
+// The candidate search on a 512x512 raster takes several seconds, which is
 // over Bun's default 5 second test timeout when the machine is under load.
 const LARGE_CORPUS_TIMEOUT_MS = 60_000;
 function sha(bytes: Uint8Array): string {

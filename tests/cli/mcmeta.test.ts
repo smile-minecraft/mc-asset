@@ -19,19 +19,14 @@ import {
 } from "../../src/core/canvas.ts";
 import type { RGBA } from "../../src/core/types.ts";
 import { decodePng } from "../../src/io/png.ts";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
- * mcmeta wiring via spawn: `validate --mcmeta` plus
+ * mcmeta wiring in process: `validate --mcmeta` plus
  * `animate validate --mcmeta` and `animate unpack --mcmeta`.
  * Sheets are packed from runtime-built .mcpx frames, so every byte on
  * disk comes from this repo; no Mojang assets are read.
  */
-
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
 
 interface JsonEnvelope {
 	success: boolean;
@@ -39,11 +34,11 @@ interface JsonEnvelope {
 	error?: { code?: string; message?: string; details?: unknown };
 }
 
-function stdoutText(result: SpawnResult): string {
+function stdoutText(result: CliResult): string {
 	return Buffer.from(result.stdout).toString("utf-8");
 }
 
-function parseJsonStdout(result: SpawnResult): JsonEnvelope {
+function parseJsonStdout(result: CliResult): JsonEnvelope {
 	return JSON.parse(stdoutText(result)) as JsonEnvelope;
 }
 
@@ -66,18 +61,8 @@ function mustError(body: JsonEnvelope): { code?: string; details?: unknown } {
 	return body.error;
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-		stdin: "ignore",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 async function listAllFiles(dir: string): Promise<string[]> {
@@ -133,7 +118,7 @@ async function packVerticalSheet(
 	return { sheet, framesDir };
 }
 
-describe("mcmeta wiring via spawn", () => {
+describe("mcmeta wiring in process", () => {
 	test("validate --mcmeta passes and leaves PNG and mcmeta bytes alone", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-mcmeta-"));
 		try {

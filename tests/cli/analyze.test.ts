@@ -4,9 +4,10 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { type CliResult, runCliInProcess } from "../support/cli-runner.ts";
 
 /**
- * analyze intake spawn coverage: PNG/JPEG/WebP report the frozen V0.1
+ * analyze intake in-process coverage: PNG/JPEG/WebP report the frozen V0.1
  * fields plus the three V0.2 groups, stay read-only, and rerun
  * byte-identical. Fixture provenance: see tests/io/decode-cases.ts
  * (self-made 8x8 pattern, jpeg-js q90, cwebp lossless-exact and lossy
@@ -20,12 +21,6 @@ const WEBP_LOSSLESS = join(FIXTURES, "px-lossless.webp");
 const WEBP_LOSSY = join(FIXTURES, "px-lossy-q80.webp");
 const SWORD_MCPX = join(FIXTURES, "sword.mcpx");
 
-interface SpawnResult {
-	code: number;
-	stdout: Uint8Array;
-	stderr: string;
-}
-
 function combinedText(stdout: Uint8Array, stderr: string): string {
 	return Buffer.from(stdout).toString("utf-8") + stderr;
 }
@@ -34,17 +29,8 @@ function sha256(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
-async function runCli(args: string[]): Promise<SpawnResult> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).arrayBuffer(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { code, stdout: new Uint8Array(stdout), stderr };
+function runCli(args: string[]): Promise<CliResult> {
+	return runCliInProcess(args);
 }
 
 interface AnalyzeResultShape {
@@ -121,7 +107,7 @@ function checkFrozenShape(result: AnalyzeResultShape): void {
 	expect(text.includes("effective")).toBe(false);
 }
 
-describe("analyze intake via spawn", () => {
+describe("analyze intake in process", () => {
 	test("png reports frozen fields plus the three new groups", async () => {
 		const { stdout, code } = await runCli(["analyze", PNG, "--json"]);
 		expect(code).toBe(0);

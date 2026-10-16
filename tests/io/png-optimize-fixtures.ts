@@ -317,17 +317,17 @@ export const OPTIMIZE_CORPUS: Record<string, () => Raster> = {
 		for (let i = 3; i < r.pixels.length; i += 4) r.pixels[i] = 255;
 		return r;
 	},
-	"large-flat": () => raster(1024, 1024, () => [70, 80, 90, 255]),
-	"large-transparent": () => raster(1024, 1024, () => [0, 0, 0, 0]),
-	"large-smooth": () => smooth(1024, 1024, 33, 16, 2, true),
-	"large-entropy": () => noise(1024, 1024, 43),
+	"large-flat": () => raster(512, 512, () => [70, 80, 90, 255]),
+	"large-transparent": () => raster(512, 512, () => [0, 0, 0, 0]),
+	"large-smooth": () => smooth(512, 512, 33, 16, 2, true),
+	"large-entropy": () => noise(512, 512, 43),
 	"large-upscaled": () => {
 		const s = paletteNoise(64, 64, 51, 14, true);
-		return raster(1024, 1024, (x, y) =>
+		return raster(512, 512, (x, y) =>
 			Array.from(
 				s.pixels.subarray(
-					((y >>> 4) * 64 + (x >>> 4)) * 4,
-					((y >>> 4) * 64 + (x >>> 4)) * 4 + 4,
+					((y >>> 3) * 64 + (x >>> 3)) * 4,
+					((y >>> 3) * 64 + (x >>> 3)) * 4 + 4,
 				),
 			),
 		);

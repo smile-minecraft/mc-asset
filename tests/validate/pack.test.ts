@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { lstat, mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { runCliInProcess } from "../support/cli-runner.ts";
 import { PACK_CASES, type PackCaseCheck } from "./pack-cases.ts";
 import {
 	atlasJson,
@@ -29,25 +30,22 @@ describe("validate-pack engine cases", () => {
 	}
 });
 
-// CLI behavior needs real subprocesses, so it stays in this bun:test entry
-// on purpose: the node:test mirror (pack.node.ts) only runs the engine
-// cases above, keeping the dual entrypoint green on both runtimes.
+// CLI behavior runs in process through the shared runner, so it stays in
+// this bun:test entry on purpose: the node:test mirror (pack.node.ts) only
+// runs the engine cases above, keeping the dual entrypoint green on both
+// runtimes.
 
 async function runCli(args: string[]): Promise<{
 	stdout: string;
 	stderr: string;
 	code: number;
 }> {
-	const proc = Bun.spawn(["bun", "src/cli/index.ts", ...args], {
-		stdout: "pipe",
-		stderr: "pipe",
-	});
-	const [stdout, stderr, code] = await Promise.all([
-		new Response(proc.stdout).text(),
-		new Response(proc.stderr).text(),
-		proc.exited,
-	]);
-	return { stdout, stderr, code };
+	const result = await runCliInProcess(args);
+	return {
+		stdout: new TextDecoder().decode(result.stdout),
+		stderr: result.stderr,
+		code: result.code,
+	};
 }
 
 async function treeHash(root: string): Promise<string> {
@@ -74,7 +72,7 @@ async function treeHash(root: string): Promise<string> {
 	return hash.digest("hex");
 }
 
-describe("validate-pack command via spawn", () => {
+describe("validate-pack command in process", () => {
 	test("clean pack passes as JSON without touching inputs", async () => {
 		const dir = await mkdtemp(join(tmpdir(), "mc-asset-pack-"));
 		try {
