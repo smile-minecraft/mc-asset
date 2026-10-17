@@ -791,32 +791,34 @@ function main() {
 		// V0.3 generate determinism: one fixed pattern/size/palette/seed
 		// gives byte-identical PNG plus re-serialized .mcpx text bytes on
 		// both runtimes (integer-only engine, seed-derived sampling).
-		const generateArgs = (dir) => [
+		const generateArgs = (dir, pattern = "noise", seed = "7") => [
 			"generate",
-			"noise",
+			pattern,
 			"--size",
 			"8",
 			"--palette",
 			"stone",
 			"--seed",
-			"7",
+			seed,
 			"--output",
-			join(dir, "generate.png"),
+			join(dir, `generate-${pattern}.png`),
 			"--source",
-			join(dir, "generate.mcpx"),
+			join(dir, `generate-${pattern}.mcpx`),
 		];
-		runBun(generateArgs(bunDir), "generate");
-		runNode(generateArgs(nodeDir), "generate");
-		compareFile(
-			"generate.png",
-			join(bunDir, "generate.png"),
-			join(nodeDir, "generate.png"),
-		);
-		compareFile(
-			"generate.mcpx",
-			join(bunDir, "generate.mcpx"),
-			join(nodeDir, "generate.mcpx"),
-		);
+		for (const pattern of ["noise", "clustered-noise", "brick"]) {
+			runBun(generateArgs(bunDir, pattern), `generate-${pattern}`);
+			runNode(generateArgs(nodeDir, pattern), `generate-${pattern}`);
+			compareFile(
+				`generate-${pattern}.png`,
+				join(bunDir, `generate-${pattern}.png`),
+				join(nodeDir, `generate-${pattern}.png`),
+			);
+			compareFile(
+				`generate-${pattern}.mcpx`,
+				join(bunDir, `generate-${pattern}.mcpx`),
+				join(nodeDir, `generate-${pattern}.mcpx`),
+			);
+		}
 
 		// V0.3 tile report mode writes no files; only the stdout JSON
 		// envelope enters the comparison, in canonical form.

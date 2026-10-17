@@ -44,7 +44,7 @@ function toHex(color: { r: number; g: number; b: number; a: number }): string {
 }
 
 /**
- * Read-only material queries: `material list` names the seven frozen
+ * Read-only material queries: `material list` names the nine frozen
  * builtins in registry order, `material show <name>` prints one
  * definition. Unknown ids are INVALID_ARGUMENT via the material registry.
  * Both refuse every file flag and never write artifact files.

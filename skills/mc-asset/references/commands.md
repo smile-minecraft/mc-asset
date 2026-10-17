@@ -47,10 +47,10 @@ this table is the working summary.
 
 ## Built-in materials
 
-`material list` → `iron`, `copper`, `oxidized_copper`, `gold`, `wood`,
-`stone`, `crystal`. Each has seven entries (outline, shadow, dark, base,
-light, highlight, accent); `recolor` uses shadow, base, and highlight.
-`generate --palette <material>` also accepts these names.
+`material list` → `iron`, `copper`, `oxidized_copper`, `gold`, `diamond`,
+`netherite`, `wood`, `stone`, `crystal`. Each has seven entries (outline,
+shadow, dark, base, light, highlight, accent); `recolor` uses shadow, base,
+and highlight. `generate --palette <material>` also accepts these names.
 
 ## Procedural patterns
 

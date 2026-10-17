@@ -5,6 +5,25 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Builtin materials `diamond` and `netherite` with complete seven-role ramps (`outline`, `shadow`, `dark`, `base`, `light`, `highlight`, `accent`) measured from vanilla gear textures. `material list` now yields nine materials in deterministic order.
+- Seamless procedural tiling: `brick`, `veins`, `clustered-noise`, `spots`, `grain`, `stripes`, and `checker` now sample the canvas as a torus and close their boundaries, ensuring repeat seams do not exceed interior neighbor variance.
+- `validate-pack` now checks the root `pack.mcmeta` structure against game behavior: `PACK_MCMETA_INVALID` errors for what the game refuses to load (missing `pack` section or `pack.description`, half or inverted `min_format` / `max_format` ranges, `supported_formats` disagreeing with the declared range, retained legacy `pack_format` outside the declared majors, illegal overlay directory names, overlay `formats` contradicting the old-format rule) and `PACK_MCMETA_SUSPICIOUS` warnings for what loads but looks wrong (missing overlay directories, version-less overlay entries, scan target outside the declared range). Effective overlays are left uninterpreted with one `overlay-not-interpreted` coverage skip and one `PACK_COVERAGE_SKIPPED` warning each. Values the game accepts are never accused.
+
+### Changed
+
+- Updated procedural pattern golden SHA-256 digests to match seamless tiling geometry; showcase pattern artifacts regenerated and optimized accordingly.
+- MCP schema and tool header comments now state the actual registered count of 25 tools; documentation in English, Traditional Chinese, and Simplified Chinese corrected to remove outdated hints regarding `--force`/`--mkdir`.
+- The CLI internal `stub` probe is registered with `{ hidden: true }` so it no longer appears in `--help` output while remaining directly callable by tests.
+- `validate-pack` and model commands refine texture variable and atlas sprite resolution: template models whose undefined texture variables are supplied by descendant child models produce no findings; models used directly as final models by `blockstates` or `items` definitions (including vanilla overrides under `--vanilla`) retain `PACK_BROKEN_REFERENCE` errors when variables cannot be resolved across the parent chain; unused models with unresolved variables and standalone `model validate` / `model inspect` invocations report `PACK_UNRESOLVED_VARIABLE` warnings without failing the scan; and texture references producible at runtime by pack or vanilla atlas `paletted_permutations` entries no longer report false `PACK_MISSING_TEXTURE` errors.
+
+### Fixed
+
+- `validate-pack` suppresses false findings and noise across three scan areas: OS metadata files and archive mirrors (`.DS_Store`, `Thumbs.db`, `desktop.ini`, `._*` prefix, `__MACOSX`) under `assets/` are silently ignored during pack scanning without findings, coverage skips, or verdict changes; files inside uninterpreted top-level resource type directories (`assets/<namespace>/<type>/...`) skip per-file checks while keeping one `uninterpreted-resource` coverage skip and one `PACK_COVERAGE_SKIPPED` warning per type (namespace-level files, namespace-level issues, and misplaced files in interpreted types still report as before); and texture files covering an identical path in a provided `--vanilla` tree no longer trigger `PACK_ORPHAN_TEXTURE`.
+
 ## [0.4.0] - 2026-10-16
 
 ### Added

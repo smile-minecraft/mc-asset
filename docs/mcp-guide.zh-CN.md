@@ -364,7 +364,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 结果（原样）：
 
 ```text
-{"mode":"list","profile":"generic","materials":["iron","copper","oxidized_copper","gold","wood","stone","crystal"]}
+{"mode":"list","profile":"generic","materials":["iron","copper","oxidized_copper","gold","diamond","netherite","wood","stone","crystal"]}
 ```
 
 ### tile_asset
@@ -570,7 +570,7 @@ isError: true
 ## 限制与缺口
 
 - **没有逐像素工具。** 不存在 `set_pixel`；像素工作要通过 ASCII Grid、批处理操作数组或内联的 `.mcpx` 文本来做。
-- **只接受显式路径，不覆盖，不建目录。** 目标已存在是 `OUTPUT_EXISTS`，缺少上级目录是 `FILESYSTEM_ERROR`。错误消息仍会提到 `--force`／`--mkdir`，但通过 MCP 无法传入这两个标志，请改用新路径，或自行创建目录。
+- **只接受显式路径，不覆盖，不建目录。** 目标已存在是 `OUTPUT_EXISTS`，缺少上级目录是 `FILESYSTEM_ERROR`。MCP 不接受 `--force` 与 `--mkdir`，请改用新路径，或自行创建目录。
 - **省略输出路径会内联产物。** 没有输出路径时，结果会带 `pngBase64`（PNG）或 `mcpxText`（`.mcpx`），而不写入文件。这是逐个产物决定的：只给 `outputPngPath` 会写出 PNG，并仍在结果中内联 `.mcpx` 文本。
 - **与 CLI 完全对等。** 二十五个工具覆盖素材输入与源码构建、空间变换、调色板与减色、确定性像素化管线、程序化生成、平铺与预览、动画 sprite sheet，以及单个资产与整个资源包的验证（含依赖／原版解析与 GUI 精灵图缩放）；版本目标设置通过 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 传入。
 - **查看与附图都是图片块，不另存副本。** `inspect_asset` 的 `view` 与 `apply_asset_operations` 的附图都不会再以 `pngBase64` 重复一份 PNG；字节走标准的 `type: "image"`、`mimeType: "image/png"` 块。查看缩放默认 1；长边自动放大（缩放前不足 128 才向 128 放大，上限 16）只适用于附图。超过 1024px 边长一律是 `RESOURCE_LIMIT_EXCEEDED`，不会默默缩图。

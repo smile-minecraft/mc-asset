@@ -17,7 +17,8 @@ export type ModelReferenceCode =
 	| "PACK_MISSING_TEXTURE"
 	| "PACK_REFERENCE_CYCLE"
 	| "PACK_UNRESOLVED_EXTERNAL"
-	| "PACK_CASE_MISMATCH";
+	| "PACK_CASE_MISMATCH"
+	| "PACK_UNRESOLVED_VARIABLE";
 
 export interface ModelFinding {
 	readonly code: ModelStructureCode | ModelReferenceCode;

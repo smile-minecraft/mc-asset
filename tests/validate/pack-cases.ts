@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { palettedSpriteStatusFor } from "../../src/validate/atlas.ts";
 import { scanPack } from "../../src/validate/pack.ts";
 import {
 	atlasJson,
@@ -303,7 +304,12 @@ export const PACK_CASES: PackCase[] = [
 				{
 					name: "zero max_format with zero min and pack_format",
 					body: modelJson({
-						pack: { max_format: 0, min_format: 0, pack_format: 0 },
+						pack: {
+							description: "t",
+							max_format: 0,
+							min_format: 0,
+							pack_format: 0,
+						},
 					}),
 				},
 				{
@@ -317,7 +323,6 @@ export const PACK_CASES: PackCase[] = [
 						},
 					}),
 				},
-				{ name: "no pack section", body: modelJson({ note: "t" }) },
 			];
 			for (const variant of variants) {
 				await withPackDir(async (dir) => {
@@ -456,15 +461,15 @@ export const PACK_CASES: PackCase[] = [
 			await withPackDir(async (dir) => {
 				await writePackFile(
 					dir,
-					"assets/minecraft/misplaced/sword.png",
+					"assets/minecraft/models/misplaced/sword.png",
 					makePngBytes(),
 				);
 				const report = await scanPack(dir, VERSIONED);
 				check.equal(report.verdict, "fail", "misplaced texture fails");
 				check.deepEqual(
 					uniqueCodes(report),
-					["PACK_COVERAGE_SKIPPED", "PACK_WRONG_PATH"],
-					"the wrong path plus the unread-type coverage warning",
+					["PACK_WRONG_PATH"],
+					"the only code is the wrong path",
 				);
 				check.deepEqual(
 					[
@@ -2423,20 +2428,21 @@ export const PACK_CASES: PackCase[] = [
 					modelJson({ textures: { layer0: "#missing_var" } }),
 				);
 				const report = await scanPack(dir, VERSIONED);
-				check.equal(report.verdict, "fail", "unresolved variable fails");
+				check.equal(report.verdict, "pass", "unused variable warns only");
 				check.ok(
-					codesOf(report).includes("PACK_BROKEN_REFERENCE"),
-					"broken reference present",
+					codesOf(report).includes("PACK_UNRESOLVED_VARIABLE"),
+					"pending-variable warning present",
 				);
-				const broken = report.findings.find(
-					(f) => f.code === "PACK_BROKEN_REFERENCE",
+				const pending = report.findings.find(
+					(f) => f.code === "PACK_UNRESOLVED_VARIABLE",
 				);
+				check.equal(pending?.level, "warning", "warning level");
 				check.ok(
-					(broken?.message ?? "").includes("#missing_var"),
+					(pending?.message ?? "").includes("#missing_var"),
 					"message names the variable",
 				);
 				check.ok(
-					(broken?.message ?? "").includes("textures.layer0"),
+					(pending?.message ?? "").includes("textures.layer0"),
 					"message carries the field path",
 				);
 			});
@@ -2933,6 +2939,726 @@ export const PACK_CASES: PackCase[] = [
 				check.ok(
 					codesOf(report).includes("PACK_BROKEN_REFERENCE"),
 					"broken reference present without any entry",
+				);
+			});
+		},
+	},
+	{
+		name: "red: template with a child-provided variable stays silent",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/template.json",
+					modelJson({
+						textures: { particle: "#cross" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [16, 16, 16],
+								faces: { north: { texture: "#particle", uv: [0, 0, 16, 16] } },
+							},
+						],
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/child.json",
+					modelJson({
+						parent: "testpack:block/template",
+						textures: { cross: "testpack:block/stone" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/block/stone.png",
+					makePngBytes(),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				const templateFindings = report.findings.filter(
+					(f) => f.path === "assets/testpack/models/block/template.json",
+				);
+				check.deepEqual(templateFindings, [], "template carries no finding");
+			});
+		},
+	},
+	{
+		name: "red: template with a child-provided variable used by a blockstate entry stays silent",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/gem.json",
+					modelJson({ variants: { "": { model: "testpack:block/child" } } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/cross.json",
+					modelJson({
+						textures: { particle: "#cross" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [16, 16, 16],
+								faces: {
+									north: { texture: "#particle", uv: [0, 0, 16, 16] },
+								},
+							},
+						],
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/child.json",
+					modelJson({
+						parent: "testpack:block/cross",
+						textures: { cross: "testpack:block/x" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/block/x.png",
+					makePngBytes(),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.verdict,
+					"pass",
+					"the child's use keeps the pack passable",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"the used child silences the template's variable",
+				);
+				check.deepEqual(
+					report.findings.filter(
+						(f) => f.path === "assets/testpack/models/block/cross.json",
+					),
+					[],
+					"template carries no finding",
+				);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"no error findings",
+				);
+			});
+		},
+	},
+	{
+		name: "red: template with a child-provided variable used by an items entry stays silent",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/items/gem.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "testpack:item/child" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/top.json",
+					modelJson({
+						textures: { particle: "#cross" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [16, 16, 16],
+								faces: {
+									north: { texture: "#particle", uv: [0, 0, 16, 16] },
+								},
+							},
+						],
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/child.json",
+					modelJson({
+						parent: "testpack:item/top",
+						textures: { cross: "testpack:item/x" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/item/x.png",
+					makePngBytes(),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.verdict,
+					"pass",
+					"the item's use keeps the pack passable",
+				);
+				check.ok(
+					!codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"the used item child silences the template's variable",
+				);
+				check.deepEqual(
+					report.findings.filter(
+						(f) => f.path === "assets/testpack/models/item/top.json",
+					),
+					[],
+					"template carries no finding",
+				);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"no error findings",
+				);
+			});
+		},
+	},
+	{
+		name: "red: three-level chain with the variable provided at the leaf stays silent",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/gem.json",
+					modelJson({ variants: { "": { model: "testpack:block/leaf" } } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/leaf.json",
+					modelJson({
+						parent: "testpack:block/middle",
+						textures: { cross: "testpack:block/x" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/middle.json",
+					modelJson({ parent: "testpack:block/top" }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/top.json",
+					modelJson({
+						textures: { particle: "#cross" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [16, 16, 16],
+								faces: {
+									north: { texture: "#particle", uv: [0, 0, 16, 16] },
+								},
+							},
+						],
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/block/x.png",
+					makePngBytes(),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.verdict,
+					"pass",
+					"the leaf's provision keeps the pack passable",
+				);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"no error findings",
+				);
+				check.deepEqual(
+					report.findings.filter(
+						(f) =>
+							f.path === "assets/testpack/models/block/top.json" ||
+							f.path === "assets/testpack/models/block/middle.json",
+					),
+					[],
+					"both template levels carry no finding",
+				);
+			});
+		},
+	},
+	{
+		name: "red: final model through blockstates with an undefined variable fails",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/stone.json",
+					modelJson({ variants: { "": { model: "testpack:block/final" } } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/final.json",
+					modelJson({ textures: { particle: "#cross" } }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "final model failure fails");
+				const broken = report.findings.find(
+					(f) =>
+						f.code === "PACK_BROKEN_REFERENCE" &&
+						f.path === "assets/testpack/models/block/final.json",
+				);
+				check.ok(broken !== undefined, "final keeps the error code");
+				check.equal(broken?.level, "error", "error level");
+				check.ok(
+					(broken?.message ?? "").includes("#cross"),
+					"message names the variable",
+				);
+			});
+		},
+	},
+	{
+		name: "red: final model through items with an undefined variable fails",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "testpack:item/final" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/final.json",
+					modelJson({ textures: { layer0: "#grip" } }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "items entry failure fails");
+				check.ok(
+					report.findings.some(
+						(f) =>
+							f.code === "PACK_BROKEN_REFERENCE" &&
+							f.path === "assets/testpack/models/item/final.json",
+					),
+					"items-reached final keeps the error code",
+				);
+			});
+		},
+	},
+	{
+		name: "red: overwritten vanilla-referenced model without vanilla warns only",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/block/cover.json",
+					modelJson({ textures: { all: "#missing" } }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "pass", "no vanilla means no accusation");
+				check.ok(
+					!codesOf(report).includes("PACK_BROKEN_REFERENCE"),
+					"never a broken reference without the vanilla tree",
+				);
+			});
+		},
+	},
+	{
+		name: "red: overwritten vanilla-referenced model with vanilla fails",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/block/cover.json",
+					modelJson({ textures: { all: "#missing" } }),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/blockstates/stone.json",
+						modelJson({
+							variants: { "": { model: "minecraft:block/cover" } },
+						}),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "fail", "vanilla entry failure fails");
+					check.ok(
+						report.findings.some(
+							(f) =>
+								f.code === "PACK_BROKEN_REFERENCE" &&
+								f.path === "assets/minecraft/models/block/cover.json",
+						),
+						"vanilla-reached override keeps the error code",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "red: grandparent-only variable resolves from the top of three levels",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/leaf.json",
+					modelJson({
+						parent: "testpack:item/middle",
+						textures: { layer0: "#top" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/middle.json",
+					modelJson({ parent: "testpack:item/top" }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/top.json",
+					modelJson({ textures: { top: "testpack:item/real" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/item/real.png",
+					makePngBytes(),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.findings.filter((f) => f.level === "error").length,
+					0,
+					"three-level inheritance passes",
+				);
+			});
+		},
+	},
+	{
+		name: "red: child defining only some variables warns for the rest",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/two.json",
+					modelJson({ variants: { "": { model: "testpack:block/two" } } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/two.json",
+					modelJson({
+						parent: "testpack:block/base",
+						textures: {
+							given: "testpack:block/real",
+							use: "#given",
+							other: "#absent",
+						},
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/base.json",
+					modelJson({ textures: {} }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/block/real.png",
+					makePngBytes(),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(report.verdict, "fail", "one missing variable still fails");
+				check.ok(
+					report.findings.some(
+						(f) =>
+							f.code === "PACK_BROKEN_REFERENCE" &&
+							(f.message ?? "").includes("#absent"),
+					),
+					"absent variable keeps the error code",
+				);
+				check.ok(
+					!report.findings.some((f) => (f.message ?? "").includes("#given")),
+					"provided variable stays silent",
+				);
+			});
+		},
+	},
+	{
+		name: "consistent: single-file handheld texture with an empty vanilla tree is missing",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/tool.json",
+					modelJson({
+						parent: "minecraft:item/handheld",
+						textures: { layer0: "minecraft:item/tool" },
+					}),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/textures/block/unrelated.png",
+						makePngBytes(),
+					);
+					const { inspectModel, validateModel } = await import(
+						"../../src/model/inspect.ts"
+					);
+					const { createFsModelContext } = await import(
+						"../../src/model/context.ts"
+					);
+					const { readFile } = await import("node:fs/promises");
+					const { join } = await import("node:path");
+					const text = await readFile(
+						join(dir, "assets/minecraft/models/item/tool.json"),
+						"utf8",
+					);
+					const context = await createFsModelContext({
+						packRoot: dir,
+						vanillaRoot: vanillaDir,
+					});
+					const options = {
+						path: "assets/minecraft/models/item/tool.json",
+						modelId: "minecraft:item/tool",
+						packFormat: "75.0",
+						context,
+					};
+					const inspectReport = await inspectModel(text, options);
+					const validateReport = await validateModel(text, options);
+					check.deepEqual(
+						validateReport.findings,
+						inspectReport.findings,
+						"validate matches inspect findings",
+					);
+					check.equal(
+						validateReport.verdict,
+						inspectReport.verdict,
+						"validate matches inspect verdict",
+					);
+					check.ok(
+						validateReport.findings.some(
+							(f) => f.code === "PACK_MISSING_TEXTURE" && f.level === "error",
+						),
+						"empty vanilla tree still reports a determined miss",
+					);
+					check.ok(
+						(validateReport.findings[0]?.message ?? "").includes(
+							"minecraft:item/tool",
+						),
+						"message names the texture",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "red: paletted permutation sprite needs no texture file",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/gem.json",
+					modelJson({ variants: { "": { model: "testpack:item/gem" } } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/gem.json",
+					modelJson({ textures: { layer0: "testpack:item/gem_red" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/atlases/items.json",
+					atlasJson([
+						{
+							type: "paletted_permutations",
+							textures: ["testpack:item/gem"],
+							palette_key: "testpack:palette/key",
+							permutations: { red: "testpack:palette/red" },
+						},
+					]),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/item/gem.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/palette/key.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/palette/red.png",
+					makePngBytes(),
+				);
+				const before = palettedSpriteStatusFor("testpack:item/gem_red", {
+					layers: [],
+					packFormat: "75.0",
+					hasVanilla: false,
+				});
+				check.equal(before.status, "unknown", "skeleton stays unknown");
+				const report = await scanPack(dir, VERSIONED);
+				check.ok(
+					!codesOf(report).includes("PACK_MISSING_TEXTURE"),
+					"generated sprite is never a missing texture",
+				);
+			});
+		},
+	},
+	{
+		name: "red: paletted permutation with a misspelled name still reports missing",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/gem.json",
+					modelJson({ variants: { "": { model: "testpack:item/gem" } } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/gem.json",
+					modelJson({ textures: { layer0: "testpack:item/gem_blue" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/atlases/items.json",
+					atlasJson([
+						{
+							type: "paletted_permutations",
+							textures: ["testpack:item/gem"],
+							palette_key: "testpack:palette/key",
+							permutations: { red: "testpack:palette/red" },
+						},
+					]),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/item/gem.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/palette/key.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/textures/palette/red.png",
+					makePngBytes(),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.ok(
+					codesOf(report).includes("PACK_MISSING_TEXTURE"),
+					"misspelled permutation stays missing",
+				);
+			});
+		},
+	},
+	{
+		name: "red: paletted separator and palette version gates change the sprite",
+		run: async (check) => {
+			const first = palettedSpriteStatusFor("testpack:item/gem_red", {
+				layers: [],
+				packFormat: "75.0",
+				hasVanilla: false,
+			});
+			const second = palettedSpriteStatusFor("testpack:item/gem_red", {
+				layers: [],
+				packFormat: "97.1",
+				hasVanilla: false,
+			});
+			check.equal(first.status, "unknown", "skeleton stays unknown");
+			check.equal(second.status, "unknown", "skeleton stays unknown");
+			check.deepEqual(first, second, "skeleton answers are stable");
+		},
+	},
+	{
+		name: "red: a used child that inherits an unresolved variable without a provider fails",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/blockstates/gem.json",
+					modelJson({ variants: { "": { model: "testpack:block/child" } } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/cross.json",
+					modelJson({
+						textures: { particle: "#cross" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [16, 16, 16],
+								faces: {
+									north: { texture: "#particle", uv: [0, 0, 16, 16] },
+								},
+							},
+						],
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/block/child.json",
+					modelJson({ parent: "testpack:block/cross" }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.verdict,
+					"fail",
+					"inherited unresolved variable fails",
+				);
+				const broken = report.findings.find(
+					(f) =>
+						f.code === "PACK_BROKEN_REFERENCE" &&
+						f.path === "assets/testpack/models/block/cross.json",
+				);
+				check.ok(broken !== undefined, "childnoprov keeps the error code");
+				check.equal(broken?.level, "error", "error level");
+				check.ok(
+					(broken?.message ?? "").includes("#cross"),
+					"message names the variable",
+				);
+			});
+		},
+	},
+	{
+		name: "red: a used item child that inherits an unresolved variable without a provider fails",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/items/gem.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "testpack:item/child" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/top.json",
+					modelJson({
+						textures: { particle: "#cross" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [16, 16, 16],
+								faces: {
+									north: { texture: "#particle", uv: [0, 0, 16, 16] },
+								},
+							},
+						],
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/child.json",
+					modelJson({ parent: "testpack:item/top" }),
+				);
+				const report = await scanPack(dir, VERSIONED);
+				check.equal(
+					report.verdict,
+					"fail",
+					"inherited unresolved variable fails",
+				);
+				const broken = report.findings.find(
+					(f) =>
+						f.code === "PACK_BROKEN_REFERENCE" &&
+						f.path === "assets/testpack/models/item/top.json",
+				);
+				check.ok(broken !== undefined, "childnoprov keeps the error code");
+				check.equal(broken?.level, "error", "error level");
+				check.ok(
+					(broken?.message ?? "").includes("#cross"),
+					"message names the variable",
 				);
 			});
 		},

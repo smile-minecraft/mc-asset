@@ -488,6 +488,43 @@ export function diagnoseTextureVariableExternal(
 }
 
 /**
+ * Unresolved texture-variable verdict shared by the single-file and
+ * whole-pack paths: final models (used through entries or directly, or whose
+ * entry chain cannot resolve the variable) produce an error, while a template
+ * model whose variable is provided by a child model produces no finding
+ * (returns undefined); everything else is a warning.
+ */
+export type UnresolvedVariableContext =
+	| { readonly kind: "final" }
+	| { readonly kind: "template"; readonly providerRel: string }
+	| { readonly kind: "unknown" };
+
+export interface UnresolvedVariableVerdict {
+	readonly code: "PACK_BROKEN_REFERENCE" | "PACK_UNRESOLVED_VARIABLE";
+	readonly level: "error" | "warning";
+}
+
+/**
+ * Map an unresolved texture variable onto its finding code and level
+ * without touching messages or pointers. Returns undefined when the
+ * holder is a template whose variable is provided by a child model, so
+ * the caller emits no finding.
+ */
+export function decideUnresolvedVariable(
+	variable: string,
+	context: UnresolvedVariableContext,
+): UnresolvedVariableVerdict | undefined {
+	void variable;
+	if (context.kind === "final") {
+		return { code: "PACK_BROKEN_REFERENCE", level: "error" };
+	}
+	if (context.kind === "template") {
+		return undefined;
+	}
+	return { code: "PACK_UNRESOLVED_VARIABLE", level: "warning" };
+}
+
+/**
  * Parent cycles over already-known model docs: only edges whose target is
  * also a known doc can form a detectable cycle. Each cycle lists its rels
  * in visit order, closed by repeating the entry rel.

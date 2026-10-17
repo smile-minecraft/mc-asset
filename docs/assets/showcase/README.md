@@ -36,7 +36,7 @@ final PNG is passed through `mc-asset optimize`.
 | `anim-sheet.png` | 64×256 | The four frames packed vertically (16×64 sheet), ×4 nearest |
 | `items/*.grid` | 16×16 ASCII grids | Hand-authored sword, pickaxe, apple, potion, sapphire, key |
 | `items.png` | 576×96 | The six items packed into one horizontal strip (96×16), ×6 nearest |
-| `variants.png` | 560×80 | `items/sword.grid` recolored into all seven builtin materials, packed into a strip (112×16), ×5 nearest |
+| `variants.png` | 720×80 | `items/sword.grid` recolored into all nine builtin materials, packed into a strip (144×16), ×5 nearest |
 | `patterns/<pattern>.png` | 64×64 each | One 16px `generate` swatch per pattern, ×4 nearest |
 | `quickstart-gem.png` | 128×128 | The README Quickstart gem (the sapphire without palette roles), ×8 nearest |
 | `batch-edit-gem.png` | 128×128 | The same gem after the README Recipe 7 batch, ×8 nearest |
@@ -100,20 +100,20 @@ Source: `items/sword.grid` (section 6). Its palette tags every color with a
 role. The blade and guard use `dark` (the lit-edge outline), `shadow`, `base`,
 and `highlight`, which `variant` maps onto the target ramp; the darkest outline
 (`outline`), the white glint (`accent`), and the wooden grip and guard gem
-(`custom`) are kept verbatim. The sword is recolored into all seven builtin
+(`custom`) are kept verbatim. The sword is recolored into all nine builtin
 materials and the variants are packed into one strip with `animate pack`,
-which reads the `.mcpx` files in name order (copper, crystal, gold, iron,
-oxidized_copper, stone, wood) and skips the PNGs with a `NON_MCPX_IGNORED`
-warning. Displayed ×5.
+which reads the `.mcpx` files in name order (copper, crystal, diamond, gold,
+iron, netherite, oxidized_copper, stone, wood) and skips the PNGs with a
+`NON_MCPX_IGNORED` warning. Displayed ×5.
 
 ```sh
 mc-asset render $OUT/items/sword.grid --source $SCRATCH/sword.mcpx
 mc-asset variant $SCRATCH/sword.mcpx \
-  --materials iron,copper,oxidized_copper,gold,stone,wood,crystal \
+  --materials iron,copper,oxidized_copper,gold,diamond,netherite,stone,wood,crystal \
   --output-dir $SCRATCH/variants --mkdir
 mc-asset animate pack --frames-dir $SCRATCH/variants --layout horizontal \
-  --output $SCRATCH/variants-112x16.png
-mc-asset preview $SCRATCH/variants-112x16.png --scale 5 --output $OUT/variants.png
+  --output $SCRATCH/variants-144x16.png
+mc-asset preview $SCRATCH/variants-144x16.png --scale 5 --output $OUT/variants.png
 ```
 
 ## 4. Tile pattern and 4×4 preview
@@ -370,4 +370,4 @@ mc-asset analyze $OUT/model-preview.png       # 384x128, 24 colors, cutout
 Size note: every showcase PNG is losslessly re-encoded with `mc-asset optimize`
 into indexed, grayscale, or compressed RGBA storage, so each file stays between
 97 bytes and 1.1 KB (`mc-asset optimize --input-dir docs/assets/showcase --recursive --dry-run`
-reports `unchanged` for all 29 PNGs).
+reports `unchanged` for all 32 PNGs).

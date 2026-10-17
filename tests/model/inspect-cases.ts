@@ -12,6 +12,7 @@ import {
 	type ModelInspectReport,
 	validateModel,
 } from "../../src/model/inspect.ts";
+import { decideUnresolvedVariable } from "../../src/validate/reference-graph.ts";
 import type { ResolutionSource } from "../../src/validate/resource-context.ts";
 import {
 	assertAsyncError,
@@ -586,14 +587,20 @@ INSPECT_CASES.push(
 		},
 	},
 	{
-		name: "texture variables: undefined variable is a broken reference",
+		name: "texture variables: undefined variable without child context is a pending warning",
 		async run(check) {
 			const report = await inspect(textureModel({}));
 			check.equal(
 				report.elements[0]?.faces[0]?.textureResolution.status,
 				"undefined-variable",
 			);
-			hasFinding(check, report, "PACK_BROKEN_REFERENCE", "error");
+			hasFinding(check, report, "PACK_UNRESOLVED_VARIABLE", "warning");
+			check.ok(
+				!report.findings.some(
+					(finding) => finding.code === "PACK_BROKEN_REFERENCE",
+				),
+				"single-file unknown context never accuses a broken reference",
+			);
 		},
 	},
 	{
@@ -1133,32 +1140,28 @@ for (const inherited of [false, true]) {
 		},
 	});
 }
-for (const count of [1, 32]) {
-	INSPECT_CASES.push({
-		name: `parent termination: complete ${count}-parent chain proves variables undefined`,
-		async run(check) {
-			const files: Record<string, unknown> = {};
-			for (let i = 0; i < count; i += 1)
-				files[`assets/demo/models/chain/${i}.json`] =
-					i === count - 1 ? {} : { parent: `demo:chain/${i + 1}` };
-			const report = await inspect(
-				{
-					parent: "demo:chain/0",
-					textures: { alias: "#all" },
-					elements: [cube],
-				},
-				context(files),
-			);
-			check.equal(report.textures[0]?.resolution.status, "undefined-variable");
-			check.equal(
-				report.elements[0]?.faces[0]?.textureResolution.status,
-				"undefined-variable",
-			);
-			hasFinding(check, report, "PACK_BROKEN_REFERENCE", "error");
-			check.equal(report.coverage.status, "complete");
-		},
-	});
-}
+INSPECT_CASES.push({
+	name: "texture variables: undefined variable stays a warning when the chain proves it",
+	async run(check) {
+		const files: Record<string, unknown> = {};
+		files["assets/demo/models/chain/0.json"] = {};
+		const report = await inspect(
+			{
+				parent: "demo:chain/0",
+				textures: { alias: "#all" },
+				elements: [cube],
+			},
+			context(files),
+		);
+		check.equal(report.textures[0]?.resolution.status, "undefined-variable");
+		check.equal(
+			report.elements[0]?.faces[0]?.textureResolution.status,
+			"undefined-variable",
+		);
+		hasFinding(check, report, "PACK_UNRESOLVED_VARIABLE", "warning");
+		check.equal(report.coverage.status, "complete");
+	},
+});
 for (const [label, parent, reason] of [
 	["invalid JSON", '{"a":}', "document-invalid-json"],
 	["oversized document", `{}${" ".repeat(1_048_575)}`, "document-too-large"],
@@ -1288,7 +1291,7 @@ for (const [label, value] of [
 	});
 }
 INSPECT_CASES.push({
-	name: "parent termination: builtin ends the chain and proves variables undefined",
+	name: "parent termination: builtin ends the chain and leaves the variable pending",
 	async run(check) {
 		const report = await inspect({
 			parent: "minecraft:item/generated",
@@ -1300,6 +1303,59 @@ INSPECT_CASES.push({
 			report.elements[0]?.faces[0]?.textureResolution.status,
 			"undefined-variable",
 		);
-		hasFinding(check, report, "PACK_BROKEN_REFERENCE", "error");
+		hasFinding(check, report, "PACK_UNRESOLVED_VARIABLE", "warning");
 	},
 });
+
+INSPECT_CASES.push(
+	{
+		name: "unresolved variable verdict: shared decision maps final models to an error",
+		async run(check) {
+			const verdict = decideUnresolvedVariable("cross", { kind: "final" });
+			check.deepEqual(verdict, {
+				code: "PACK_BROKEN_REFERENCE",
+				level: "error",
+			});
+		},
+	},
+	{
+		name: "unresolved variable verdict: shared decision silences templates with a provider",
+		async run(check) {
+			const verdict = decideUnresolvedVariable("cross", {
+				kind: "template",
+				providerRel: "assets/demo/models/item/child.json",
+			});
+			check.equal(verdict, undefined, "template verdict produces no finding");
+		},
+	},
+	{
+		name: "unresolved variable verdict: shared decision warns when usage is unknown",
+		async run(check) {
+			const verdict = decideUnresolvedVariable("cross", { kind: "unknown" });
+			check.deepEqual(verdict, {
+				code: "PACK_UNRESOLVED_VARIABLE",
+				level: "warning",
+			});
+		},
+	},
+	{
+		name: "unresolved variable verdict: single-file undefined variable warns with the new code",
+		async run(check) {
+			const report = await inspect(textureModel({ layer: "#ghost" }, "#ghost"));
+			check.equal(
+				report.elements[0]?.faces[0]?.textureResolution.status,
+				"undefined-variable",
+			);
+			hasFinding(check, report, "PACK_UNRESOLVED_VARIABLE", "warning");
+			check.equal(report.verdict, "pass");
+		},
+	},
+	{
+		name: "unresolved variable verdict: variable cycles still fail",
+		async run(check) {
+			const report = await inspect(textureModel({ all: "#all" }, "#all"));
+			hasFinding(check, report, "PACK_REFERENCE_CYCLE", "error");
+			check.equal(report.verdict, "fail");
+		},
+	},
+);

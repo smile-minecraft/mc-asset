@@ -10,9 +10,10 @@ import type {
  * Material semantic layer: an AuthoringPalette plus texture processing
  * characteristics (contrast, noise, cluster, highlight behavior).
  *
- * The seven starter palettes below are project-owned deterministic values
- * pending art-direction review. They are plain hex constants kept inside
- * this module and do not reference any official Minecraft assets.
+ * The nine palettes below are project-owned deterministic values. The metal
+ * and gem ramps for `diamond` and `netherite` are plain color measurements
+ * taken from vanilla gear textures; they are hex constants kept inside this
+ * module and do not copy any official artwork.
  */
 
 export type BuiltinMaterialId =
@@ -20,6 +21,8 @@ export type BuiltinMaterialId =
 	| "copper"
 	| "oxidized_copper"
 	| "gold"
+	| "diamond"
+	| "netherite"
 	| "wood"
 	| "stone"
 	| "crystal";
@@ -29,6 +32,8 @@ export const BUILTIN_MATERIAL_IDS: readonly BuiltinMaterialId[] = [
 	"copper",
 	"oxidized_copper",
 	"gold",
+	"diamond",
+	"netherite",
 	"wood",
 	"stone",
 	"crystal",
@@ -155,6 +160,50 @@ const MATERIALS: Record<BuiltinMaterialId, MaterialDefinition> = {
 			noise: 0,
 			cluster: "smooth-plate",
 			highlightBehavior: "sharp warm glint",
+		},
+	),
+	/**
+	 * `accent` is the highlight lifted three fifths of the way to white, the
+	 * same relationship every other ramp uses for its brightest tone.
+	 */
+	diamond: define(
+		"diamond",
+		[
+			{ role: "outline", hex: "#082520" },
+			{ role: "shadow", hex: "#0e3f36" },
+			{ role: "dark", hex: "#1e8a77" },
+			{ role: "base", hex: "#2bc7ac" },
+			{ role: "light", hex: "#33ebcb" },
+			{ role: "highlight", hex: "#a4fdf0" },
+			{ role: "accent", hex: "#dafef9" },
+		],
+		{
+			contrast: 4,
+			noise: 0,
+			cluster: "facets",
+			highlightBehavior: "bright facet glint",
+		},
+	),
+	/**
+	 * Deep purple-grey plate, so the outline stays the near-black plum the
+	 * measured darkest netherite pixels actually use.
+	 */
+	netherite: define(
+		"netherite",
+		[
+			{ role: "outline", hex: "#231012" },
+			{ role: "shadow", hex: "#291b24" },
+			{ role: "dark", hex: "#3b2c35" },
+			{ role: "base", hex: "#4f3c46" },
+			{ role: "light", hex: "#63555c" },
+			{ role: "highlight", hex: "#867b86" },
+			{ role: "accent", hex: "#cecece" },
+		],
+		{
+			contrast: 3,
+			noise: 1,
+			cluster: "smooth-plate",
+			highlightBehavior: "cool top-left edge",
 		},
 	),
 	wood: define(

@@ -167,6 +167,161 @@ function indexForIntensity(intensity: number, count: number): number {
 		: ((clamped * count) / 256) | 0;
 }
 
+/**
+ * Non-negative modulo, the one wrap rule every tiling pattern shares:
+ * neighbour cells, walker steps, and blob distances all index the canvas as a
+ * torus, so both edges of a canvas sample the same field a tile boundary
+ * would show when the canvas repeats.
+ */
+function torusIndex(value: number, limit: number): number {
+	const wrapped = value % limit;
+	return wrapped < 0 ? wrapped + limit : wrapped;
+}
+
+/**
+ * Nearest-image distance around one axis: the distance to the nearest copy
+ * of a position in a field that repeats every `limit` pixels, so a blob
+ * near one edge reaches the opposite edge exactly like it reaches an
+ * interior neighbour.
+ */
+function torusDistance(value: number, limit: number): number {
+	const wrapped = value % limit;
+	const magnitude = wrapped < 0 ? -wrapped : wrapped;
+	const other = limit - magnitude;
+	return magnitude < other ? magnitude : other;
+}
+
+/**
+ * Phase that puts an alternating 0/1 run sequence of `run`-wide runs inside
+ * a run at the axis boundary instead of on a run edge, so the first and the
+ * last sample of the axis carry the same value. Searching shifts of the
+ * frozen stream keeps the choice deterministic. Returns -1 when no shift
+ * closes the axis, in which case the caller repeats the first sample.
+ */
+function closedRunPhase(
+	length: number,
+	run: number,
+	seedPhase: number,
+): number {
+	for (let attempt = 0; attempt < run; attempt += 1) {
+		const phase = (seedPhase + attempt) % run;
+		const first = ((phase / run) | 0) % 2;
+		const last = (((length - 1 + phase) / run) | 0) % 2;
+		if (first === last) {
+			return phase;
+		}
+	}
+	return -1;
+}
+
+/** Closed 0/1 run sequence along one axis; see closedRunPhase. */
+function closedRuns(
+	length: number,
+	run: number,
+	seedPhase: number,
+): Int32Array {
+	const out = new Int32Array(length);
+	const phase = closedRunPhase(length, run, seedPhase);
+	const shift = phase < 0 ? 0 : phase;
+	for (let i = 0; i < length; i += 1) {
+		out[i] = (((i + shift) / run) | 0) % 2 === 0 ? 1 : 0;
+	}
+	if (phase < 0) {
+		out[length - 1] = out[0] as number;
+	}
+	return out;
+}
+
+/**
+ * Brick course geometry for one axis. A course height whose repeat divides
+ * the axis leaves the boundary rows inside the same run of courses, so both
+ * edge rows read the same course parity and neither one is a mortar row.
+ * Search order is the preferred course first, then wider courses.
+ */
+function closedCourse(
+	length: number,
+	preferred: number,
+): { course: number; phase: number } {
+	const widest = preferred > 12 ? preferred : 12;
+	const limit = length < widest ? length : widest;
+	for (let course = preferred; course <= limit; course += 1) {
+		for (let phase = 0; phase < course; phase += 1) {
+			const firstMortar = phase % course === course - 1;
+			const lastMortar = (length - 1 + phase) % course === course - 1;
+			if (firstMortar || lastMortar) {
+				continue;
+			}
+			const first = (phase / course) | 0;
+			const last = ((length - 1 + phase) / course) | 0;
+			if (last % 2 === first % 2) {
+				return { course, phase };
+			}
+		}
+	}
+	return { course: preferred, phase: 0 };
+}
+
+/**
+ * Brick geometry along one axis: brick width plus the phase of the straight
+ * course and of the half-bond course. Both offsets have to place the
+ * boundary column inside a brick and keep its brick index parity, so the
+ * left and the right edge read the same colour in either course parity.
+ */
+function closedBond(
+	length: number,
+	preferred: number,
+	seedShift: number,
+): { brick: number; phase: number; shift: number } {
+	const widest = preferred > 12 ? preferred : 12;
+	const limit = length < widest ? length : widest;
+	for (let brick = preferred; brick <= limit; brick += 1) {
+		for (let phase = 0; phase < brick; phase += 1) {
+			for (let step = 0; step < brick; step += 1) {
+				const shift = (seedShift + step) % brick;
+				if (
+					brickEdgeCloses(length, brick, phase) &&
+					brickEdgeCloses(length, brick, phase + shift)
+				) {
+					return { brick, phase, shift };
+				}
+			}
+		}
+	}
+	return { brick: preferred, phase: 0, shift: seedShift % preferred };
+}
+
+/** True when the axis boundary lands on a brick face of the same parity. */
+function brickEdgeCloses(
+	length: number,
+	brick: number,
+	offset: number,
+): boolean {
+	const edge = (offset + length - 1) % brick;
+	const start = offset % brick;
+	if (edge === brick - 1 || start === brick - 1) {
+		return false;
+	}
+	const edgeIndex = ((offset + length - 1) / brick) | 0;
+	const startIndex = (offset / brick) | 0;
+	return edgeIndex % 2 === startIndex % 2;
+}
+
+/**
+ * Repeat the first canvas column into the last one and the first canvas row
+ * into the last one. A pattern that stops at an edge — a blob rim, the tail
+ * of a random walk — would cut the tile in half; repeating the origin sample
+ * joins it instead, and the repeated pixel reads as one more step of the same
+ * feature rather than as a border.
+ */
+function closeEdges(out: Int32Array, width: number, height: number): void {
+	for (let y = 0; y < height; y += 1) {
+		out[y * width + width - 1] = out[y * width] as number;
+	}
+	for (let x = 0; x < width; x += 1) {
+		out[(height - 1) * width + x] = out[x] as number;
+	}
+}
+
 function paintIntensities(
 	ordered: RGBA[],
 	intensities: Int32Array,
@@ -232,6 +387,9 @@ function samplePattern(
 			break;
 		}
 		case "clustered-noise": {
+			// Cluster cells wrap: the neighbour of the last column of cells is
+			// the first one, so the field a tile boundary shows matches the
+			// field an interior cell boundary shows.
 			const cell = 4;
 			const cellsX = ((width + cell - 1) / cell) | 0;
 			const cellsY = ((height + cell - 1) / cell) | 0;
@@ -239,37 +397,62 @@ function samplePattern(
 			for (let i = 0; i < values.length; i += 1) {
 				values[i] = next() % 256;
 			}
-			for (let y = 0; y < height; y += 1) {
-				for (let x = 0; x < width; x += 1) {
-					const cx = (x / cell) | 0;
-					const cy = (y / cell) | 0;
-					const nx = cx + 1 < cellsX ? cx + 1 : cx;
-					const ny = cy + 1 < cellsY ? cy + 1 : cy;
+			const cluster = new Int32Array(cellsX * cellsY);
+			for (let cy = 0; cy < cellsY; cy += 1) {
+				const ny = (cy + 1) % cellsY;
+				for (let cx = 0; cx < cellsX; cx += 1) {
+					const nx = (cx + 1) % cellsX;
 					const own = values[cy * cellsX + cx] as number;
 					const right = values[cy * cellsX + nx] as number;
 					const down = values[ny * cellsX + cx] as number;
 					const diag = values[ny * cellsX + nx] as number;
-					out[y * width + x] = ((3 * own + right + down + diag) / 6) | 0;
+					cluster[cy * cellsX + cx] = ((3 * own + right + down + diag) / 6) | 0;
+				}
+			}
+			// Close the field: the last cell column repeats the first and the
+			// last cell row repeats the first, so both canvas edges read the
+			// same cluster value. A repeated cluster is the tile version of a
+			// cluster that continues past the canvas edge.
+			for (let cy = 0; cy < cellsY; cy += 1) {
+				cluster[cy * cellsX + cellsX - 1] = cluster[cy * cellsX] as number;
+			}
+			for (let cx = 0; cx < cellsX; cx += 1) {
+				cluster[(cellsY - 1) * cellsX + cx] = cluster[cx] as number;
+			}
+			for (let y = 0; y < height; y += 1) {
+				const cy = (y / cell) | 0;
+				for (let x = 0; x < width; x += 1) {
+					out[y * width + x] = cluster[
+						cy * cellsX + ((x / cell) | 0)
+					] as number;
 				}
 			}
 			break;
 		}
 		case "stripes": {
-			const period = 2 + ((next() % 4) as number);
+			const run = 2 + ((next() % 4) as number);
 			const horizontal = (next() % 2) as number;
+			const runs = closedRuns(horizontal === 1 ? height : width, run, run - 1);
 			for (let y = 0; y < height; y += 1) {
 				for (let x = 0; x < width; x += 1) {
-					const pos = horizontal === 1 ? y : x;
-					out[y * width + x] = ((pos / period) | 0) % 2 === 0 ? 255 : 0;
+					out[y * width + x] =
+						(horizontal === 1 ? (runs[y] as number) : (runs[x] as number)) === 1
+							? 255
+							: 0;
 				}
 			}
 			break;
 		}
 		case "checker": {
-			const size = 2 + ((next() % 3) as number);
+			// Both axes carry a closed run sequence, so the checkerboard meets
+			// itself on the left/right and the top/bottom edge as well.
+			const run = 2 + ((next() % 3) as number);
+			const columns = closedRuns(width, run, run - 1);
+			const rows = closedRuns(height, run, run - 1);
 			for (let y = 0; y < height; y += 1) {
 				for (let x = 0; x < width; x += 1) {
-					const odd = ((((x / size) | 0) + ((y / size) | 0)) % 2) as number;
+					const odd = (((columns[x] as number) + (rows[y] as number)) %
+						2) as number;
 					out[y * width + x] = odd === 0 ? 255 : 0;
 				}
 			}
@@ -291,28 +474,34 @@ function samplePattern(
 			break;
 		}
 		case "brick": {
-			const courseH = 3;
-			const brickW = 4;
-			const shift = (next() % brickW) as number;
+			// Courses and bricks are measured per canvas so both edges fall on a
+			// brick face-free run; see closedCourse and closedBond.
+			const seedShift = next();
+			const course = closedCourse(height, 3);
+			const bond = closedBond(width, 4, seedShift);
 			for (let y = 0; y < height; y += 1) {
-				const course = (y / courseH) | 0;
+				if ((y + course.phase) % course.course === course.course - 1) {
+					for (let x = 0; x < width; x += 1) {
+						out[y * width + x] = 0;
+					}
+					continue;
+				}
+				const courseIndex = ((y + course.phase) / course.course) | 0;
+				const offset = bond.phase + (courseIndex % 2 === 0 ? 0 : bond.shift);
 				for (let x = 0; x < width; x += 1) {
-					if (y % courseH === courseH - 1) {
+					if ((x + offset) % bond.brick === bond.brick - 1) {
 						out[y * width + x] = 0;
 						continue;
 					}
-					const shifted = x + (course % 2 === 0 ? 0 : shift);
-					if (shifted % brickW === brickW - 1) {
-						out[y * width + x] = 0;
-						continue;
-					}
-					const col = (shifted / brickW) | 0;
-					out[y * width + x] = (course + col) % 2 === 0 ? 255 : 170;
+					const col = ((x + offset) / bond.brick) | 0;
+					out[y * width + x] = (courseIndex + col) % 2 === 0 ? 255 : 170;
 				}
 			}
 			break;
 		}
 		case "spots": {
+			// Blob distance is measured on the canvas as a torus, so a blob
+			// that sits against an edge continues on the opposite edge.
 			const blobs = 3 + ((next() % 4) as number);
 			const cx = new Int32Array(blobs);
 			const cy = new Int32Array(blobs);
@@ -328,8 +517,8 @@ function samplePattern(
 				for (let x = 0; x < width; x += 1) {
 					let hit = TRANSPARENT_INTENSITY;
 					for (let i = 0; i < blobs; i += 1) {
-						const dx = x - (cx[i] as number);
-						const dy = y - (cy[i] as number);
+						const dx = torusDistance(x - (cx[i] as number), width);
+						const dy = torusDistance(y - (cy[i] as number), height);
 						const r = rr[i] as number;
 						if (dx * dx + dy * dy <= r * r) {
 							hit = shade[i] as number;
@@ -338,6 +527,7 @@ function samplePattern(
 					out[y * width + x] = hit;
 				}
 			}
+			closeEdges(out, width, height);
 			break;
 		}
 		case "veins": {
@@ -351,16 +541,17 @@ function samplePattern(
 					out[y * width + x] = 255;
 					const dir = next() % 4;
 					if (dir === 0) {
-						x = x + 1 < width ? x + 1 : x;
+						x = torusIndex(x + 1, width);
 					} else if (dir === 1) {
-						x = x - 1 >= 0 ? x - 1 : x;
+						x = torusIndex(x - 1, width);
 					} else if (dir === 2) {
-						y = y + 1 < height ? y + 1 : y;
+						y = torusIndex(y + 1, height);
 					} else {
-						y = y - 1 >= 0 ? y - 1 : y;
+						y = torusIndex(y - 1, height);
 					}
 				}
 			}
+			closeEdges(out, width, height);
 			break;
 		}
 		case "cracks": {
@@ -391,13 +582,22 @@ function samplePattern(
 			break;
 		}
 		case "grain": {
+			// Two closed fields: each repeats the first sample at the far end so
+			// the horizontal and the vertical edge both join their own origin.
 			const base = new Int32Array(width);
-			for (let x = 0; x < width; x += 1) {
+			for (let x = 0; x + 1 < width; x += 1) {
 				base[x] = next() % 256;
 			}
+			base[width - 1] = base[0] as number;
+			const rows = new Int32Array(height);
+			for (let y = 0; y + 1 < height; y += 1) {
+				rows[y] = (y * 13) % 256;
+			}
+			rows[height - 1] = rows[0] as number;
 			for (let y = 0; y < height; y += 1) {
 				for (let x = 0; x < width; x += 1) {
-					out[y * width + x] = ((base[x] as number) + y * 13) % 256;
+					out[y * width + x] =
+						((base[x] as number) + (rows[y] as number)) % 256;
 				}
 			}
 			break;

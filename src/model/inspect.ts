@@ -1,3 +1,4 @@
+import { decideUnresolvedVariable } from "../validate/reference-graph.ts";
 import type { ResolutionSource } from "../validate/resource-context.ts";
 import { validateResourceLocation } from "../validate/resource-location.ts";
 import {
@@ -656,14 +657,20 @@ async function analyze(
 		};
 		textureReports.push(reportEntry);
 
-		if (resolved.status === "undefined-variable")
-			referenceFinding(
-				findings,
-				"PACK_BROKEN_REFERENCE",
-				"error",
-				jsonPointer(["textures", name]),
-				`Texture variable ${entry.value} is undefined.`,
-			);
+		if (resolved.status === "undefined-variable") {
+			const verdict = decideUnresolvedVariable(entry.value, {
+				kind: "unknown",
+			});
+			if (verdict !== undefined) {
+				referenceFinding(
+					findings,
+					verdict.code,
+					verdict.level,
+					jsonPointer(["textures", name]),
+					`Texture variable ${entry.value} is undefined.`,
+				);
+			}
+		}
 		if (resolved.status === "cycle")
 			referenceFinding(
 				findings,
@@ -779,14 +786,20 @@ async function analyze(
 					)
 						? resolveTextureValue(texture, texturePointer)
 						: { status: "missing" as const, via: [] };
-					if (textureResolution.status === "undefined-variable")
-						referenceFinding(
-							findings,
-							"PACK_BROKEN_REFERENCE",
-							"error",
-							jsonPointer(["elements", index, "faces", face.key, "texture"]),
-							`Texture variable ${texture} is undefined.`,
-						);
+					if (textureResolution.status === "undefined-variable") {
+						const verdict = decideUnresolvedVariable(texture, {
+							kind: "unknown",
+						});
+						if (verdict !== undefined) {
+							referenceFinding(
+								findings,
+								verdict.code,
+								verdict.level,
+								jsonPointer(["elements", index, "faces", face.key, "texture"]),
+								`Texture variable ${texture} is undefined.`,
+							);
+						}
+					}
 					if (textureResolution.status === "cycle")
 						referenceFinding(
 							findings,

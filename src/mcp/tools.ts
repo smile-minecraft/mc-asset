@@ -7,11 +7,8 @@ export interface McpToolDefinition {
 }
 
 /**
- * Frozen tool surface: twenty-one tools for v0.7 CLI parity plus agent
- * authoring — the seven original §90 tools plus twelve v0.7 additions —
- * plus the capability-completion scale_gui_asset and the authoring-round
- * inspect_asset, each with its final
- * name, description, and input schema. Descriptions state the read/write
+ * Frozen tool surface: the twenty-five names in `MCP_TOOL_NAMES`, each with
+ * its final description and input schema. Descriptions state the read/write
  * contract so agents pick batch or grid paths instead of per-pixel calls.
  */
 export const MCP_TOOLS: readonly McpToolDefinition[] = [

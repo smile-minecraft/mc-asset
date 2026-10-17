@@ -9,11 +9,14 @@ export type {
 	AtlasSkipKind,
 	AtlasSpriteEntry,
 	AtlasSpriteRules,
+	PalettedSpriteAnswer,
+	PalettedSpriteQuery,
 } from "./atlas.ts";
 export {
 	atlasCoverageDetail,
 	atlasNameOf,
 	atlasSpriteCoverageFor,
+	palettedSpriteStatusFor,
 	parseAtlasLayers,
 	requiredAtlasesForUsage,
 	requiredAtlasForModel,
@@ -51,12 +54,15 @@ export type {
 	ReferenceKind,
 	ReferenceStatus,
 	TextureVariableExternalDiagnosis,
+	UnresolvedVariableContext,
+	UnresolvedVariableVerdict,
 	VariableResolution,
 } from "./reference-graph.ts";
 export {
 	collectBlockstateModelRefs,
 	collectItemModelRefs,
 	computeModelReachability,
+	decideUnresolvedVariable,
 	diagnoseTextureVariableExternal,
 	findParentCycles,
 	modelRelForValue,

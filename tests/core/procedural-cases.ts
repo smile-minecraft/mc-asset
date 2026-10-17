@@ -82,18 +82,25 @@ function assertPixelsInPalette(
 	}
 }
 
+/**
+ * Starter goldens below pin the 8x8 seed-7 output over the stone palette.
+ * Every tiling pattern has to wrap on all four edges, so brick, veins,
+ * clustered-noise, spots, grain, and stripes carry seam-closing geometry and
+ * these digests moved with it. `noise`, `checker`, `gradient`, and `cracks`
+ * were not part of the wrap rework and keep their earlier digests.
+ */
 const STONE_GOLDENS: Readonly<Record<string, string>> = {
 	noise: "67a79a39b98d166e178756b89ec3649c634470cdcaca8c51754e1ca3fa207783",
 	"clustered-noise":
-		"ab08b4b8751288f27b03a4ddc37b5daa29988209c024e4a7a8d911f3ab82fed0",
-	stripes: "23fa7475a7108d14d629a1da4444d830a84b1cb7d4158677a09c79f04ac2f01b",
+		"4174c00a37eaa298a42bc430de6beef08524529d19fad03b70c0761ff3f8e038",
+	stripes: "bad5bf05fe9ca33e31cc276fb1c0184aafb1e1ce45e9503c722f7e009331ddc6",
 	checker: "5e9e3f845b8cfad033eeeae3762c6296449ed35e571decf6d3a669ab4671fa2b",
 	gradient: "1a24fff2f10aa309b5904fb0f28ce401fc739c8a25d4e76ea6491f4c9d1d2759",
-	brick: "08a6a9998ddd3d2233c315bd667674d58410f60d07edc31106402fb05933b888",
-	spots: "792a956595211b50bd1e48195f14893ef14842fd0b634596789b373a9e9bb9f9",
-	veins: "b8521a11b10b5eae77598d4ffa30ab1b0257b212954c777d494f901aef075628",
+	brick: "b816fdda23a378aff3a818fbd314270e515c28fe8e9fae793693f033e3d25457",
+	spots: "c9bf0b7c13228a497a67de873cd54240ac483b0ee28d5f6447a178728e6ee47b",
+	veins: "2c29d11ebde0821627b8cacd829d2dce793f978663c94b725e80c5b7112ddfdf",
 	cracks: "7ca9b101267ed081b023e73d64bb6edd39e92bfa4bb53d8e98065ac40d5dff2f",
-	grain: "567c72d63787a8c6277dda58f2731c5be0c0813c37ee1f0d8440af3bc9bc86cb",
+	grain: "617a85542c8ad6709109990e37917e8ee9f8d334f8d23e17f681496b8f92c1bc",
 };
 
 /** Starter goldens below pin the 8x8 seed-7 output over the stone palette. */

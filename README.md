@@ -72,9 +72,9 @@ Every image below is produced by `mc-asset` itself, with fixed seeds for the gen
 | ![pixelize before](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-before.png) → ![pixelize after](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/pixelize-after.png) | ![quantize before](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-before.png) → ![quantize after](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/quantize-after.png) |
 | A detailed reference image (128px, shown ×2) reduced to 16px (shown ×16): the grain coarsens and shapes snap to a tidy pixel grid. | A 64-color gradient reduced to 8 colors (both ×4): the color count drops and the result settles into clear steps. |
 
-**Material variants** — the sword from the top of this page fanned out into all seven built-in materials (`copper`, `crystal`, `gold`, `iron`, `oxidized_copper`, `stone`, `wood`, shown ×5). Its palette gives each color a role, so the blade and guard take the new ramp while the darkest outline, the white glint, the wooden grip, and the guard's gem keep their colors:
+**Material variants** — the sword from the top of this page fanned out into all nine built-in materials (`copper`, `crystal`, `diamond`, `gold`, `iron`, `netherite`, `oxidized_copper`, `stone`, `wood`, shown ×5). Its palette gives each color a role, so the blade and guard take the new ramp while the darkest outline, the white glint, the wooden grip, and the guard's gem keep their colors:
 
-![the sword recolored into seven materials](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variants.png)
+![the sword recolored into nine materials](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/variants.png)
 
 **Generated patterns** — every `generate` pattern as a 16px swatch from a fixed seed (shown ×4):
 

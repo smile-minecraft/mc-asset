@@ -249,8 +249,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		)
 		.exitOverride();
 
-	program
-		.command("stub")
+	// Internal mount probe: registered hidden so `--help` only advertises the
+	// commands a user can actually run, while the CLI skeleton keeps calling
+	// it to exercise the output contract.
+	const stub = new Command("stub")
 		.description("Framework mount probe used by CLI skeleton tests.")
 		.option("--output <path>", "Explicit output file path.")
 		.option("--stdout", "Write artifact bytes to stdout.")
@@ -270,6 +272,7 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			const code = await runStub(options, globals.json === true, realStreams());
 			process.exitCode = code;
 		});
+	program.addCommand(stub, { hidden: true });
 
 	program
 		.command("analyze <image>")

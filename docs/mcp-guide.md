@@ -471,7 +471,7 @@ Call:
 Result (verbatim):
 
 ```text
-{"mode":"list","profile":"generic","materials":["iron","copper","oxidized_copper","gold","wood","stone","crystal"]}
+{"mode":"list","profile":"generic","materials":["iron","copper","oxidized_copper","gold","diamond","netherite","wood","stone","crystal"]}
 ```
 
 ### tile_asset
@@ -747,9 +747,9 @@ File-rule failures to expect:
 - **No per-pixel tool.** There is no `set_pixel`; pixel work goes through the
   ASCII Grid, the batch operations array, or the inline `.mcpx` text.
 - **Explicit paths only, no overwrite, no mkdir.** An existing target is
-  `OUTPUT_EXISTS` and a missing parent is `FILESYSTEM_ERROR`. The error
-  messages still mention `--force` / `--mkdir`, but there is no way to pass
-  either through MCP — pick a new path, or create the directory yourself.
+  `OUTPUT_EXISTS` and a missing parent is `FILESYSTEM_ERROR`. Pick a new
+  path, or create the directory yourself — MCP passes no `--force` and no
+  `--mkdir`.
 - **Omitted output paths embed the artifact.** Without an output path the
   result carries `pngBase64` (PNG) or `mcpxText` (`.mcpx`) instead of writing
   a file. This is decided per artifact: giving only `outputPngPath` writes the

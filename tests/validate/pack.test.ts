@@ -474,7 +474,12 @@ describe("validate-pack command in process", () => {
 				dir,
 				"pack.mcmeta",
 				modelJson({
-					pack: { max_format: "bogus", min_format: [84], pack_format: 0 },
+					pack: {
+						description: "t",
+						max_format: "bogus",
+						min_format: [84],
+						pack_format: 0,
+					},
 				}),
 			);
 			const { stdout, code } = await runCli(["validate-pack", dir, "--json"]);

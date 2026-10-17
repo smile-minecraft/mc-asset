@@ -41,6 +41,8 @@ export type ErrorCode =
 	| "OPTIMIZE_MODE_NOT_EXACT"
 	| "MODEL_UNSUPPORTED_VERSION"
 	| "PACK_INVALID_JSON"
+	| "PACK_MCMETA_INVALID"
+	| "PACK_MCMETA_SUSPICIOUS"
 	| "PACK_MISSING_TEXTURE"
 	| "PACK_MISSING_ASSET"
 	| "PACK_WRONG_PATH"
@@ -56,6 +58,7 @@ export type ErrorCode =
 	| "PACK_VERSION_UNDETERMINED"
 	| "PACK_GUI_SCALING_BORDER"
 	| "PACK_UNRESOLVED_EXTERNAL"
+	| "PACK_UNRESOLVED_VARIABLE"
 	| "PACK_COVERAGE_SKIPPED"
 	| "PACK_REFERENCE_CYCLE"
 	| "MODEL_INVALID_STRUCTURE"
@@ -115,6 +118,10 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	// authority. PACK_TEXTURE_NOT_IN_ATLAS is reserved for the atlas
 	// check that lands separately; the warning-level codes never fail.
 	PACK_INVALID_JSON: 3,
+	// Pack root metadata structure findings. The error code names what the game
+	// refuses to load; the warning code names what loads but looks wrong.
+	PACK_MCMETA_INVALID: 3,
+	PACK_MCMETA_SUSPICIOUS: 3,
 	PACK_MISSING_TEXTURE: 3,
 	PACK_MISSING_ASSET: 3,
 	PACK_WRONG_PATH: 3,
@@ -130,6 +137,7 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	PACK_VERSION_UNDETERMINED: 3,
 	PACK_GUI_SCALING_BORDER: 3,
 	PACK_UNRESOLVED_EXTERNAL: 3,
+	PACK_UNRESOLVED_VARIABLE: 3,
 	// Coverage gaps that stay warnings: the verdict only covers what was
 	// checked, and the coverage list carries what was skipped.
 	PACK_COVERAGE_SKIPPED: 3,

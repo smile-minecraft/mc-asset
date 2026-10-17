@@ -32,6 +32,8 @@ const EXPECTED_IDS = [
 	"copper",
 	"oxidized_copper",
 	"gold",
+	"diamond",
+	"netherite",
 	"wood",
 	"stone",
 	"crystal",
@@ -39,9 +41,9 @@ const EXPECTED_IDS = [
 
 export const MATERIAL_CASES: MaterialCase[] = [
 	{
-		name: "builtin material ids match the frozen seven",
+		name: "builtin material ids match the frozen nine",
 		run: (check) => {
-			check.deepEqual(listMaterialIds(), EXPECTED_IDS, "seven ids in order");
+			check.deepEqual(listMaterialIds(), EXPECTED_IDS, "nine ids in order");
 			check.deepEqual(
 				[...BUILTIN_MATERIAL_IDS],
 				EXPECTED_IDS,
@@ -52,6 +54,33 @@ export const MATERIAL_CASES: MaterialCase[] = [
 			}
 			check.ok(!isBuiltinMaterialId("steel"), "steel is not builtin yet");
 			check.ok(!isBuiltinMaterialId(""), "empty is not builtin");
+		},
+	},
+	{
+		name: "every material carries the full seven-role palette",
+		run: (check) => {
+			const roles = [
+				"outline",
+				"shadow",
+				"dark",
+				"base",
+				"light",
+				"highlight",
+				"accent",
+			] as const;
+			for (const id of EXPECTED_IDS) {
+				const palette = getMaterialPalette(id);
+				check.equal(palette.entries.length, 7, `${id} has seven entries`);
+				for (const role of roles) {
+					const entry = palette.entries.find((item) => item.role === role);
+					check.ok(entry !== undefined, `${id} has a ${role} entry`);
+					check.equal(
+						entry?.id,
+						`${id}-${role}`,
+						`${id} ${role} entry id follows the registry`,
+					);
+				}
+			}
 		},
 	},
 	{

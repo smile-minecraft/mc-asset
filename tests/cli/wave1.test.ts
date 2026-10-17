@@ -448,7 +448,7 @@ describe("wave1 wiring in process", () => {
 		}
 	}, 30_000);
 
-	test("material list reports the seven builtins", async () => {
+	test("material list reports the nine builtins", async () => {
 		const result = await runCli(["material", "list", "--json"]);
 		expect(result.code).toBe(0);
 		const envelope = JSON.parse(stdoutText(result)) as {
@@ -461,6 +461,8 @@ describe("wave1 wiring in process", () => {
 			"copper",
 			"oxidized_copper",
 			"gold",
+			"diamond",
+			"netherite",
 			"wood",
 			"stone",
 			"crystal",

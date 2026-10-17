@@ -248,12 +248,13 @@ async function runEntryProcess(args: string[]): Promise<CliResult> {
 }
 
 describe("cli entry wiring via spawn", () => {
-	test("--help exits 0 and lists commands", async () => {
+	test("--help exits 0, lists commands, and hides the internal probe", async () => {
 		const result = await runEntryProcess(["--help"]);
 		expect(result.code).toBe(0);
-		expect(
-			Buffer.from(result.stdout).toString("utf-8") + result.stderr,
-		).toContain("stub");
+		const help = Buffer.from(result.stdout).toString("utf-8") + result.stderr;
+		expect(help).toContain("analyze");
+		expect(help).toContain("material");
+		expect(help).not.toMatch(/\bstub\b/);
 	}, 30_000);
 
 	test("--version exits 0", async () => {

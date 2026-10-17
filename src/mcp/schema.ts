@@ -1,12 +1,13 @@
 import { z } from "zod";
 
 /**
- * Frozen MCP tool surface: twenty-one tools for agent authoring — the
- * seven original §90 tools plus twelve v0.7 additions (import through
- * validate-pack, with palette/material/preview/animate mode merges) plus
- * the capability-completion scale_gui_asset plus the authoring-round
- * inspect_asset. The
- * product document once listed `edit_asset` for the batch-edit slot, and
+ * Frozen MCP tool surface: twenty-five tools for agent authoring — the
+ * intake and inspection pair, raster transforms, palette and quantization,
+ * the deterministic pixelize pipeline, procedural generation, tiling and
+ * preview, animation sheets, single-asset and whole-pack validation, model
+ * and `.mcmeta` authoring, and PNG comparison. `MCP_TOOL_NAMES` below is
+ * the registry this count is checked against.
+ * The product document once listed `edit_asset` for the batch-edit slot, and
  * §90 wins, so the frozen name is `apply_asset_operations`. The input
  * shapes below are the frozen contract; handler behavior lives in
  * `src/mcp/handlers.ts`.

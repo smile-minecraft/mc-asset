@@ -243,7 +243,7 @@ export const FRAMESET_CASES: ModelCase[] = [
 				check,
 				() => unpackSheetToFrameSet(pixels, 4, 5, "vertical", 4, 2),
 				"INVALID_ANIMATION_FRAME",
-				(details) => details["layout"],
+				(details) => details.layout,
 				"vertical",
 			);
 		},
@@ -256,7 +256,7 @@ export const FRAMESET_CASES: ModelCase[] = [
 				check,
 				() => unpackSheetToFrameSet(pixels, 5, 4, "horizontal", 2, 4),
 				"INVALID_ANIMATION_FRAME",
-				(details) => details["layout"],
+				(details) => details.layout,
 				"horizontal",
 			);
 		},
@@ -269,7 +269,7 @@ export const FRAMESET_CASES: ModelCase[] = [
 				check,
 				() => unpackSheetToFrameSet(pixels, 5, 4, "grid", 2, 2, 2),
 				"INVALID_ANIMATION_FRAME",
-				(details) => details["layout"],
+				(details) => details.layout,
 				"grid",
 			);
 		},
@@ -283,8 +283,8 @@ export const FRAMESET_CASES: ModelCase[] = [
 				() => unpackSheetToFrameSet(pixels, 6, 2, "grid", 2, 2, 2),
 				"INVALID_ANIMATION_FRAME",
 				(details) => ({
-					frameWidth: details["frameWidth"],
-					sheetWidth: details["sheetWidth"],
+					frameWidth: details.frameWidth,
+					sheetWidth: details.sheetWidth,
 				}),
 				{ frameWidth: 2, sheetWidth: 6 },
 			);
@@ -342,7 +342,7 @@ export const FRAMESET_CASES: ModelCase[] = [
 				() =>
 					createFrameSet([solidCanvas(2, 2, RED), solidCanvas(3, 2, GREEN)]),
 				"INVALID_ANIMATION_FRAME",
-				(details) => details["index"],
+				(details) => details.index,
 				1,
 			);
 		},

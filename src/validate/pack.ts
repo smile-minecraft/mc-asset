@@ -25,15 +25,18 @@ import {
 	type AtlasSkip,
 	atlasCoverageDetail,
 	atlasNameOf,
+	palettedSpriteStatusFor,
 	parseAtlasLayers,
 	requiredAtlasesForUsage,
 	spriteIdForTextureValue,
 } from "./atlas.ts";
 import type { ValidateFindingLevel } from "./checks.ts";
+import { checkPackMcmeta, type PackMcmetaCheckResult } from "./pack-mcmeta.ts";
 import {
 	collectBlockstateModelRefs,
 	collectItemModelRefs,
 	computeModelReachability,
+	decideUnresolvedVariable,
 	diagnoseTextureVariableExternal,
 	findParentCycles,
 	type ModelDocView,
@@ -41,6 +44,7 @@ import {
 	modelRelForValue,
 	parentRelForValue,
 	resolveTextureVariable,
+	type UnresolvedVariableContext,
 } from "./reference-graph.ts";
 import {
 	buildLayerIndex,
@@ -52,7 +56,10 @@ import {
 	resolveModelReference,
 	resolveTextureReference,
 } from "./resource-context.ts";
-import { findUninterpretedResources } from "./resource-kinds.ts";
+import {
+	classifyResourceKind,
+	findUninterpretedResources,
+} from "./resource-kinds.ts";
 import {
 	parseResourceLocation,
 	validateDiskFilename,
@@ -145,13 +152,19 @@ const FINDING_ORDER: Readonly<Record<string, number>> = {
 	PACK_VERSION_UNDETERMINED: 15,
 	PACK_TEXTURE_NOT_IN_ATLAS: 16,
 	PACK_UNRESOLVED_EXTERNAL: 17,
-	PACK_COVERAGE_SKIPPED: 18,
-	MODEL_INVALID_STRUCTURE: 19,
-	MODEL_INVALID_UV: 20,
-	MODEL_INVALID_ROTATION: 21,
-	MODEL_INVALID_DISPLAY: 22,
-	MODEL_VERSION_FEATURE: 23,
-	MODEL_SUSPICIOUS_VALUE: 24,
+	PACK_UNRESOLVED_VARIABLE: 18,
+	PACK_COVERAGE_SKIPPED: 19,
+	MODEL_INVALID_STRUCTURE: 20,
+	MODEL_INVALID_UV: 21,
+	MODEL_INVALID_ROTATION: 22,
+	MODEL_INVALID_DISPLAY: 23,
+	MODEL_VERSION_FEATURE: 24,
+	MODEL_SUSPICIOUS_VALUE: 25,
+	// pack.mcmeta structure findings read one whole file rather than a
+	// per-file rule, so they sort after the per-file codes; the two keep a
+	// fixed order against each other.
+	PACK_MCMETA_INVALID: 26,
+	PACK_MCMETA_SUSPICIOUS: 27,
 };
 
 const IMAGE_EXTENSIONS: ReadonlySet<string> = new Set([
@@ -265,12 +278,48 @@ function normalizeMcmetaFormatValue(value: unknown): string | undefined {
 	return undefined;
 }
 
+/**
+ * Checks whether a path or path segment matches excluded system artifacts
+ * (.DS_Store, Thumbs.db, desktop.ini, ._* prefix, __MACOSX directory).
+ */
+export function isIgnoredSystemPath(rel: string): boolean {
+	const parts = rel.split("/");
+	for (const part of parts) {
+		if (part === "__MACOSX") {
+			return true;
+		}
+	}
+	const base = parts[parts.length - 1] ?? "";
+	if (base === ".DS_Store" || base === "Thumbs.db" || base === "desktop.ini") {
+		return true;
+	}
+	if (base.startsWith("._")) {
+		return true;
+	}
+	return false;
+}
+
+/** Whether a file sits inside an uninterpreted top-level resource type directory. */
+function isUninterpretedDirectoryFile(rel: string): boolean {
+	const parts = rel.split("/");
+	if (parts[0] !== "assets") {
+		return false;
+	}
+	if (parts.length < 4) {
+		return false;
+	}
+	return classifyResourceKind(parts[2] as string) === "uninterpreted";
+}
+
 async function collectPackFiles(packRoot: string): Promise<string[]> {
 	const out: string[] = [];
 	async function walk(dirRel: string): Promise<void> {
 		const entries = (await readdir(`${packRoot}/${dirRel}`)).sort(compareBytes);
 		for (const entry of entries) {
 			const rel = dirRel === "" ? entry : `${dirRel}/${entry}`;
+			if (isIgnoredSystemPath(rel)) {
+				continue;
+			}
 			let children: string[] | undefined;
 			try {
 				children = (await readdir(`${packRoot}/${rel}`)).sort(compareBytes);
@@ -311,6 +360,30 @@ async function collectPackFiles(packRoot: string): Promise<string[]> {
 		);
 	}
 	return out;
+}
+
+/**
+ * Top-level directory names in the pack root. Overlay directories sit
+ * beside assets/, never under it, so collectPackFiles never sees them and
+ * the pack.mcmeta check needs this separate listing to tell a declared
+ * overlay from one the pack root does not hold. Only directories count:
+ * a file with that name leaves the overlay without a directory.
+ */
+async function collectRootDirectories(
+	packRoot: string,
+): Promise<ReadonlySet<string>> {
+	try {
+		const entries = await readdir(packRoot, { withFileTypes: true });
+		return new Set(
+			entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name),
+		);
+	} catch {
+		throw new McAssetError(
+			"FILESYSTEM_ERROR",
+			`Cannot read pack root: ${packRoot}.`,
+			{ path: packRoot },
+		);
+	}
 }
 
 /** Split assets/<namespace>/<rest>; anything else has no namespace. */
@@ -392,6 +465,14 @@ interface ScanState {
 		field: string;
 		value: string;
 		target: string;
+	}>;
+	atlasLayers?: AtlasLayerInput[];
+	atlasPackFormat?: string | undefined;
+	unresolvedVariables: Array<{
+		rel: string;
+		field: string;
+		variable: string;
+		value: string;
 	}>;
 	unresolved: Map<
 		string,
@@ -969,14 +1050,12 @@ function checkTextureReference(
 			);
 			return;
 		}
-		push(
-			state.findings,
-			"PACK_BROKEN_REFERENCE",
-			"error",
-			`"${field}" "${value}" in "${rel}" refers to undefined texture variable "#${variable}".`,
+		state.unresolvedVariables.push({
 			rel,
-		);
-		state.errorFiles.add(rel);
+			field,
+			variable,
+			value,
+		});
 		return;
 	}
 	checkTextureValue(rel, field, value, context, state);
@@ -1035,6 +1114,17 @@ function checkTextureValue(
 	if (resolved.status === "unresolved") {
 		recordUnresolved("texture", field, value, target, rel, state);
 		return;
+	}
+	const layers = state.atlasLayers;
+	if (layers !== undefined) {
+		const paletted = palettedSpriteStatusFor(value, {
+			layers,
+			packFormat: state.atlasPackFormat,
+			hasVanilla: context.hasVanilla,
+		});
+		if (paletted.status === "generatable") {
+			return;
+		}
 	}
 	push(
 		state.findings,
@@ -1432,7 +1522,8 @@ async function checkAtlasCoverage(
 	if (placement.itemSameAtlas !== true) {
 		return [];
 	}
-	const layers = await collectAtlasLayers(state, context, options);
+	const layers =
+		state.atlasLayers ?? (await collectAtlasLayers(state, context, options));
 	const parsed = parseAtlasLayers(layers, {
 		packFormat,
 		hasVanilla: context.hasVanilla,
@@ -1633,6 +1724,7 @@ export async function scanPack(
 	options?: PackScanOptions,
 ): Promise<PackReport> {
 	const rels = await collectPackFiles(packRoot);
+	const rootDirectories = await collectRootDirectories(packRoot);
 	const dependencyPaths = options?.dependencyPaths ?? [];
 	const dependencies: LayerIndex[] = [];
 	for (const dependency of dependencyPaths) {
@@ -1663,6 +1755,7 @@ export async function scanPack(
 		blockEntries: [],
 		itemEntries: [],
 		atlasRefs: [],
+		unresolvedVariables: [],
 		unresolved: new Map(),
 		modelTexts: new Map(),
 		blockstateTexts: new Map(),
@@ -1674,6 +1767,9 @@ export async function scanPack(
 	const fontRels: string[] = [];
 	for (const rel of rels) {
 		if (rel === "pack.mcmeta") {
+			continue;
+		}
+		if (isUninterpretedDirectoryFile(rel)) {
 			continue;
 		}
 		let bytes: Uint8Array;
@@ -1725,11 +1821,13 @@ export async function scanPack(
 	// only read, never written; an unusable value keeps the version
 	// undetermined with no default applied.
 	let mcmetaDoc: unknown;
+	let mcmetaParsed = false;
 	if (knownFiles.has("pack.mcmeta")) {
 		try {
 			const bytes = new Uint8Array(await readFile(`${packRoot}/pack.mcmeta`));
 			const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 			mcmetaDoc = JSON.parse(text) as unknown;
+			mcmetaParsed = true;
 		} catch {
 			push(
 				state.findings,
@@ -1763,6 +1861,28 @@ export async function scanPack(
 			);
 		}
 	}
+	// Only a pack.mcmeta that parsed reaches the structure check; an absent
+	// or broken one keeps its own findings and says nothing about ranges,
+	// overlays, or a missing description it never got to read.
+	const mcmetaCheck: PackMcmetaCheckResult = mcmetaParsed
+		? checkPackMcmeta({
+				doc: mcmetaDoc,
+				packFormat: effectivePackFormat,
+				rootDirectories,
+			})
+		: { findings: [], skipped: [] };
+	for (const finding of mcmetaCheck.findings) {
+		push(
+			state.findings,
+			finding.code,
+			finding.level,
+			finding.message,
+			"pack.mcmeta",
+		);
+		if (finding.level === "error") {
+			state.errorFiles.add("pack.mcmeta");
+		}
+	}
 	const modelRules = resolveModelRules(effectivePackFormat);
 	// Equipment definitions sat under models/ for one release; they are
 	// not models, so they leave the model checks where that applies.
@@ -1773,6 +1893,10 @@ export async function scanPack(
 		equipmentRels.push(rel);
 		return false;
 	});
+
+	const atlasLayers = await collectAtlasLayers(state, context, options);
+	state.atlasLayers = atlasLayers;
+	state.atlasPackFormat = effectivePackFormat;
 
 	const views = modelDocViews(state, modelRules);
 	const parentOf = parentOfModels(state);
@@ -1915,7 +2039,198 @@ export async function scanPack(
 		context,
 		effectivePackFormat,
 	);
+	// Vanilla blockstate/item definitions can reach models that the current
+	// pack overwrites; those references count as final-model usage even
+	// though the vanilla tree is not part of the current pack's docs.
+	if (context.vanilla !== undefined && options?.vanillaPath !== undefined) {
+		const vanillaRoot = options.vanillaPath;
+		const vanillaRels = [...context.vanilla.files].sort(compareBytes);
+		for (const rel of vanillaRels) {
+			const low = rel.toLowerCase();
+			const isBlockstate =
+				low.includes("/blockstates/") && low.endsWith(".json");
+			const isItem = low.includes("/items/") && low.endsWith(".json");
+			if (!isBlockstate && !isItem) {
+				continue;
+			}
+			let doc: unknown;
+			try {
+				const bytes = new Uint8Array(await readFile(`${vanillaRoot}/${rel}`));
+				const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+				doc = JSON.parse(text) as unknown;
+			} catch {
+				continue;
+			}
+			if (!isRecord(doc)) {
+				continue;
+			}
+			if (isBlockstate) {
+				const { refs } = collectBlockstateModelRefs(doc);
+				for (const ref of refs) {
+					if (typeof ref.value === "string" && ref.value.trim() !== "") {
+						const target = modelRelForValue(ref.value);
+						if (target !== undefined) {
+							state.blockEntries.push(target);
+						}
+					}
+				}
+			}
+			if (isItem) {
+				const { refs } = collectItemModelRefs(
+					(doc as Record<string, unknown>).model,
+				);
+				for (const ref of refs) {
+					if (typeof ref.value === "string" && ref.value.trim() !== "") {
+						const target = modelRelForValue(ref.value);
+						if (target !== undefined) {
+							state.itemEntries.push(target);
+						}
+					}
+				}
+			}
+		}
+	}
 	const reachability = computeReachability(parentOf, state);
+
+	// Deferred unresolved texture variables: classify each holder after the
+	// entry graph and parent graph are known, then let the shared decision
+	// map the context onto a code and level. Only models that are direct
+	// entry targets count as final; reachability along parent chains is
+	// retained for atlas demand and must not promote a parent to final.
+	const directEntries = new Set<string>([
+		...state.blockEntries,
+		...state.itemEntries,
+	]);
+	const pendingVariables = [...state.unresolvedVariables].sort(
+		(a, b) =>
+			compareBytes(a.rel, b.rel) || compareBytes(a.variable, b.variable),
+	);
+	for (const pending of pendingVariables) {
+		let context: UnresolvedVariableContext;
+		if (directEntries.has(pending.rel)) {
+			context = { kind: "final" };
+		} else {
+			// entryChains: direct entry models whose parent chain passes through M.
+			const entryChains: string[] = [];
+			for (const entry of directEntries) {
+				let current: string | undefined = entry;
+				const seen = new Set<string>();
+				let passesThrough = false;
+				while (current !== undefined && !seen.has(current)) {
+					seen.add(current);
+					if (current === pending.rel) {
+						passesThrough = true;
+						break;
+					}
+					const parent = parentOf.get(current);
+					if (parent === undefined || !parentOf.has(parent)) {
+						break;
+					}
+					current = parent;
+				}
+				if (passesThrough) {
+					entryChains.push(entry);
+				}
+			}
+			if (entryChains.length > 0) {
+				let allResolve = true;
+				let firstProvider: string | undefined;
+				for (const entry of entryChains) {
+					// walk entry's chain (entry + ancestors) to last readable model
+					const chain: string[] = [];
+					let current: string | undefined = entry;
+					const seen = new Set<string>();
+					while (current !== undefined && !seen.has(current)) {
+						seen.add(current);
+						chain.push(current);
+						const parent = parentOf.get(current);
+						if (parent === undefined || !parentOf.has(parent)) {
+							break;
+						}
+						current = parent;
+					}
+					let provides = false;
+					for (const model of chain) {
+						const doc = views.get(model);
+						if (
+							doc !== undefined &&
+							Object.hasOwn(doc.textures, pending.variable)
+						) {
+							provides = true;
+							if (firstProvider === undefined) {
+								firstProvider = model;
+							}
+							break;
+						}
+					}
+					if (!provides) {
+						allResolve = false;
+						break;
+					}
+				}
+				if (allResolve) {
+					context = {
+						kind: "template",
+						providerRel: firstProvider ?? (entryChains[0] as string),
+					};
+				} else {
+					context = { kind: "final" };
+				}
+			} else {
+				let providerRel: string | undefined;
+				const candidates = [...views.keys()].sort(compareBytes);
+				for (const candidate of candidates) {
+					if (candidate === pending.rel) {
+						continue;
+					}
+					let current: string | undefined = candidate;
+					const seen = new Set<string>();
+					let isDescendant = false;
+					while (current !== undefined && !seen.has(current)) {
+						seen.add(current);
+						const parent = parentOf.get(current);
+						if (parent === pending.rel) {
+							isDescendant = true;
+							break;
+						}
+						if (parent === undefined || !parentOf.has(parent)) {
+							break;
+						}
+						current = parent;
+					}
+					if (!isDescendant) {
+						continue;
+					}
+					const doc = views.get(candidate);
+					if (
+						doc !== undefined &&
+						Object.hasOwn(doc.textures, pending.variable)
+					) {
+						providerRel = candidate;
+						break;
+					}
+				}
+				if (providerRel !== undefined) {
+					context = { kind: "template", providerRel };
+				} else {
+					context = { kind: "unknown" };
+				}
+			}
+		}
+		const verdict = decideUnresolvedVariable(pending.variable, context);
+		if (verdict === undefined) {
+			continue;
+		}
+		const message =
+			verdict.code === "PACK_BROKEN_REFERENCE"
+				? `"${pending.field}" "${pending.value}" in "${pending.rel}" refers to undefined texture variable "#${pending.variable}".`
+				: `"${pending.field}" "${pending.value}" in "${pending.rel}" refers to unresolved texture variable "#${pending.variable}" (no child model provides it).`;
+		push(state.findings, verdict.code, verdict.level, message, pending.rel);
+		if (verdict.level === "error") {
+			state.errorFiles.add(pending.rel);
+		}
+	}
+
 	const atlasSkips = await checkAtlasCoverage(
 		state,
 		context,
@@ -1943,6 +2258,9 @@ export async function scanPack(
 		if (state.referencedTextures.has(rel)) {
 			continue;
 		}
+		if (context.vanilla?.files.has(rel)) {
+			continue;
+		}
 		push(
 			state.findings,
 			"PACK_ORPHAN_TEXTURE",
@@ -1964,6 +2282,7 @@ export async function scanPack(
 	);
 	const skipped: PackCoverageSkip[] = [
 		...atlasSkips,
+		...mcmetaCheck.skipped,
 		...state.itemSkips,
 		...state.modelSkips,
 		...state.referenceSkips,
