@@ -21,7 +21,7 @@ function removeDir(dir: string): void {
 }
 
 const EXPECTED_FORMULA_SHA256 =
-	"1e3bbafda0867d9938dcfbe072ad5ae20a9084283420061b1e1667cdcc7a3cc2";
+	"33b97633b1df6919a0c12bcec294955429d7de3f37d598cdd7dfc9e278248bef";
 
 function extractFormulaSha256(text: string): string | null {
 	const match = text.match(/^\s*sha256\s+"([0-9a-f]{64})"/m);
@@ -37,14 +37,14 @@ describe("homebrew formula (static)", () => {
 		const text = readFormula();
 		expect(text).toContain("class McAsset < Formula");
 		expect(text).toContain(
-			"https://github.com/smile-minecraft/mc-asset/releases/download/v0.4.0/mc-asset-0.4.0.tar.gz",
+			"https://github.com/smile-minecraft/mc-asset/releases/download/v0.5.0/mc-asset-0.5.0.tar.gz",
 		);
-		expect(text).toContain("v0.4.0");
+		expect(text).toContain("v0.5.0");
 		expect(text).toMatch(/sha256\s+"[0-9a-f]{64}"/);
 		expect(text).toMatch(/license\s+"MIT"/);
 	});
 
-	test("formula pins the published v0.4.0 asset digest, no pending marker", () => {
+	test("formula pins the published v0.5.0 asset digest, no pending marker", () => {
 		const text = readFormula();
 		expect(extractFormulaSha256(text)).toBe(EXPECTED_FORMULA_SHA256);
 		expect(text).not.toContain("PENDING_TAG_RECHECK");
@@ -62,6 +62,9 @@ describe("homebrew formula (static)", () => {
 		);
 		expect(text).not.toContain(
 			"77b4d471cc8683a5802328380cc0b0b3a860f909ea6125957a238946cbf96e3e",
+		);
+		expect(text).not.toContain(
+			"1e3bbafda0867d9938dcfbe072ad5ae20a9084283420061b1e1667cdcc7a3cc2",
 		);
 	});
 
