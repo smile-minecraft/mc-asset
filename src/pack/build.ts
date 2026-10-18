@@ -50,9 +50,27 @@ import {
 import type { PaletteRole, PixelCanvas, RGBA } from "../core/types.ts";
 import { decodePng, encodePng } from "../io/png.ts";
 import { parseMcpx } from "../mcpx/index.ts";
+import {
+	comparePackFormats,
+	normalizePackFormat,
+} from "../profiles/versions.ts";
 import { resolveStyle } from "../style/load.ts";
 import type { ResolvedStyle } from "../style/types.ts";
-import { isJsonObject, isRelativeProjectPath } from "./document.ts";
+import { parseResourceLocation } from "../validate/resource-location.ts";
+import {
+	canonicalDocumentText,
+	isJsonObject,
+	isRelativeProjectPath,
+} from "./document.ts";
+import {
+	collectItemOutputsForStep,
+	collectModelOutputsForStep,
+} from "./item-plan.ts";
+import {
+	buildItemDefinitionDocument,
+	buildParentModel,
+	collectItemDefinitionModelRefs,
+} from "./item-templates.ts";
 import { parsePackProjectText } from "./load.ts";
 import {
 	getToolVersion,
@@ -66,6 +84,7 @@ import {
 	parseRecipeText,
 	type RecipeDocument,
 	type RecipeSource,
+	type RecipeStep,
 	type RecipeTarget,
 } from "./recipe.ts";
 import { compareCodeUnits } from "./skeleton.ts";
@@ -91,6 +110,15 @@ export interface McmetaPlanInternal {
 	computedOutputHash?: string | undefined;
 }
 
+export interface ModelOutputPlan {
+	readonly path: string;
+	readonly judgement: BuildOutputJudgement;
+	readonly kind: "model" | "itemDefinition";
+	readonly needsRewrite: boolean;
+	computedOutputHash?: string | undefined;
+	computedText?: string | undefined;
+}
+
 export interface TargetPlanInternal {
 	readonly targetId: string;
 	readonly recipeId: string;
@@ -109,6 +137,7 @@ export interface TargetPlanInternal {
 	readonly inputHash: string;
 	readonly needsRewrite: boolean;
 	readonly mcmetaPlan?: McmetaPlanInternal | undefined;
+	readonly modelPlans?: readonly ModelOutputPlan[] | undefined;
 	computedOutputHash?: string | undefined;
 }
 
@@ -201,6 +230,59 @@ function normalizedStyleForHash(style: ResolvedStyle): unknown {
 		light: style.light,
 		formatVersion: style.formatVersion,
 	};
+}
+
+function validateJsonNamespaceOverride(
+	item: string,
+	projectNamespace: string,
+	step: RecipeStep,
+	targetId: string,
+	kind: string,
+): void {
+	if (projectNamespace === "minecraft" && step.override !== true) {
+		throw new McAssetError(
+			"RECIPE_INVALID",
+			`${kind} in the minecraft namespace requires override: true for item '${item}'.`,
+			{ targetId, item },
+		);
+	}
+}
+
+/**
+ * Every model a built item definition points at must resolve inside the same
+ * recipe run: either a model this plan writes, a model file already on disk
+ * under the pack output, or the vanilla minecraft tree. A dangling pointer
+ * fails here with PACK_BROKEN_REFERENCE before any byte is written, so the
+ * plan never stages a definition its own pack cannot satisfy.
+ */
+function assertItemModelRefsResolvable(
+	refs: readonly string[],
+	plannedModelPaths: ReadonlySet<string>,
+	projectDir: string,
+	project: PackProjectDocument,
+	targetId: string,
+): void {
+	for (const ref of refs) {
+		const parsed = parseResourceLocation(ref);
+		const leaf = parsed.path.endsWith(".json")
+			? parsed.path
+			: `${parsed.path}.json`;
+		const relPath = `${project.outputDir}/assets/${parsed.namespace}/models/${leaf}`;
+		if (plannedModelPaths.has(relPath)) {
+			continue;
+		}
+		if (existsSync(join(projectDir, relPath))) {
+			continue;
+		}
+		if (parsed.namespace === "minecraft") {
+			continue;
+		}
+		throw new McAssetError(
+			"PACK_BROKEN_REFERENCE",
+			`Item definition for target '${targetId}' references unknown model '${ref}'.`,
+			{ targetId, model: ref },
+		);
+	}
 }
 
 /**
@@ -646,6 +728,131 @@ export async function planPackBuild(
 				};
 			}
 
+			const modelPlans: ModelOutputPlan[] = [];
+			for (const step of target.steps) {
+				for (const rel of collectModelOutputsForStep(step, target.id)) {
+					const modelRelPath = `${project.outputDir}/assets/${project.namespace}/models/item/${rel.item}.json`;
+
+					validateJsonNamespaceOverride(
+						rel.item,
+						project.namespace,
+						step,
+						target.id,
+						"model step",
+					);
+
+					const fullModelPath = join(projectDir, modelRelPath);
+					const existsOnDisk = existsSync(fullModelPath);
+					const lockEntry = lock?.outputs?.[modelRelPath];
+
+					let modelJudgement: BuildOutputJudgement;
+					let modelNeedsRewrite = false;
+
+					if (lockEntry !== undefined) {
+						if (!existsOnDisk) {
+							modelJudgement = "new";
+							modelNeedsRewrite = true;
+						} else {
+							const diskBytes = readFileSync(fullModelPath);
+							const diskHash = sha256Hex(diskBytes);
+							if (diskHash !== lockEntry.outputHash) {
+								modelJudgement = "own-modified";
+								modelNeedsRewrite = false;
+							} else {
+								modelJudgement = "own-clean";
+								modelNeedsRewrite = inputHash !== lockEntry.inputHash;
+							}
+						}
+					} else {
+						if (existsOnDisk) {
+							modelJudgement = "foreign";
+							modelNeedsRewrite = false;
+						} else {
+							modelJudgement = "new";
+							modelNeedsRewrite = true;
+						}
+					}
+
+					outputs.push({
+						path: modelRelPath,
+						judgement: modelJudgement,
+						targetId: target.id,
+						recipeId: recipe.id,
+					});
+					modelPlans.push({
+						path: modelRelPath,
+						judgement: modelJudgement,
+						kind: "model",
+						needsRewrite: modelNeedsRewrite,
+					});
+				}
+				for (const rel of collectItemOutputsForStep(step, target.id)) {
+					validateJsonNamespaceOverride(
+						rel.item,
+						project.namespace,
+						step,
+						target.id,
+						"itemDefinition step",
+					);
+
+					const itemRelPath = `${project.outputDir}/assets/${project.namespace}/items/${rel.item}.json`;
+
+					const format = normalizePackFormat(project.resourcePackVersion);
+					if (comparePackFormats(format, "46.0") < 0) {
+						throw new McAssetError(
+							"RECIPE_VERSION_UNSUPPORTED",
+							`itemDefinition requires pack format 46.0 or higher; target format is ${format}.`,
+							{ targetId: target.id, actualFormat: format },
+						);
+					}
+
+					const fullItemPath = join(projectDir, itemRelPath);
+					const existsOnDisk = existsSync(fullItemPath);
+					const lockEntry = lock?.outputs?.[itemRelPath];
+
+					let itemJudgement: BuildOutputJudgement;
+					let itemNeedsRewrite = false;
+
+					if (lockEntry !== undefined) {
+						if (!existsOnDisk) {
+							itemJudgement = "new";
+							itemNeedsRewrite = true;
+						} else {
+							const diskBytes = readFileSync(fullItemPath);
+							const diskHash = sha256Hex(diskBytes);
+							if (diskHash !== lockEntry.outputHash) {
+								itemJudgement = "own-modified";
+								itemNeedsRewrite = false;
+							} else {
+								itemJudgement = "own-clean";
+								itemNeedsRewrite = inputHash !== lockEntry.inputHash;
+							}
+						}
+					} else {
+						if (existsOnDisk) {
+							itemJudgement = "foreign";
+							itemNeedsRewrite = false;
+						} else {
+							itemJudgement = "new";
+							itemNeedsRewrite = true;
+						}
+					}
+
+					outputs.push({
+						path: itemRelPath,
+						judgement: itemJudgement,
+						targetId: target.id,
+						recipeId: recipe.id,
+					});
+					modelPlans.push({
+						path: itemRelPath,
+						judgement: itemJudgement,
+						kind: "itemDefinition",
+						needsRewrite: itemNeedsRewrite,
+					});
+				}
+			}
+
 			targetPlans.push({
 				targetId: target.id,
 				recipeId: recipe.id,
@@ -665,6 +872,7 @@ export async function planPackBuild(
 				inputHash,
 				needsRewrite,
 				mcmetaPlan,
+				modelPlans,
 			});
 		}
 	}
@@ -690,6 +898,37 @@ export async function planPackBuild(
 			`Total decoded source pixels exceed 16777216 limit: ${totalDecodedPixels}.`,
 			{ limit: 16777216, actual: totalDecodedPixels },
 		);
+	}
+
+	const plannedModelPaths = new Set<string>();
+	for (const tp of targetPlans) {
+		for (const mp of tp.modelPlans ?? []) {
+			if (mp.kind === "model") {
+				plannedModelPaths.add(mp.path);
+			}
+		}
+	}
+	for (const tp of targetPlans) {
+		for (const step of tp.target.steps) {
+			if (step.type !== "itemDefinition") {
+				continue;
+			}
+			const refs = collectItemDefinitionModelRefs(
+				isJsonObject(step.definition)
+					? (step.definition as Record<string, unknown>)
+					: undefined,
+			);
+			if (typeof step.model === "string" && refs.length === 0) {
+				refs.push(step.model);
+			}
+			assertItemModelRefsResolvable(
+				refs,
+				plannedModelPaths,
+				projectDir,
+				project,
+				tp.targetId,
+			);
+		}
 	}
 
 	const recipeId = recipes.length === 1 ? recipes[0].recipe.id : "";
@@ -752,9 +991,13 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 	}
 
 	const projectDir = plan.projectDir ?? process.cwd();
+	const projectNamespace = plan.project?.namespace ?? "";
 	const targetPlans = (plan.targetPlans ?? []) as TargetPlanInternal[];
 	const targetsToExecute = targetPlans.filter(
-		(tp) => tp.needsRewrite || tp.mcmetaPlan?.needsRewrite,
+		(tp) =>
+			tp.needsRewrite ||
+			tp.mcmetaPlan?.needsRewrite ||
+			(tp.modelPlans ?? []).some((mp) => mp.needsRewrite),
 	);
 
 	if (targetsToExecute.length === 0) {
@@ -777,6 +1020,15 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 				extension: ".mcmeta",
 				allowOverwrite: true,
 			});
+		}
+		for (const mp of tp.modelPlans ?? []) {
+			if (mp.needsRewrite) {
+				outputTargets.push({
+					path: resolve(projectDir, mp.path),
+					extension: ".json",
+					allowOverwrite: true,
+				});
+			}
 		}
 	}
 
@@ -983,6 +1235,8 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 						canvas.layers.length === 1 ? canvas.layers[0]?.id : undefined,
 					);
 					applyOperations(canvas, typedOps);
+				} else if (step.type === "model" || step.type === "itemDefinition") {
+					// JSON outputs are validated and rendered after the pixel steps.
 				} else {
 					throw new McAssetError(
 						"RECIPE_INVALID",
@@ -1008,6 +1262,110 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 			payloads.set(resolve(projectDir, tp.path), pngBytes);
 			completedPaths.push(tp.path);
 		}
+
+		for (const mp of tp.modelPlans ?? []) {
+			if (!mp.needsRewrite) {
+				continue;
+			}
+			try {
+				const doc = buildModelOutputDocument(tp, mp, projectNamespace);
+				const text = canonicalDocumentText(doc);
+				mp.computedOutputHash = sha256Hex(new TextEncoder().encode(text));
+				mp.computedText = text;
+				payloads.set(
+					resolve(projectDir, mp.path),
+					new TextEncoder().encode(text),
+				);
+				completedPaths.push(mp.path);
+			} catch (err) {
+				if (err instanceof McAssetError) {
+					const details = isJsonObject(err.details) ? err.details : {};
+					throw new McAssetError(err.code, err.message, {
+						...details,
+						targetId: tp.targetId,
+					});
+				}
+				throw err;
+			}
+		}
+	}
+
+	/** Render one model or item definition document from recipe steps. */
+	function buildModelOutputDocument(
+		tp: TargetPlanInternal,
+		mp: ModelOutputPlan,
+		projectNamespace: string,
+	): Record<string, unknown> {
+		for (let stepIndex = 0; stepIndex < tp.target.steps.length; stepIndex++) {
+			const step = tp.target.steps[stepIndex] as RecipeStep;
+			if (mp.kind === "model" && step.type === "model") {
+				const item =
+					typeof step.item === "string" && step.item.trim() !== ""
+						? step.item
+						: tp.targetId;
+				const inferred = itemFromModelPath(mp.path);
+				if (inferred !== undefined && inferred !== item) {
+					continue;
+				}
+				const resolvedItem = inferred ?? item;
+				if (step.modelSpec !== undefined) {
+					if (!isJsonObject(step.modelSpec)) {
+						throw new McAssetError(
+							"RECIPE_INVALID",
+							`model step modelSpec must be an object for item '${resolvedItem}'.`,
+							{
+								targetId: tp.targetId,
+								stepIndex,
+								item: resolvedItem,
+							},
+						);
+					}
+					return step.modelSpec as Record<string, unknown>;
+				}
+				const parent =
+					typeof step.parent === "string" ? step.parent : "generated";
+				const texture =
+					typeof step.texture === "string"
+						? step.texture
+						: `${projectNamespace}:item/${resolvedItem}`;
+				return buildParentModel({
+					parent,
+					texture,
+					item: resolvedItem,
+					namespace: projectNamespace,
+				});
+			}
+			if (mp.kind === "itemDefinition" && step.type === "itemDefinition") {
+				const item =
+					typeof step.item === "string" && step.item.trim() !== ""
+						? step.item
+						: tp.targetId;
+				const inferred = itemFromModelPath(mp.path);
+				if (inferred !== undefined && inferred !== item) {
+					continue;
+				}
+				const resolvedItem = inferred ?? item;
+				const model = typeof step.model === "string" ? step.model : undefined;
+				const definition = isJsonObject(step.definition)
+					? (step.definition as Record<string, unknown>)
+					: undefined;
+				const defaultModel =
+					model ?? `${projectNamespace}:item/${resolvedItem}`;
+				return buildItemDefinitionDocument(definition, defaultModel);
+			}
+		}
+		throw new McAssetError(
+			"INTERNAL_ERROR",
+			`No matching step for planned output '${mp.path}'.`,
+			{
+				targetId: tp.targetId,
+			},
+		);
+	}
+
+	function itemFromModelPath(path: string): string | undefined {
+		const match = /\/(models\/item|items)\/(.+)\.json$/.exec(path);
+		return match?.[2];
 	}
 
 	// 3. Write planned targets to disk
@@ -1028,6 +1386,17 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 				inputHash: tp.inputHash,
 				outputHash: tp.computedOutputHash,
 			};
+		}
+		for (const mp of tp.modelPlans ?? []) {
+			if (mp.needsRewrite && mp.computedOutputHash !== undefined) {
+				updatedOutputs[mp.path] = {
+					targetId: tp.targetId,
+					recipeId: tp.recipeId,
+					kind: mp.kind,
+					inputHash: tp.inputHash,
+					outputHash: mp.computedOutputHash,
+				};
+			}
 		}
 		if (
 			tp.mcmetaPlan?.needsRewrite &&

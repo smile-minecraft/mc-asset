@@ -96,8 +96,9 @@ pack build [--project <file>] [--recipe <file>] [--dry-run] [--json]
   1. *解析与计划*：读取项目文件、配方、解析后的风格、lock 文件（`mc-asset.lock.json`）与源文件；在内存中完成变量展开、调色板映射与全部校验，不写入任何字节。
   2. *分类*：将每个预定产物比对 lock 文件与磁盘现况，划入四类：`new`（未记录且不存在；预定写入）、`own-clean`（已记录且输出哈希相符；输入未变则跳过，输入变更则预定重写）、`own-modified`（已记录但磁盘文件被修改；用户修改冲突）、`foreign`（未记录但磁盘已有文件；外部文件冲突）。若有任何产物为 `own-modified` 或 `foreign`，整批以 `PACK_BUILD_CONFLICT`（exit 4）拒绝，一个字节都不写，并在 `details.conflicts` 完整列出冲突路径。
   3. *写入*：先对全部目标执行 safe-output 只读预检（拒绝符号链接、路径别名与目录冲突）；全部通过后才以临时文件加 rename 原子写入各文件，最后再原子更新 `mc-asset.lock.json`。
+- 模型与物品定义步骤：`model` 步骤写出 `assets/<namespace>/models/item/<item>.json`（父模型预设或自定义 modelSpec）；`itemDefinition` 步骤写出 `assets/<namespace>/items/<item>.json`（默认 simple 或 select／condition／range_dispatch 模板）。两者都以 `kind: model`／`kind: itemDefinition` 的 lock 条目与贴图产物一起规划。物品定义需资源包格式 46.0 及以上，否则返回 `RECIPE_VERSION_UNSUPPORTED`（带 `targetId` 与实际格式）；引用不存在模型时返回 `PACK_BROKEN_REFERENCE`；`minecraft` 命名空间需 `override: true`，否则返回 `RECIPE_INVALID`。
 - `--dry-run` 执行至分类阶段为止，不写入任何文件与 lock 文件，仅报告分类统计与预定输出列表。
-- 构建错误码：`RECIPE_INVALID`（语法、字段、变量未用或占位符错误；exit 2）、`RECIPE_UNSUPPORTED_VERSION`（配方文件版本过新；exit 5）、`RECIPE_OUTPUT_CONFLICT`（展开后输出路径重复；exit 2）、`RECIPE_VERSION_UNSUPPORTED`（目标格式不支持产物，如 46.0 前的物品定义；exit 2）、`RECIPE_SOURCE_MISSING`（源文件或原版素材目录不存在；exit 4）、`PACK_BUILD_CONFLICT`（产物分类冲突；exit 4）、`PACK_LOCK_INVALID`（lock 文件损坏；exit 4）、`PACK_LOCK_UNSUPPORTED_VERSION`（lock 文件版本过新；exit 5）。资源预算上限（单次构建输出最多 4096 文件、源文件总计 256 MiB、解码像素 16M）触发 `RESOURCE_LIMIT_EXCEEDED`（exit 5）。
+- 构建错误码：`RECIPE_INVALID`（语法、字段、变量未用、占位符错误、不允许的命名空间或缺少 `override`；exit 2）、`RECIPE_UNSUPPORTED_VERSION`（配方文件版本过新；exit 5）、`RECIPE_OUTPUT_CONFLICT`（展开后输出路径重复；exit 2）、`RECIPE_VERSION_UNSUPPORTED`（目标格式不支持产物，如 46.0 前的物品定义；exit 2）、`RECIPE_SOURCE_MISSING`（源文件或原版素材目录不存在；exit 4）、`PACK_BUILD_CONFLICT`（产物分类冲突；exit 4）、`PACK_BROKEN_REFERENCE`（物品定义引用不存在模型；exit 3）、`PACK_LOCK_INVALID`（lock 文件损坏；exit 4）、`PACK_LOCK_UNSUPPORTED_VERSION`（lock 文件版本过新；exit 5）。资源预算上限（单次构建输出最多 4096 文件、源文件总计 256 MiB、解码像素 16M）触发 `RESOURCE_LIMIT_EXCEEDED`（exit 5）。
 
 - `--source <path>` 会保存可编辑的 `.mcpx` 文本源码。
 - `--in-place` 直接改写输入文件（对该目标等同 force）。

@@ -63,7 +63,38 @@ const SUPPORTED_STEP_TYPES: ReadonlySet<string> = new Set([
 	"outline",
 	"sweep",
 	"operations",
+	"model",
+	"itemDefinition",
 ]);
+
+const IMAGE_STEP_TYPES: ReadonlySet<string> = new Set([
+	"recolor",
+	"outline",
+	"sweep",
+	"operations",
+]);
+
+const ASSET_NAMESPACE_PATTERN = /^[a-z0-9_.-]+$/;
+
+/**
+ * A recipe output or sweep mcmeta output pointing under `assets/<namespace>/`
+ * names the namespace that owns the file. The middle segment must be a plain
+ * lowercase namespace, so a typo like an uppercase segment fails in planning
+ * with RECIPE_INVALID instead of slipping into the pack.
+ */
+function assertAssetNamespaceSegment(path: string): void {
+	const segments = path.split("/");
+	if (segments.length >= 2 && segments[0] === "assets") {
+		const segment = segments[1] ?? "";
+		if (!ASSET_NAMESPACE_PATTERN.test(segment)) {
+			throw new McAssetError(
+				"RECIPE_INVALID",
+				`Invalid namespace segment in output path: ${path}`,
+				{ output: path },
+			);
+		}
+	}
+}
 
 const PLACEHOLDER_REGEX = /\{([a-zA-Z0-9_.-]+)\}/g;
 
@@ -349,25 +380,28 @@ export function parseRecipeText(text: string): RecipeDocument {
 			steps.push({ ...rawStep, type: rawStep.type });
 		}
 
-		if (
-			typeof rawTarget.output !== "string" ||
-			rawTarget.output.trim() === ""
-		) {
-			throw new McAssetError(
-				"RECIPE_INVALID",
-				`Target '${rawTarget.id}' with image steps must declare output.`,
-				{ targetId: rawTarget.id },
-			);
-		}
-		if (
-			typeof rawTarget.source !== "string" ||
-			rawTarget.source.trim() === ""
-		) {
-			throw new McAssetError(
-				"RECIPE_INVALID",
-				`Target '${rawTarget.id}' with image steps must declare source.`,
-				{ targetId: rawTarget.id },
-			);
+		const hasImageStep = steps.some((s) => IMAGE_STEP_TYPES.has(s.type));
+		if (hasImageStep) {
+			if (
+				typeof rawTarget.output !== "string" ||
+				rawTarget.output.trim() === ""
+			) {
+				throw new McAssetError(
+					"RECIPE_INVALID",
+					`Target '${rawTarget.id}' with image steps must declare output.`,
+					{ targetId: rawTarget.id },
+				);
+			}
+			if (
+				typeof rawTarget.source !== "string" ||
+				rawTarget.source.trim() === ""
+			) {
+				throw new McAssetError(
+					"RECIPE_INVALID",
+					`Target '${rawTarget.id}' with image steps must declare source.`,
+					{ targetId: rawTarget.id },
+				);
+			}
 		}
 
 		targets.push({
@@ -538,6 +572,7 @@ export function expandRecipeTargets(
 						{ output },
 					);
 				}
+				assertAssetNamespaceSegment(output);
 			}
 
 			const steps = substituteValue(target.steps, scope) as RecipeStep[];
@@ -561,6 +596,7 @@ export function expandRecipeTargets(
 							{ output: step.mcmetaOutput },
 						);
 					}
+					assertAssetNamespaceSegment(step.mcmetaOutput);
 				}
 			}
 
@@ -590,7 +626,7 @@ export function expandRecipeTargets(
 		seenIds.add(t.id);
 	}
 
-	// Validate unique output paths
+	// Validate unique output paths across all targets and steps
 	const seenOutputs = new Set<string>();
 	const dupeOutputs = new Set<string>();
 	for (const t of expandedList) {
@@ -599,6 +635,30 @@ export function expandRecipeTargets(
 				dupeOutputs.add(t.output);
 			}
 			seenOutputs.add(t.output);
+		}
+		for (const step of t.steps) {
+			if (step.type === "sweep" && typeof step.mcmetaOutput === "string") {
+				if (seenOutputs.has(step.mcmetaOutput)) {
+					dupeOutputs.add(step.mcmetaOutput);
+				}
+				seenOutputs.add(step.mcmetaOutput);
+			}
+			if (step.type === "model") {
+				const item = typeof step.item === "string" ? step.item : t.id;
+				const modelRel = `assets/${namespace}/models/item/${item}.json`;
+				if (seenOutputs.has(modelRel)) {
+					dupeOutputs.add(modelRel);
+				}
+				seenOutputs.add(modelRel);
+			}
+			if (step.type === "itemDefinition") {
+				const item = typeof step.item === "string" ? step.item : t.id;
+				const itemRel = `assets/${namespace}/items/${item}.json`;
+				if (seenOutputs.has(itemRel)) {
+					dupeOutputs.add(itemRel);
+				}
+				seenOutputs.add(itemRel);
+			}
 		}
 	}
 	if (dupeOutputs.size > 0) {

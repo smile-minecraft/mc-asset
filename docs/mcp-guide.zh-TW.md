@@ -722,3 +722,5 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 ```
 
 未帶 `dryRun` 時，`completed` 會列出實際寫出的每個路徑，並在 `mc-asset.lock.json` 記錄輸出雜湊，確保後續重跑冪等且不重複寫入。
+
+配方 `model` 步驟寫出 `assets/<namespace>/models/item/<item>.json`（父模型預設或自訂 modelSpec），`itemDefinition` 步驟寫出 `assets/<namespace>/items/<item>.json`（預設 simple 或 select／condition／range_dispatch 範本），因此一個目標可同時產出貼圖與多個 JSON 文件，並以 `kind: model`／`kind: itemDefinition` 的 lock 條目追蹤。物品定義需資源包格式 46.0 以上（`RECIPE_VERSION_UNSUPPORTED`，帶 `targetId` 與實際格式）；參照不存在模型時回 `PACK_BROKEN_REFERENCE`；`minecraft` 命名空間需 `override: true`，否則回 `RECIPE_INVALID`。

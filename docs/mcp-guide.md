@@ -875,6 +875,8 @@ Result:
 
 When run without `dryRun`, `completed` lists every path written, and `mc-asset.lock.json` records output hashes to guarantee idempotent subsequent runs.
 
+A recipe `model` step writes `assets/<namespace>/models/item/<item>.json` (parent preset or custom modelSpec) and an `itemDefinition` step writes `assets/<namespace>/items/<item>.json` (simple default or the select / condition / range_dispatch template), so one target can produce a texture plus several JSON outputs tracked by `kind: model` / `kind: itemDefinition` lock entries. Item definitions require resource-pack format 46.0 or higher (`RECIPE_VERSION_UNSUPPORTED` with `targetId` and the actual format); references to missing models fail with `PACK_BROKEN_REFERENCE`; in the `minecraft` namespace they require `override: true`, otherwise `RECIPE_INVALID`.
+
 ## How failures come back
 
 A tool failure sets `isError: true`, and the payload is a JSON string in

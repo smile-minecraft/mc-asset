@@ -96,8 +96,9 @@ pack build [--project <file>] [--recipe <file>] [--dry-run] [--json]
   1. *解析與計畫*：讀取專案檔、配方、解析後的風格、lock 檔（`mc-asset.lock.json`）與來源檔；在記憶體完成變數展開、調色盤映射與所有驗證，不寫入任何位元組。
   2. *分類*：將每個預定產物比對 lock 檔與磁碟現況，劃入四個分類：`new`（未記錄且不存在；預定寫入）、`own-clean`（已記錄且輸出雜湊相符；輸入未變則跳過，輸入變更則預定重寫）、`own-modified`（已記錄但磁碟檔案遭修改；使用者修改衝突）、`foreign`（未記錄但磁碟已有檔案；外部檔案衝突）。若有任何產物為 `own-modified` 或 `foreign`，整批以 `PACK_BUILD_CONFLICT`（exit 4）拒絕，一個位元組都不寫，並在 `details.conflicts` 完整列出衝突路徑。
   3. *寫入*：先對全部目標進行 safe-output 唯讀預檢（拒絕符號連結、路徑別名與目錄衝突）；全部通過後才以暫存檔加 rename 原子寫入各檔案，最後再原子更新 `mc-asset.lock.json`。
+- 模型與物品定義步驟：`model` 步驟寫出 `assets/<namespace>/models/item/<item>.json`（父模型預設或自訂 modelSpec）；`itemDefinition` 步驟寫出 `assets/<namespace>/items/<item>.json`（預設 simple 或 select／condition／range_dispatch 範本）。兩者皆以 `kind: model`／`kind: itemDefinition` 的 lock 條目與貼圖產物一同規劃。物品定義需資源包格式 46.0 以上，否則回 `RECIPE_VERSION_UNSUPPORTED`（帶 `targetId` 與實際格式）；參照不存在模型時回 `PACK_BROKEN_REFERENCE`；`minecraft` 命名空間需 `override: true`，否則回 `RECIPE_INVALID`。
 - `--dry-run` 執行至分類階段為止，不寫入任何檔案與 lock 檔，僅回報分類統計與預定輸出清單。
-- 建置錯誤碼：`RECIPE_INVALID`（語法、欄位、變數未用或佔位符錯誤；exit 2）、`RECIPE_UNSUPPORTED_VERSION`（配方檔版本過新；exit 5）、`RECIPE_OUTPUT_CONFLICT`（展開後輸出路徑重複；exit 2）、`RECIPE_VERSION_UNSUPPORTED`（目標格式不支援產物，如 46.0 前的物品定義；exit 2）、`RECIPE_SOURCE_MISSING`（來源檔或原版素材目錄不存在；exit 4）、`PACK_BUILD_CONFLICT`（產物分類衝突；exit 4）、`PACK_LOCK_INVALID`（lock 檔損壞；exit 4）、`PACK_LOCK_UNSUPPORTED_VERSION`（lock 檔版本過新；exit 5）。資源預算上限（單次建置輸出最多 4096 檔、來源總計 256 MiB、解碼像素 16M）觸發 `RESOURCE_LIMIT_EXCEEDED`（exit 5）。
+- 建置錯誤碼：`RECIPE_INVALID`（語法、欄位、變數未用、佔位符錯誤、不允許的命名空間或缺少 `override`；exit 2）、`RECIPE_UNSUPPORTED_VERSION`（配方檔版本過新；exit 5）、`RECIPE_OUTPUT_CONFLICT`（展開後輸出路徑重複；exit 2）、`RECIPE_VERSION_UNSUPPORTED`（目標格式不支援產物，如 46.0 前的物品定義；exit 2）、`RECIPE_SOURCE_MISSING`（來源檔或原版素材目錄不存在；exit 4）、`PACK_BUILD_CONFLICT`（產物分類衝突；exit 4）、`PACK_BROKEN_REFERENCE`（物品定義參照不存在模型；exit 3）、`PACK_LOCK_INVALID`（lock 檔損壞；exit 4）、`PACK_LOCK_UNSUPPORTED_VERSION`（lock 檔版本過新；exit 5）。資源預算上限（單次建置輸出最多 4096 檔、來源總計 256 MiB、解碼像素 16M）觸發 `RESOURCE_LIMIT_EXCEEDED`（exit 5）。
 
 - `--source <path>` 會儲存可編輯的 `.mcpx` 文字來源。
 - `--in-place` 直接改寫輸入檔（對該目標等同 force）。
