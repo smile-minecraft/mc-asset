@@ -1,5 +1,7 @@
 import { McAssetError } from "../core/errors.ts";
 import { executePackBuild, planPackBuild } from "../pack/build.ts";
+import { catalogVanillaTextures } from "../pack/catalog.ts";
+import { extractVanillaJar } from "../pack/extract.ts";
 import { initializePackProject, type PackInitRequest } from "../pack/index.ts";
 import { emitCommandFailure } from "./artifacts.ts";
 import {
@@ -29,6 +31,16 @@ export interface PackOptions {
 	style?: string | undefined;
 	resourcePackVersion?: string | undefined;
 	allowMinecraftNamespace?: boolean | undefined;
+	vanilla?: string | undefined;
+	category?: string | undefined;
+	page?: string | undefined;
+	pageSize?: string | undefined;
+	includeFamilies?: boolean | undefined;
+	jar?: string | undefined;
+	outputDir?: string | undefined;
+	force?: boolean | undefined;
+	mkdir?: boolean | undefined;
+	output?: string | undefined;
 }
 
 /** Read a required flag, naming the flag itself when it is missing. */
@@ -124,6 +136,49 @@ export async function runPack(
 				for (const directory of written.directories) {
 					emitLog(`dir=${directory}`, streams, route);
 				}
+			}
+			return 0;
+		}
+		if (mode === "catalog") {
+			const vanilla = requiredFlag(options.vanilla, "--vanilla");
+			const report = await catalogVanillaTextures({
+				vanillaPath: vanilla,
+				category: options.category,
+				page: options.page === undefined ? undefined : Number(options.page),
+				pageSize:
+					options.pageSize === undefined ? undefined : Number(options.pageSize),
+				includeFamilies: options.includeFamilies,
+			});
+			const result = { command: "pack", mode: "catalog", ...report };
+			if (globalJson) {
+				emitEnvelope(successEnvelope(result), streams, route);
+			} else {
+				emitLog(
+					`ok pack catalog total=${report.total} entries=${report.entries.length} page=${report.page}`,
+					streams,
+					route,
+				);
+			}
+			return 0;
+		}
+		if (mode === "extract") {
+			const jar = requiredFlag(options.jar, "--jar");
+			const outputDir = requiredFlag(options.outputDir, "--output-dir");
+			const extracted = await extractVanillaJar({
+				jarPath: jar,
+				outputDir,
+				force: options.force,
+				mkdir: options.mkdir,
+			});
+			const result = { command: "pack", mode: "extract", ...extracted };
+			if (globalJson) {
+				emitEnvelope(successEnvelope(result), streams, route);
+			} else {
+				emitLog(
+					`ok pack extract files=${extracted.fileCount} bytes=${extracted.totalBytes}`,
+					streams,
+					route,
+				);
 			}
 			return 0;
 		}

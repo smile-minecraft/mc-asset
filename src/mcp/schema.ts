@@ -1273,7 +1273,9 @@ export const TOOL_INPUT_SCHEMAS = {
 			.describe("Create missing parent directories (create)."),
 	},
 	pack_asset: {
-		mode: z.enum(["init", "build"]).describe("Pack subcommand: init or build."),
+		mode: z
+			.enum(["init", "build", "catalog", "extract"])
+			.describe("Pack subcommand: init, build, catalog, or extract."),
 		projectDir: z
 			.string()
 			.min(1)
@@ -1341,5 +1343,50 @@ export const TOOL_INPUT_SCHEMAS = {
 			.describe(
 				"init only: allow the reserved minecraft namespace; refused without it.",
 			),
+		vanillaPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("catalog only: vanilla tree directory containing assets/."),
+		category: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("catalog only: exact texture category filter."),
+		page: z
+			.number()
+			.int()
+			.min(1)
+			.optional()
+			.describe("catalog only: page number."),
+		pageSize: z
+			.number()
+			.int()
+			.min(1)
+			.max(1000)
+			.optional()
+			.describe("catalog only: entries per page, at most 1000."),
+		includeFamilies: z
+			.boolean()
+			.optional()
+			.describe("catalog only: include the mask family index."),
+		jarPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("extract only: caller-specified client jar path."),
+		outputDir: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("extract only: directory receiving assets/ entries."),
+		force: z
+			.boolean()
+			.optional()
+			.describe("extract only: allow overwriting existing files."),
+		mkdir: z
+			.boolean()
+			.optional()
+			.describe("extract only: create missing parent directories."),
 	},
 } satisfies Record<McpToolName, Record<string, z.ZodTypeAny>>;

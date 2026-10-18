@@ -75,6 +75,8 @@
 | `build [source]` | `.mcpx` 來源檔或 stdin（`--stdin`） | PNG 和／或 `.mcpx` | 將可編輯的來源檔建置成材質，或重新序列化來源。 |
 | `pack init <dir>` | 無 | 專案骨架 | 產生專案檔、資源包根 metadata、佔位圖示與資源包目錄。 |
 | `pack build` | 專案檔（`mc-asset.pack.json`）、配方 | 資源包材質、物品定義與 lock 檔 | 依配方建置資源包專案，並以 lock 檔追蹤產物。 |
+| `pack catalog` | 含 `assets/` 的原版資源樹 | 唯讀材質清單 | 列出材質的分類、尺寸、動畫旗標與遮罩家族。 |
+| `pack extract` | 呼叫端指定的用戶端 jar | 複製出的 `assets/` 檔案 | 只取出 `assets/` 底下項目到輸出目錄。 |
 
 ```text
 import <image> [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
@@ -83,6 +85,8 @@ build  [source] [--stdin] [--output <png>] [--source <mcpx>] [--stdout] [--opera
 pack init <dir> --namespace <ns> --minecraft-version <version> [--name <name>] [--description <text>]
        [--style <id|path>] [--resource-pack-version <N>] [--allow-minecraft-namespace]
 pack build [--project <file>] [--recipe <file>] [--dry-run] [--json]
+pack catalog --vanilla <path> [--category <c>] [--page <n>] [--page-size <n>] [--include-families] [--json]
+pack extract --jar <path> --output-dir <dir> [--force] [--mkdir]
 ```
 
 - `pack init <dir>` 一次預檢後整批寫出骨架：專案根目錄的專案檔 `mc-asset.pack.json`、依目標版本產生的 `pack/pack.mcmeta`、64x64 的 `pack/pack.png` 佔位圖示，以及目錄 `recipes/`、`pack/assets/<ns>/textures/item`、`pack/assets/<ns>/textures/block`、`pack/assets/<ns>/models/item`，資源包格式 46.0 起再多了 `pack/assets/<ns>/items/`。`--namespace` 與 `--minecraft-version` 必填，其餘設定都有預設值（專案名取自目錄名、說明取自專案名、風格為 `vanilla`、輸出目錄為 `pack`、配方目錄為 `recipes`）。
@@ -98,6 +102,8 @@ pack build [--project <file>] [--recipe <file>] [--dry-run] [--json]
   3. *寫入*：先對全部目標進行 safe-output 唯讀預檢（拒絕符號連結、路徑別名與目錄衝突）；全部通過後才以暫存檔加 rename 原子寫入各檔案，最後再原子更新 `mc-asset.lock.json`。
 - 模型與物品定義步驟：`model` 步驟寫出 `assets/<namespace>/models/item/<item>.json`（父模型預設或自訂 modelSpec）；`itemDefinition` 步驟寫出 `assets/<namespace>/items/<item>.json`（預設 simple 或 select／condition／range_dispatch 範本）。兩者皆以 `kind: model`／`kind: itemDefinition` 的 lock 條目與貼圖產物一同規劃。物品定義需資源包格式 46.0 以上，否則回 `RECIPE_VERSION_UNSUPPORTED`（帶 `targetId` 與實際格式）；參照不存在模型時回 `PACK_BROKEN_REFERENCE`；`minecraft` 命名空間需 `override: true`，否則回 `RECIPE_INVALID`。
 - `--dry-run` 執行至分類階段為止，不寫入任何檔案與 lock 檔，僅回報分類統計與預定輸出清單。
+- `pack catalog --vanilla <path>` 列出原版資源樹下含 `assets/` 的 PNG 材質。每筆回報路徑、分類（`textures/` 下第一段）、解碼寬高、是否動畫（同名 `.mcmeta` 或高寬比為整數倍且高大於寬），以及遮罩家族鍵（尺寸加不透明遮罩的 SHA-256；相同鍵屬同一家族，代表為路徑位元組序最小者）。`--category` 精確比對，`--page` 從 1 起算，`--page-size` 每頁至多 1000 筆，`--include-families` 附上家族索引。缺 `assets/` 或超過掃描預算回 `PACK_CATALOG_INVALID`。
+- `pack extract --jar <path> --output-dir <dir>` 只取出呼叫端指定 jar 內的 `assets/` 項目。絕對路徑、`..` 片段與加密項目回 `PACK_ARCHIVE_INVALID`，中央目錄損壞亦同；項目數與解壓位元組沿用既有資源預算。`--force` 允許覆寫，`--mkdir` 建立缺失的父目錄。
 - 建置錯誤碼：`RECIPE_INVALID`（語法、欄位、變數未用、佔位符錯誤、不允許的命名空間或缺少 `override`；exit 2）、`RECIPE_UNSUPPORTED_VERSION`（配方檔版本過新；exit 5）、`RECIPE_OUTPUT_CONFLICT`（展開後輸出路徑重複；exit 2）、`RECIPE_VERSION_UNSUPPORTED`（目標格式不支援產物，如 46.0 前的物品定義；exit 2）、`RECIPE_SOURCE_MISSING`（來源檔或原版素材目錄不存在；exit 4）、`PACK_BUILD_CONFLICT`（產物分類衝突；exit 4）、`PACK_BROKEN_REFERENCE`（物品定義參照不存在模型；exit 3）、`PACK_LOCK_INVALID`（lock 檔損壞；exit 4）、`PACK_LOCK_UNSUPPORTED_VERSION`（lock 檔版本過新；exit 5）。資源預算上限（單次建置輸出最多 4096 檔、來源總計 256 MiB、解碼像素 16M）觸發 `RESOURCE_LIMIT_EXCEEDED`（exit 5）。
 
 - `--source <path>` 會儲存可編輯的 `.mcpx` 文字來源。

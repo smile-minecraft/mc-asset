@@ -924,6 +924,49 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			);
 			process.exitCode = code;
 		});
+	pack
+		.command("catalog")
+		.description("List textures in a vanilla tree with mask families.")
+		.requiredOption("--vanilla <path>", "Vanilla tree containing assets/.")
+		.option("--category <c>", "Exact texture category filter.")
+		.option("--page <n>", "Page number, starting at 1.")
+		.option("--page-size <n>", "Entries per page, at most 1000.")
+		.option("--include-families", "Include the mask family index.")
+		.action(async (options: PackOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runPack(
+				"catalog",
+				undefined,
+				{
+					...options,
+					includeFamilies: options.includeFamilies === true ? true : undefined,
+				},
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	pack
+		.command("extract")
+		.description("Extract assets/ entries from a client jar.")
+		.requiredOption("--jar <path>", "Caller-specified client jar path.")
+		.requiredOption(
+			"--output-dir <dir>",
+			"Directory receiving assets/ entries.",
+		)
+		.option("--force", "Allow overwriting existing files.")
+		.option("--mkdir", "Create missing parent directories.")
+		.action(async (options: PackOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runPack(
+				"extract",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
 
 	program
 		.command("recolor <source>")

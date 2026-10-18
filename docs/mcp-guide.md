@@ -877,6 +877,22 @@ When run without `dryRun`, `completed` lists every path written, and `mc-asset.l
 
 A recipe `model` step writes `assets/<namespace>/models/item/<item>.json` (parent preset or custom modelSpec) and an `itemDefinition` step writes `assets/<namespace>/items/<item>.json` (simple default or the select / condition / range_dispatch template), so one target can produce a texture plus several JSON outputs tracked by `kind: model` / `kind: itemDefinition` lock entries. Item definitions require resource-pack format 46.0 or higher (`RECIPE_VERSION_UNSUPPORTED` with `targetId` and the actual format); references to missing models fail with `PACK_BROKEN_REFERENCE`; in the `minecraft` namespace they require `override: true`, otherwise `RECIPE_INVALID`.
 
+`catalog` lists the PNG textures under a caller-given vanilla tree containing `assets/`:
+
+```json
+{"mode":"catalog","vanillaPath":"/abs/vanilla-1.21","includeFamilies":true}
+```
+
+Each entry reports path, category, decoded size, animation flag (same-name `.mcmeta` sidecar or an integer aspect ratio taller than wide), and mask family key. The result reports `total` plus the current page (`page` from 1, `pageSize` at most 1000, `category` as an exact filter). A tree without `assets/` or a scan above budget is `PACK_CATALOG_INVALID`.
+
+`extract` copies only `assets/` entries from a caller-specified client jar:
+
+```json
+{"mode":"extract","jarPath":"/abs/client.jar","outputDir":"/abs/vanilla"}
+```
+
+Absolute paths, `..` segments, and encrypted entries are `PACK_ARCHIVE_INVALID`, as is a damaged central directory. The result reports the extracted file count and byte total.
+
 ## How failures come back
 
 A tool failure sets `isError: true`, and the payload is a JSON string in

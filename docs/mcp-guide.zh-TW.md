@@ -724,3 +724,19 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 未帶 `dryRun` 時，`completed` 會列出實際寫出的每個路徑，並在 `mc-asset.lock.json` 記錄輸出雜湊，確保後續重跑冪等且不重複寫入。
 
 配方 `model` 步驟寫出 `assets/<namespace>/models/item/<item>.json`（父模型預設或自訂 modelSpec），`itemDefinition` 步驟寫出 `assets/<namespace>/items/<item>.json`（預設 simple 或 select／condition／range_dispatch 範本），因此一個目標可同時產出貼圖與多個 JSON 文件，並以 `kind: model`／`kind: itemDefinition` 的 lock 條目追蹤。物品定義需資源包格式 46.0 以上（`RECIPE_VERSION_UNSUPPORTED`，帶 `targetId` 與實際格式）；參照不存在模型時回 `PACK_BROKEN_REFERENCE`；`minecraft` 命名空間需 `override: true`，否則回 `RECIPE_INVALID`。
+
+`catalog` 列出呼叫端給定原版資源樹（含 `assets/`）下的 PNG 材質：
+
+```json
+{"mode":"catalog","vanillaPath":"/abs/vanilla-1.21","includeFamilies":true}
+```
+
+每筆回報路徑、分類、解碼尺寸、動畫旗標（同名 `.mcmeta` 或高寬比為整數倍且高大於寬）與遮罩家族鍵。結果回報 `total` 與當頁筆數（`page` 從 1 起算，`pageSize` 每頁至多 1000 筆，`category` 精確比對）。缺 `assets/` 或超過掃描預算回 `PACK_CATALOG_INVALID`。
+
+`extract` 只取出呼叫端指定 jar 內的 `assets/` 項目到 `outputDir`：
+
+```json
+{"mode":"extract","jarPath":"/abs/client.jar","outputDir":"/abs/vanilla"}
+```
+
+`jarPath` 與 `outputDir` 必填，另有選用的 `force` 與 `mkdir`。絕對路徑、`..` 片段與加密項目回 `PACK_ARCHIVE_INVALID`，中央目錄損壞亦同。結果回報取出檔數與位元組總計。

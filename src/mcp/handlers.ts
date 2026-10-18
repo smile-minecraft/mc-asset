@@ -154,6 +154,8 @@ import { validateDimension } from "../core/validate.ts";
 import { decodePng, encodePng, flattenCanvas } from "../io/png.ts";
 import { collectCanvasColors, colorKeyOf, parseMcpx } from "../mcpx/index.ts";
 import { executePackBuild, planPackBuild } from "../pack/build.ts";
+import { catalogVanillaTextures } from "../pack/catalog.ts";
+import { extractVanillaJar } from "../pack/extract.ts";
 import { initializePackProject } from "../pack/index.ts";
 import { GUI_STRETCH_INNER_FACT, isFactActive } from "../profiles/versions.ts";
 import { buildPaletteMcpx } from "../style/export-palette.ts";
@@ -3058,9 +3060,46 @@ export async function handlePackAsset(
 			});
 			return textResult({ mode: "init", ...written });
 		}
+		if (args.mode === "catalog") {
+			if (args.vanillaPath === undefined || args.vanillaPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"pack_asset catalog needs a vanillaPath.",
+				);
+			}
+			const report = await catalogVanillaTextures({
+				vanillaPath: args.vanillaPath,
+				category: args.category,
+				page: args.page,
+				pageSize: args.pageSize,
+				includeFamilies: args.includeFamilies,
+			});
+			return textResult({ mode: "catalog", ...report });
+		}
+		if (args.mode === "extract") {
+			if (args.jarPath === undefined || args.jarPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"pack_asset extract needs a jarPath.",
+				);
+			}
+			if (args.outputDir === undefined || args.outputDir === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"pack_asset extract needs an outputDir.",
+				);
+			}
+			const extracted = await extractVanillaJar({
+				jarPath: args.jarPath,
+				outputDir: args.outputDir,
+				force: args.force,
+				mkdir: args.mkdir,
+			});
+			return textResult({ mode: "extract", ...extracted });
+		}
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"pack_asset mode must be init or build.",
+			"pack_asset mode must be init, build, catalog, or extract.",
 			{ mode: args.mode },
 		);
 	} catch (error) {

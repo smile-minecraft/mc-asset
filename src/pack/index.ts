@@ -13,6 +13,18 @@ export {
 	planPackBuild,
 } from "./build.ts";
 export {
+	type CatalogFamilyEntry,
+	type CatalogOptions,
+	type CatalogReport,
+	type CatalogTextureEntry,
+	catalogVanillaTextures,
+} from "./catalog.ts";
+export {
+	type ExtractOptions,
+	type ExtractReport,
+	extractVanillaJar,
+} from "./extract.ts";
+export {
 	initializePackProject,
 	planPackInit,
 	resolvePackInitVersion,

@@ -75,6 +75,8 @@ All commands that produce or modify files adhere to strict path and safety rules
 | `build [source]` | `.mcpx` source file or stdin (`--stdin`) | PNG and/or `.mcpx` | Builds editable source files into textures or re-serializes source. |
 | `pack init <dir>` | None | Project skeleton | Creates the project document, pack root metadata, placeholder icon, and the resource pack directories. |
 | `pack build` | Project document (`mc-asset.pack.json`), recipes | Resource pack textures, item definitions, and lockfile | Builds a pack project from its recipes, tracking outputs with a lockfile. |
+| `pack catalog` | Vanilla tree containing `assets/` | Read-only texture listing | Lists textures with category, size, animation flag, and mask family. |
+| `pack extract` | Caller-specified client jar | Copied `assets/` files | Extracts only `assets/` entries into an output directory. |
 
 ```text
 import <image> [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
@@ -83,6 +85,8 @@ build  [source] [--stdin] [--output <png>] [--source <mcpx>] [--stdout] [--opera
 pack init <dir> --namespace <ns> --minecraft-version <version> [--name <name>] [--description <text>]
        [--style <id|path>] [--resource-pack-version <N>] [--allow-minecraft-namespace]
 pack build [--project <file>] [--recipe <file>] [--dry-run] [--json]
+pack catalog --vanilla <path> [--category <c>] [--page <n>] [--page-size <n>] [--include-families] [--json]
+pack extract --jar <path> --output-dir <dir> [--force] [--mkdir]
 ```
 
 - `pack init <dir>` writes one skeleton in a single preflighted batch: the project document `mc-asset.pack.json` in the project root, `pack/pack.mcmeta` for the pinned target, a 64x64 `pack/pack.png` placeholder icon, and the directories `recipes/`, `pack/assets/<ns>/textures/item`, `pack/assets/<ns>/textures/block`, `pack/assets/<ns>/models/item`, plus `pack/assets/<ns>/items/` from resource pack format 46.0 on. `--namespace` and `--minecraft-version` are required; every other setting has a default (project name from the directory name, description from the name, `vanilla` style, `pack` output directory, `recipes` recipe directory).
@@ -98,6 +102,8 @@ pack build [--project <file>] [--recipe <file>] [--dry-run] [--json]
   3. *Write*: Performs safe-output preflights across all targets (refusing symlinks, aliases, and directory collisions). Only when all targets pass, files are written atomically, and `mc-asset.lock.json` is updated atomically as the final step.
 - Model and item definition steps: a `model` step writes `assets/<namespace>/models/item/<item>.json` (parent preset or custom modelSpec); an `itemDefinition` step writes `assets/<namespace>/items/<item>.json` (simple default or the select/condition/range_dispatch template). Both are planned as `kind: model` / `kind: itemDefinition` lock entries alongside texture outputs. Item definitions require resource-pack format 46.0 or higher, otherwise `RECIPE_VERSION_UNSUPPORTED` with `targetId` and the actual format; references to missing models fail with `PACK_BROKEN_REFERENCE`; in the `minecraft` namespace they require `override: true`, otherwise `RECIPE_INVALID`.
 - `--dry-run` stops after classification, writing no files and no lockfile, and reports the classification counts and planned outputs.
+- `pack catalog --vanilla <path>` lists the PNG textures under a vanilla tree containing `assets/`. Each entry reports its path, category (the first segment under `textures/`), decoded width and height, whether it is animated (a same-name `.mcmeta` sidecar or an integer aspect ratio taller than wide), and its mask family key (image size plus the SHA-256 of the opaque mask; identical keys share a family whose representative is the byte-smallest path). `--category` filters by exact match, `--page` starts at 1, `--page-size` caps at 1000 entries per page, and `--include-families` adds the family index. A tree without `assets/` or a scan above budget is `PACK_CATALOG_INVALID`.
+- `pack extract --jar <path> --output-dir <dir>` copies only `assets/` entries from a caller-specified client jar. Absolute paths, `..` segments, and encrypted entries are `PACK_ARCHIVE_INVALID`, as is a damaged central directory; entry counts and decompressed bytes follow the existing resource budgets. `--force` allows overwriting and `--mkdir` creates missing parents.
 - Build error codes: `RECIPE_INVALID` (syntax, schema, unused variables, placeholder errors, unallowed namespace or missing `override`; exit 2), `RECIPE_UNSUPPORTED_VERSION` (recipe format version above supported; exit 5), `RECIPE_OUTPUT_CONFLICT` (duplicate output paths after expansion; exit 2), `RECIPE_VERSION_UNSUPPORTED` (output unsupported by target format, such as `items/` before pack format 46.0; exit 2), `RECIPE_SOURCE_MISSING` (source file or required `vanillaSource` missing; exit 4), `PACK_BUILD_CONFLICT` (output classified as own-modified or foreign; exit 4), `PACK_BROKEN_REFERENCE` (item definition references a missing model; exit 3), `PACK_LOCK_INVALID` (corrupted or unparseable lockfile; exit 4), and `PACK_LOCK_UNSUPPORTED_VERSION` (lockfile format version above supported; exit 5). Resource limits (max 4096 outputs, 256 MiB source bytes, 16M decoded pixels) trigger `RESOURCE_LIMIT_EXCEEDED` (exit 5).
 
 - `--source <path>` saves the editable `.mcpx` text source.
