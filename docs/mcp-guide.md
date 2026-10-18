@@ -844,6 +844,37 @@ version or an illegal namespace is `INVALID_ARGUMENT`. The tool takes no
 mode by the commands that consume it (`PACK_PROJECT_INVALID` naming the
 field, `PACK_PROJECT_NOT_FOUND`, `PACK_PROJECT_UNSUPPORTED_VERSION`).
 
+`build` builds the pack project from its recipes into the pack asset directory structure, tracked by `mc-asset.lock.json`. It requires `projectPath` (path to `mc-asset.pack.json`), plus optional `recipe` (a single recipe file; omitted reads every `*.recipe.json` in `recipeDir` in byte-sorted order) and optional `dryRun`.
+
+Call:
+
+```json
+{"mode":"build","projectPath":"packs/aurelian-forge/mc-asset.pack.json","dryRun":true}
+```
+
+Build execution runs in three stages:
+1. *Parse & Plan*: Reads the project document, recipes, resolved style, lockfile (`mc-asset.lock.json`), and source files; expands variables, resolves palettes, and validates all planned outputs in memory without writing bytes.
+2. *Classify*: Compares each planned output against the lockfile and disk state into four judgements:
+   - `new`: not in lock, not on disk (planned for write).
+   - `own-clean`: in lock with matching output hash (skipped if input hash is unchanged, or planned for rewrite if input hash changed).
+   - `own-modified`: in lock but disk file output hash differs (user-modified conflict).
+   - `foreign`: not in lock but file exists on disk (conflict).
+3. *Write*: Performs safe-output preflights across all targets; if all pass, files are written atomically and `mc-asset.lock.json` is updated atomically.
+
+If any planned output is `own-modified` or `foreign`, the entire batch is refused with `PACK_BUILD_CONFLICT` (code 4) listing all conflicts in `details.conflicts`, writing nothing and leaving the lockfile untouched:
+
+```json
+{"code":"PACK_BUILD_CONFLICT","message":"pack build found conflicting outputs.","details":{"recipeId":"tool-matrix","conflicts":[{"path":"pack/assets/aurelian/textures/item/iron_sword.png","reason":"foreign"}]}}
+```
+
+Result:
+
+```json
+{"mode":"build","recipeId":"tool-matrix","outputs":35,"completed":[],"dryRun":true}
+```
+
+When run without `dryRun`, `completed` lists every path written, and `mc-asset.lock.json` records output hashes to guarantee idempotent subsequent runs.
+
 ## How failures come back
 
 A tool failure sets `isError: true`, and the payload is a JSON string in

@@ -52,7 +52,7 @@ is no `set_pixel` tool on purpose.
 | `mcmeta_asset` | PNG sprite sheet (`animation`) or design sprite (`gui`), mode-specific parameters, version fields | Optional explicit `.mcmeta` output path (`force`, `mkdir`) | Generated `.mcmeta` text and metadata summary (writes file only with `outputPath`) |
 | `compare_assets` | Two same-size PNGs, `image` (`none` / `diff`), `scale` (1–16) | Optional explicit PNG output path (`force`, `mkdir`; only with `image: "diff"`) | Comparison report (dimensions, raw and visible difference counts, bounds) plus optional standard PNG image block (writes file only with `outputPath`) |
 | `style_asset` | Style presets and `.style.json` sources, or one raster image (`lint`), one `mode` (`list` / `show` / `export-palette` / `create` / `lint`) | Optional explicit `.mcpx` path (`export-palette`) or `.style.json` path (`create`) | Preset list, resolved style, palette `.mcpx` text or file, the written style document, or a style report |
-| `pack_asset` | Nothing; one `mode` (`init`) plus a project directory, namespace, and release version | The new project directory and nothing else | Report of the created project skeleton, or a refusal with the conflicting paths |
+| `pack_asset` | Resource pack projects: one `mode` (`init` / `build`), project directory or project path, optional recipe and dryRun | The new project directory (`init`) or generated textures, item definitions, and lockfile (`build`) | Report of the created project skeleton (`init`), or build plan, output classification counts, and write report (`build`) |
 
 ## Input semantics
 
@@ -68,7 +68,7 @@ is no `set_pixel` tool on purpose.
 - Subcommand tools merge CLI modes into a `mode` field: `palette_asset`
   (`extract` / `inspect`), `material_asset` (`list` / `show`),
   `style_asset` (`list` / `show` / `export-palette` / `create` / `lint`),
-  `pack_asset` (`init`),
+  `pack_asset` (`init` / `build`),
   `preview_asset` (`ascii` / `palette-map` / `scale` / `nine-slice`),
   `animate_asset` (`pack` / `sweep` / `unpack` / `reorder` / `resize` /
   `validate` / `preview`).
@@ -126,6 +126,7 @@ is no `set_pixel` tool on purpose.
   `PACK_PROJECT_INVALID` naming the field, an unreadable path is
   `PACK_PROJECT_NOT_FOUND`, and a newer `formatVersion` is
   `PACK_PROJECT_UNSUPPORTED_VERSION`.
+- `pack_asset` in `build` mode executes recipe-driven asset builds for a resource pack project (§10.2). It requires `projectPath` (pointing to `mc-asset.pack.json`), and accepts optional `recipe` (a single recipe file; omitted reads every `*.recipe.json` in `recipeDir` in byte-sorted order) and optional `dryRun` (boolean). It executes the three-stage build: memory-only parse and planning, output classification against `mc-asset.lock.json` and disk state (`new`, `own-clean`, `own-modified`, `foreign`), and atomic writes followed by updating `mc-asset.lock.json`. If any planned output is `own-modified` or `foreign`, the call is refused with `PACK_BUILD_CONFLICT` and `details.conflicts`, writing nothing. Lockfile errors raise `PACK_LOCK_INVALID` or `PACK_LOCK_UNSUPPORTED_VERSION`, recipe errors raise `RECIPE_INVALID`, `RECIPE_UNSUPPORTED_VERSION`, `RECIPE_OUTPUT_CONFLICT`, `RECIPE_VERSION_UNSUPPORTED`, or `RECIPE_SOURCE_MISSING`. With `dryRun: true`, planning and classification run without writing files or updating the lockfile. The result reports `mode: "build"`, `recipeId`, `outputs` count, `completed` list, and `dryRun`.
 - `apply_asset_operations` takes an array of operation objects, each
   with a `type` (the Core batch vocabulary: the nine pixel operations
   `setPixel`, `clearPixel`, `drawLine`, `drawRect`, `fillRect`,
@@ -234,7 +235,7 @@ is no `set_pixel` tool on purpose.
   In `style_asset`, `list` and `show` are read-only; `export-palette` and
   `create` write only to their explicit output path, and the style sources
   they read stay unchanged. `pack_asset` writes a new project directory
-  once and never rewrites it.
+  once (`init`), or builds generated textures and updates `mc-asset.lock.json` (`build`).
 - Validation reports carry `coverage: {status, skipped}`; `partial`
   lists each skipped check with its kind and reason, and never changes
   the exit code.

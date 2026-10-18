@@ -6,11 +6,31 @@
  */
 
 export {
+	type BuildOutputJudgement,
+	type BuildOutputPlan,
+	executePackBuild,
+	type PackBuildPlan,
+	planPackBuild,
+} from "./build.ts";
+export {
 	initializePackProject,
 	planPackInit,
 	resolvePackInitVersion,
 } from "./init.ts";
-export { loadPackProject, parsePackProjectText } from "./load.ts";
+export {
+	type LockDocument,
+	type LockEntry,
+	parseLockText,
+	serializeLockText,
+} from "./lock.ts";
+export {
+	expandRecipeTargets,
+	parseRecipeText,
+	type RecipeDocument,
+	type RecipeSource,
+	type RecipeStep,
+	type RecipeTarget,
+} from "./recipe.ts";
 export {
 	buildPlaceholderIcon,
 	compareCodeUnits,

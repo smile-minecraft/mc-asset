@@ -691,3 +691,34 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 ```
 
 项目目录本身或其下任何位置是符号链接时是 `FILESYSTEM_ERROR`，而且永远不会穿过链接写入；未知的发布版本或非法命名空间是 `INVALID_ARGUMENT`。这个工具没有 `force` 也没有 `mkdir`；它写出的项目文件由后续命令以严格模式读取（`PACK_PROJECT_INVALID` 带字段路径、`PACK_PROJECT_NOT_FOUND`、`PACK_PROJECT_UNSUPPORTED_VERSION`）。
+
+`build` 按配方将素材构建到资源包目录结构中，并以 `mc-asset.lock.json` 追踪产物。需要 `projectPath`（必填，指向 `mc-asset.pack.json`），另有可选的 `recipe`（单个配方文件；省略时按文件名字节序读取 `recipeDir` 下所有 `*.recipe.json`）与可选的 `dryRun`。
+
+调用：
+
+```json
+{"mode":"build","projectPath":"packs/aurelian-forge/mc-asset.pack.json","dryRun":true}
+```
+
+构建采用三段式执行：
+1. *解析与计划*：读取项目文件、配方、风格、lock 文件（`mc-asset.lock.json`）与源文件；在内存中完成变量展开、调色板映射与全部校验，不写入任何字节。
+2. *分类*：将每个预定产物比对 lock 文件与磁盘现况，划入四类：
+   - `new`：未记录且磁盘无文件（预定写入）。
+   - `own-clean`：已记录且输出哈希相符（输入未变则跳过，输入变更则预定重写）。
+   - `own-modified`：已记录但磁盘文件被修改（用户修改冲突）。
+   - `foreign`：未记录但磁盘已有文件（外部文件冲突）。
+3. *写入*：先对全部目标执行 safe-output 预检；全部通过后才原子写入各文件，最后再原子更新 `mc-asset.lock.json`。
+
+若有任何产物属于 `own-modified` 或 `foreign`，整批以 `PACK_BUILD_CONFLICT`（code 4）拒绝，在 `details.conflicts` 完整列出冲突路径，一个字节都不写且 lock 文件保持原样：
+
+```json
+{"code":"PACK_BUILD_CONFLICT","message":"pack build found conflicting outputs.","details":{"recipeId":"tool-matrix","conflicts":[{"path":"pack/assets/aurelian/textures/item/iron_sword.png","reason":"foreign"}]}}
+```
+
+结果：
+
+```json
+{"mode":"build","recipeId":"tool-matrix","outputs":35,"completed":[],"dryRun":true}
+```
+
+未带 `dryRun` 时，`completed` 会列出实际写入的每个路径，并在 `mc-asset.lock.json` 记录输出哈希，确保后续重跑幂等且不重复写入。

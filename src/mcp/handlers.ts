@@ -153,6 +153,7 @@ import type { PixelCanvas, Rect, RGBA } from "../core/types.ts";
 import { validateDimension } from "../core/validate.ts";
 import { decodePng, encodePng, flattenCanvas } from "../io/png.ts";
 import { collectCanvasColors, colorKeyOf, parseMcpx } from "../mcpx/index.ts";
+import { executePackBuild, planPackBuild } from "../pack/build.ts";
 import { initializePackProject } from "../pack/index.ts";
 import { GUI_STRETCH_INNER_FACT, isFactActive } from "../profiles/versions.ts";
 import { buildPaletteMcpx } from "../style/export-palette.ts";
@@ -3006,6 +3007,26 @@ export async function handlePackAsset(
 	args: PackAssetInput,
 ): Promise<McpTextResult> {
 	try {
+		if (args.mode === "build") {
+			if (args.projectPath === undefined || args.projectPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"pack_asset build needs a projectPath.",
+				);
+			}
+			const plan = await planPackBuild(args.projectPath, {
+				recipe: args.recipe,
+				dryRun: args.dryRun,
+			});
+			const executed = await executePackBuild(plan);
+			return textResult({
+				mode: "build",
+				recipeId: plan.recipeId,
+				outputs: plan.outputs,
+				completed: executed.completed,
+				dryRun: plan.dryRun,
+			});
+		}
 		if (args.mode === "init") {
 			if (args.projectDir === undefined || args.projectDir === "") {
 				throw new McAssetError(
@@ -3039,7 +3060,7 @@ export async function handlePackAsset(
 		}
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"pack_asset mode must be init.",
+			"pack_asset mode must be init or build.",
 			{ mode: args.mode },
 		);
 	} catch (error) {

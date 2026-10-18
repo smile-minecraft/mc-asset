@@ -1,4 +1,5 @@
 import { McAssetError } from "../core/errors.ts";
+import { executePackBuild, planPackBuild } from "../pack/build.ts";
 import { initializePackProject, type PackInitRequest } from "../pack/index.ts";
 import { emitCommandFailure } from "./artifacts.ts";
 import {
@@ -18,6 +19,9 @@ import { successEnvelope } from "./envelope.ts";
  */
 
 export interface PackOptions {
+	project?: string | undefined;
+	recipe?: string | undefined;
+	dryRun?: boolean | undefined;
 	namespace?: string | undefined;
 	minecraftVersion?: string | undefined;
 	name?: string | undefined;
@@ -60,6 +64,32 @@ export async function runPack(
 ): Promise<number> {
 	const route = routeStreams({ json: globalJson, stdoutArtifact: false });
 	try {
+		if (mode === "build") {
+			const projectPath = target ?? options.project ?? "./mc-asset.pack.json";
+			const plan = await planPackBuild(projectPath, {
+				recipe: options.recipe,
+				dryRun: options.dryRun,
+			});
+			const executed = await executePackBuild(plan);
+			const result = {
+				command: "pack",
+				mode: "build",
+				recipeId: plan.recipeId,
+				outputs: plan.outputs,
+				completed: executed.completed,
+				dryRun: plan.dryRun,
+			};
+			if (globalJson) {
+				emitEnvelope(successEnvelope(result), streams, route);
+			} else {
+				emitLog(
+					`ok pack build recipe=${plan.recipeId} planned=${plan.outputs.length} completed=${executed.completed.length} dryRun=${plan.dryRun}`,
+					streams,
+					route,
+				);
+			}
+			return 0;
+		}
 		if (mode === "init") {
 			if (target === undefined || target === "") {
 				throw new McAssetError(
@@ -97,7 +127,9 @@ export async function runPack(
 			}
 			return 0;
 		}
-		throw new McAssetError("INVALID_ARGUMENT", "pack takes init.", { mode });
+		throw new McAssetError("INVALID_ARGUMENT", "pack takes init or build.", {
+			mode,
+		});
 	} catch (error) {
 		return emitCommandFailure(streams, route, globalJson, error);
 	}

@@ -876,6 +876,23 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.command("pack")
 		.description("Resource pack projects: skeleton, settings, and checks.");
 	pack
+		.command("build")
+		.description("Build a pack project from its recipe(s).")
+		.option("--project <file>", "Project document (mc-asset.pack.json).")
+		.option("--recipe <file>", "Single recipe file.")
+		.option("--dry-run", "Plan only, write nothing.")
+		.action(async (options: PackOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runPack(
+				"build",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	pack
 		.command("init <dir>")
 		.description(
 			"Write one project skeleton: the project document, the pack root metadata, the placeholder icon, and the resource pack directories.",

@@ -74,6 +74,7 @@
 | `render <grid>` | ASCII Grid 檔（`.grid`） | PNG 和／或 `.mcpx` | 編譯由人或 Agent 撰寫的 ASCII Grid。 |
 | `build [source]` | `.mcpx` 來源檔或 stdin（`--stdin`） | PNG 和／或 `.mcpx` | 將可編輯的來源檔建置成材質，或重新序列化來源。 |
 | `pack init <dir>` | 無 | 專案骨架 | 產生專案檔、資源包根 metadata、佔位圖示與資源包目錄。 |
+| `pack build` | 專案檔（`mc-asset.pack.json`）、配方 | 資源包材質、物品定義與 lock 檔 | 依配方建置資源包專案，並以 lock 檔追蹤產物。 |
 
 ```text
 import <image> [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
@@ -81,6 +82,7 @@ render <grid>  [--output <png>] [--source <mcpx>] [--stdout] [--operations <path
 build  [source] [--stdin] [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
 pack init <dir> --namespace <ns> --minecraft-version <version> [--name <name>] [--description <text>]
        [--style <id|path>] [--resource-pack-version <N>] [--allow-minecraft-namespace]
+pack build [--project <file>] [--recipe <file>] [--dry-run] [--json]
 ```
 
 - `pack init <dir>` 一次預檢後整批寫出骨架：專案根目錄的專案檔 `mc-asset.pack.json`、依目標版本產生的 `pack/pack.mcmeta`、64x64 的 `pack/pack.png` 佔位圖示，以及目錄 `recipes/`、`pack/assets/<ns>/textures/item`、`pack/assets/<ns>/textures/block`、`pack/assets/<ns>/models/item`，資源包格式 46.0 起再多了 `pack/assets/<ns>/items/`。`--namespace` 與 `--minecraft-version` 必填，其餘設定都有預設值（專案名取自目錄名、說明取自專案名、風格為 `vanilla`、輸出目錄為 `pack`、配方目錄為 `recipes`）。
@@ -89,6 +91,13 @@ pack init <dir> --namespace <ns> --minecraft-version <version> [--name <name>] [
 - 每個預定路徑都會在寫入第一個位元組前先讀過。已經存在的路徑會讓整批拒絕，回 `PACK_INIT_CONFLICT` 並附上 `conflicts` 清單（列出所有已存在的相對路徑），所以重跑不會只覆寫一半；專案目錄本身或其下任何位置是符號連結時是 `FILESYSTEM_ERROR`，而且永遠不會寫穿連結。`init` 沒有 `--force` 也沒有 `--mkdir`：專案只建立一次。
 - `namespace: minecraft` 會覆寫遊戲本身的素材，因此需要 `--allow-minecraft-namespace`；沒給時是 `PACK_PROJECT_INVALID`，欄位指向 `namespace`。
 - 佔位圖示是原創的 64x64 圖樣，用整數幾何畫出（棋盤底、帶外框的方板、菱形標記），因此同一次請求永遠寫出相同的位元組。
+- `pack build [--project <file>] [--recipe <file>] [--dry-run]` 依配方建置資源包專案。`--project` 指定專案檔，省略時預設為目前目錄的 `./mc-asset.pack.json`（這是工具鏈中唯一允許的隱含路徑，其餘仍要求明確路徑）。`--recipe` 指定單一配方檔；省略時依檔名字元組序讀取 `recipeDir` 下的所有 `*.recipe.json`。
+- 建置採三段式執行：
+  1. *解析與計畫*：讀取專案檔、配方、解析後的風格、lock 檔（`mc-asset.lock.json`）與來源檔；在記憶體完成變數展開、調色盤映射與所有驗證，不寫入任何位元組。
+  2. *分類*：將每個預定產物比對 lock 檔與磁碟現況，劃入四個分類：`new`（未記錄且不存在；預定寫入）、`own-clean`（已記錄且輸出雜湊相符；輸入未變則跳過，輸入變更則預定重寫）、`own-modified`（已記錄但磁碟檔案遭修改；使用者修改衝突）、`foreign`（未記錄但磁碟已有檔案；外部檔案衝突）。若有任何產物為 `own-modified` 或 `foreign`，整批以 `PACK_BUILD_CONFLICT`（exit 4）拒絕，一個位元組都不寫，並在 `details.conflicts` 完整列出衝突路徑。
+  3. *寫入*：先對全部目標進行 safe-output 唯讀預檢（拒絕符號連結、路徑別名與目錄衝突）；全部通過後才以暫存檔加 rename 原子寫入各檔案，最後再原子更新 `mc-asset.lock.json`。
+- `--dry-run` 執行至分類階段為止，不寫入任何檔案與 lock 檔，僅回報分類統計與預定輸出清單。
+- 建置錯誤碼：`RECIPE_INVALID`（語法、欄位、變數未用或佔位符錯誤；exit 2）、`RECIPE_UNSUPPORTED_VERSION`（配方檔版本過新；exit 5）、`RECIPE_OUTPUT_CONFLICT`（展開後輸出路徑重複；exit 2）、`RECIPE_VERSION_UNSUPPORTED`（目標格式不支援產物，如 46.0 前的物品定義；exit 2）、`RECIPE_SOURCE_MISSING`（來源檔或原版素材目錄不存在；exit 4）、`PACK_BUILD_CONFLICT`（產物分類衝突；exit 4）、`PACK_LOCK_INVALID`（lock 檔損壞；exit 4）、`PACK_LOCK_UNSUPPORTED_VERSION`（lock 檔版本過新；exit 5）。資源預算上限（單次建置輸出最多 4096 檔、來源總計 256 MiB、解碼像素 16M）觸發 `RESOURCE_LIMIT_EXCEEDED`（exit 5）。
 
 - `--source <path>` 會儲存可編輯的 `.mcpx` 文字來源。
 - `--in-place` 直接改寫輸入檔（對該目標等同 force）。
@@ -476,6 +485,14 @@ model preview  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
 | `PACK_PROJECT_INVALID` | 2 | 專案檔欄位未知、不符合型別，或指向跑出專案根的路徑；`pack init` 沒加 `--allow-minecraft-namespace` 卻使用 `minecraft` 命名空間也是這個碼。 | 依訊息中的欄位路徑修正該欄位；`namespace` 的情況則是換一個命名空間，或加上這個明確同意的旗標。 |
 | `PACK_PROJECT_NOT_FOUND` | 2 | 明確指定路徑的專案檔讀不到。 | 檢查路徑；指令不會往父目錄搜尋專案檔。 |
 | `PACK_PROJECT_UNSUPPORTED_VERSION` | 5 | 專案檔的 `formatVersion` 高於工具支援的版本。 | 把 `formatVersion` 設為 1，並依這個版本調整專案檔內容。 |
+| `RECIPE_INVALID` | 2 | 配方檔欄位無效、未知欄位、變數未被任何目標使用，或佔位符語法錯誤。 | 依訊息修正配方 JSON 欄位或移除未使用的變數。 |
+| `RECIPE_UNSUPPORTED_VERSION` | 5 | 配方檔宣告的 `formatVersion` 高於目前支援的版本。 | 將 `formatVersion` 設為 1 並調整為此版本格式。 |
+| `RECIPE_OUTPUT_CONFLICT` | 2 | 配方目標展開後產生重複的輸出路徑。 | 確保所有目標與變數展開後輸出路徑各自唯一。 |
+| `RECIPE_VERSION_UNSUPPORTED` | 2 | 配方步驟產出目標資源包格式不支援的項目（例如 46.0 前的 `items/` 物品定義）。 | 改為相容的目標版本，或為舊版本移除該步驟。 |
+| `RECIPE_SOURCE_MISSING` | 4 | 配方來源檔不存在，或使用 `vanilla` 來源但專案檔未設定 `vanillaSource`。 | 檢查來源路徑，或於 `mc-asset.pack.json` 設定 `vanillaSource`。 |
+| `PACK_BUILD_CONFLICT` | 4 | `pack build` 發現預定輸出遭使用者手動修改（`own-modified`）或未經 lock 記錄而已存在於磁碟（`foreign`）。 | 檢查 details 中的 `conflicts` 清單；將衝突檔案移除或移開後重跑。本次未寫入任何檔案。 |
+| `PACK_LOCK_INVALID` | 4 | `mc-asset.lock.json` 格式錯誤、無法解析，或條目雜湊無效。 | 修復 lock 檔語法，或將其刪除以重新乾淨建置。 |
+| `PACK_LOCK_UNSUPPORTED_VERSION` | 5 | lock 檔宣告的 `formatVersion` 高於目前支援的版本。 | 將 `formatVersion` 設為 1 並調整為此版本格式。 |
 | `PACK_GUI_SCALING_BORDER` | 3 | `validate-pack` 發現某個 GUI 貼圖的九宮格邊框沒有留下中段（判斷方式同 `INVALID_MCMETA`）。 | 縮小該貼圖 `.mcmeta` 裡的邊框。 |
 | `PACK_MCMETA_INVALID` | 3 | 根目錄 `pack.mcmeta` 寫了遊戲拒絕載入的內容：缺少 `pack` 區段或 `pack.description`、`min_format`／`max_format` 只寫一半、負值或上下顛倒的範圍、與宣告範圍不一致的 `supported_formats`、落在宣告 major 之外的舊制 `pack_format`、不合法的 overlay 目錄名，或違反舊格式規則的 overlay `formats` 欄位。 | 把指出的欄位修好（範圍兩端都要能讀、宣告的 major 要一致），或拿掉規則不准寫的舊欄位。 |
 | `PACK_MCMETA_SUSPICIOUS` | 0（警告） | 包照常載入，但寫法疑似失誤：pack 根目錄沒有的 overlay 目錄、完全沒寫版本欄位的 overlay 條目，或落在宣告範圍外的掃描目標。以警告回報，本身不會讓掃描失敗。 | 補上缺少的 overlay 目錄、給該條目一個版本範圍，或把掃描目標改回宣告範圍內。 |

@@ -1273,12 +1273,17 @@ export const TOOL_INPUT_SCHEMAS = {
 			.describe("Create missing parent directories (create)."),
 	},
 	pack_asset: {
-		mode: z.enum(["init"]).describe("Pack subcommand: init."),
+		mode: z.enum(["init", "build"]).describe("Pack subcommand: init or build."),
 		projectDir: z
 			.string()
 			.min(1)
 			.optional()
 			.describe("init only: project directory to create the skeleton in."),
+		projectPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("build only: project document path (mc-asset.pack.json)."),
 		namespace: z
 			.string()
 			.min(1)
@@ -1286,6 +1291,17 @@ export const TOOL_INPUT_SCHEMAS = {
 			.describe(
 				"init only: resource namespace of the pack; lowercase letters, digits, underscore, dot, and dash.",
 			),
+		recipe: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"build only: a single recipe file; omitted reads every *.recipe.json.",
+			),
+		dryRun: z
+			.boolean()
+			.optional()
+			.describe("build only: plan only, write nothing."),
 		minecraftVersion: z
 			.string()
 			.min(1)

@@ -41,6 +41,14 @@ export type ErrorCode =
 	| "PACK_PROJECT_INVALID"
 	| "PACK_PROJECT_UNSUPPORTED_VERSION"
 	| "PACK_INIT_CONFLICT"
+	| "RECIPE_INVALID"
+	| "RECIPE_UNSUPPORTED_VERSION"
+	| "RECIPE_OUTPUT_CONFLICT"
+	| "RECIPE_VERSION_UNSUPPORTED"
+	| "RECIPE_SOURCE_MISSING"
+	| "PACK_BUILD_CONFLICT"
+	| "PACK_LOCK_INVALID"
+	| "PACK_LOCK_UNSUPPORTED_VERSION"
 	| "FILESYSTEM_ERROR"
 	| "OUTPUT_EXISTS"
 	| "MCPX_UNSUPPORTED_VERSION"
@@ -180,6 +188,17 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	// An occupied init target refuses the whole batch and lists every
 	// conflicting path, so the caller clears the run instead of one file.
 	PACK_INIT_CONFLICT: 4,
+	// Recipe documents and the build lock file. Invalid fields and
+	// unsupported output targets refuse before any byte is written; a
+	// newer format version is the only code that exits 5.
+	RECIPE_INVALID: 2,
+	RECIPE_UNSUPPORTED_VERSION: 5,
+	RECIPE_OUTPUT_CONFLICT: 2,
+	RECIPE_VERSION_UNSUPPORTED: 2,
+	RECIPE_SOURCE_MISSING: 4,
+	PACK_BUILD_CONFLICT: 4,
+	PACK_LOCK_INVALID: 4,
+	PACK_LOCK_UNSUPPORTED_VERSION: 5,
 };
 
 export function isErrorCode(value: unknown): value is ErrorCode {
