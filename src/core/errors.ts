@@ -37,6 +37,9 @@ export type ErrorCode =
 	| "STYLE_UNSUPPORTED_VERSION"
 	| "STYLE_INHERITANCE_CYCLE"
 	| "STYLE_FAMILY_NOT_FOUND"
+	| "STYLE_FAMILY_SIZE_DRIFT"
+	| "STYLE_FAMILY_SILHOUETTE_DRIFT"
+	| "STYLE_FAMILY_PALETTE_DRIFT"
 	| "PACK_PROJECT_NOT_FOUND"
 	| "PACK_PROJECT_INVALID"
 	| "PACK_PROJECT_UNSUPPORTED_VERSION"
@@ -181,6 +184,9 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	STYLE_UNSUPPORTED_VERSION: 5,
 	STYLE_INHERITANCE_CYCLE: 2,
 	STYLE_FAMILY_NOT_FOUND: 2,
+	STYLE_FAMILY_SIZE_DRIFT: 2,
+	STYLE_FAMILY_SILHOUETTE_DRIFT: 2,
+	STYLE_FAMILY_PALETTE_DRIFT: 2,
 	// Project documents. An invalid field and an unknown path are refusals;
 	// a newer format version is the one project code that exits 5, because
 	// guessing a newer document would silently change its meaning.

@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import { addLayer, createCanvas, replaceLayerPixels } from "../core/canvas.ts";
+import { buildContactSheet } from "../core/contact-sheet.ts";
 import { McAssetError } from "../core/errors.ts";
 import {
 	deriveNineSliceRegions,
@@ -25,7 +26,7 @@ import {
 	writeArtifactPayloads,
 } from "./artifacts.ts";
 import { buildAsciiDoc, toHex } from "./ascii-doc.ts";
-import { loadEditableCanvas } from "./canvas-input.ts";
+import { loadEditableCanvas, loadRasterCanvas } from "./canvas-input.ts";
 import {
 	emitArtifact,
 	emitEnvelope,
@@ -34,6 +35,7 @@ import {
 	routeStreams,
 } from "./channels.ts";
 import { successEnvelope } from "./envelope.ts";
+import { atomicWriteFile } from "./filesystem.ts";
 import { parseProfile } from "./profiles.ts";
 
 export interface PreviewOptions {
@@ -41,6 +43,11 @@ export interface PreviewOptions {
 	paletteMap?: boolean | undefined;
 	scale?: string | undefined;
 	nineSlice?: boolean | undefined;
+	contactSheet?: boolean | undefined;
+	inputs?: readonly string[] | undefined;
+	columns?: string | undefined;
+	background?: string | undefined;
+	pairMode?: string | undefined;
 	mcmeta?: string | undefined;
 	output?: string | undefined;
 	stdout?: boolean | undefined;
@@ -103,11 +110,13 @@ export async function runPreview(
 	const paletteMap = options.paletteMap === true;
 	const scaled = options.scale !== undefined;
 	const nineSlice = options.nineSlice === true;
+	const contactSheet = options.contactSheet === true;
 	const modeCount =
 		(ascii ? 1 : 0) +
 		(paletteMap ? 1 : 0) +
 		(scaled ? 1 : 0) +
-		(nineSlice ? 1 : 0);
+		(nineSlice ? 1 : 0) +
+		(contactSheet ? 1 : 0);
 	if (modeCount === 0) {
 		const route = routeStreams({ json: globalJson, stdoutArtifact: false });
 		return emitCommandFailure(
@@ -116,7 +125,7 @@ export async function runPreview(
 			globalJson,
 			new McAssetError(
 				"INVALID_ARGUMENT",
-				"preview needs exactly one of --ascii, --palette-map, --scale N, or --nine-slice.",
+				"preview needs exactly one of --ascii, --palette-map, --scale N, --nine-slice, or --contact-sheet.",
 			),
 		);
 	}
@@ -128,7 +137,7 @@ export async function runPreview(
 			globalJson,
 			new McAssetError(
 				"ARGUMENT_CONFLICT",
-				"preview takes exactly one of --ascii, --palette-map, --scale N, or --nine-slice.",
+				"preview takes exactly one of --ascii, --palette-map, --scale N, --nine-slice, or --contact-sheet.",
 			),
 		);
 	}
@@ -143,6 +152,9 @@ export async function runPreview(
 	}
 	if (nineSlice) {
 		return runPreviewNineSlice(input, options, globalJson, streams);
+	}
+	if (contactSheet) {
+		return runPreviewContactSheet(input, options, globalJson, streams);
 	}
 	return runPreviewScale(input, options, globalJson, streams);
 }
@@ -518,6 +530,104 @@ async function runPreviewScale(
 			emitLog(parts.join(" "), streams, route);
 			for (const warning of warnings) {
 				emitLog(`warning [${warning.code}] ${warning.message}`, streams, route);
+			}
+		}
+		return 0;
+	} catch (error) {
+		return emitCommandFailure(streams, route, globalJson, error);
+	}
+}
+
+async function runPreviewContactSheet(
+	input: string | undefined,
+	options: PreviewOptions,
+	globalJson: boolean,
+	streams: OutputStreams,
+): Promise<number> {
+	const route = routeStreams({ json: globalJson, stdoutArtifact: false });
+	try {
+		if (input !== undefined && input !== "") {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				"preview --contact-sheet takes --inputs, not a positional input.",
+			);
+		}
+		const inputPaths = options.inputs ?? [];
+		if (inputPaths.length === 0) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				"preview --contact-sheet needs at least one --inputs path.",
+			);
+		}
+		const canvases = [];
+		for (const p of inputPaths) {
+			const loaded = await loadRasterCanvas(p);
+			canvases.push(loaded.canvas);
+		}
+		const columns =
+			options.columns !== undefined ? Number(options.columns) : undefined;
+		const scale =
+			options.scale !== undefined ? Number(options.scale) : undefined;
+		const background = options.background === "light" ? "light" : "dark";
+		const pairMode = options.pairMode === "sequential" ? "sequential" : "none";
+
+		const report = buildContactSheet({
+			inputs: canvases,
+			names: inputPaths,
+			columns,
+			scale,
+			background,
+			pairMode,
+		});
+
+		if (
+			report.pageCount > 1 &&
+			options.output !== undefined &&
+			!options.output.includes("{page}")
+		) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				"Multi-page contact sheet output path must contain {page}.",
+			);
+		}
+
+		const writtenFiles: string[] = [];
+		for (let i = 0; i < report.pages.length; i += 1) {
+			const page = report.pages[i];
+			if (page === undefined) continue;
+			const pngBytes = encodePng(page.canvas);
+			if (options.output !== undefined) {
+				const target = options.output.includes("{page}")
+					? options.output.replace("{page}", String(i + 1))
+					: options.output;
+				await atomicWriteFile(target, pngBytes, {
+					force: options.force === true,
+					mkdir: options.mkdir === true,
+				});
+				writtenFiles.push(target);
+			} else if (options.stdout === true && i === 0) {
+				emitArtifact(pngBytes, streams, route);
+			}
+		}
+
+		const result = {
+			command: "preview",
+			mode: "contact-sheet",
+			pageCount: report.pageCount,
+			labelFallbacks: report.labelFallbacks,
+			...(writtenFiles.length > 0 ? { files: writtenFiles } : {}),
+		};
+
+		if (globalJson) {
+			emitEnvelope(successEnvelope(result), streams, route);
+		} else {
+			emitLog(
+				`ok preview mode=contact-sheet pages=${report.pageCount} fallbacks=${report.labelFallbacks}`,
+				streams,
+				route,
+			);
+			for (const file of writtenFiles) {
+				emitLog(`output=${file}`, streams, route);
 			}
 		}
 		return 0;

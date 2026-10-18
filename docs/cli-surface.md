@@ -77,6 +77,8 @@ All commands that produce or modify files adhere to strict path and safety rules
 | `pack build` | Project document (`mc-asset.pack.json`), recipes | Resource pack textures, item definitions, and lockfile | Builds a pack project from its recipes, tracking outputs with a lockfile. |
 | `pack catalog` | Vanilla tree containing `assets/` | Read-only texture listing | Lists textures with category, size, animation flag, and mask family. |
 | `pack extract` | Caller-specified client jar | Copied `assets/` files | Extracts only `assets/` entries into an output directory. |
+| `pack check` | Project document (`mc-asset.pack.json`) | Read-only verdict with fix list | Merges pack validation and style measurement with an ordered fix list. |
+| `pack package` | Built pack directory | Reproducible `.zip` | Packages the pack directory into a byte-identical zip. |
 
 ```text
 import <image> [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
@@ -87,6 +89,8 @@ pack init <dir> --namespace <ns> --minecraft-version <version> [--name <name>] [
 pack build [--project <file>] [--recipe <file>] [--dry-run] [--json]
 pack catalog --vanilla <path> [--category <c>] [--page <n>] [--page-size <n>] [--include-families] [--json]
 pack extract --jar <path> --output-dir <dir> [--force] [--mkdir]
+pack check [--project <file>] [--vanilla <path>] [--minecraft-version <v>] [--json]
+pack package [--project <file>] --output <file.zip> [--force] [--mkdir]
 ```
 
 - `pack init <dir>` writes one skeleton in a single preflighted batch: the project document `mc-asset.pack.json` in the project root, `pack/pack.mcmeta` for the pinned target, a 64x64 `pack/pack.png` placeholder icon, and the directories `recipes/`, `pack/assets/<ns>/textures/item`, `pack/assets/<ns>/textures/block`, `pack/assets/<ns>/models/item`, plus `pack/assets/<ns>/items/` from resource pack format 46.0 on. `--namespace` and `--minecraft-version` are required; every other setting has a default (project name from the directory name, description from the name, `vanilla` style, `pack` output directory, `recipes` recipe directory).
@@ -104,6 +108,8 @@ pack extract --jar <path> --output-dir <dir> [--force] [--mkdir]
 - `--dry-run` stops after classification, writing no files and no lockfile, and reports the classification counts and planned outputs.
 - `pack catalog --vanilla <path>` lists the PNG textures under a vanilla tree containing `assets/`. Each entry reports its path, category (the first segment under `textures/`), decoded width and height, whether it is animated (a same-name `.mcmeta` sidecar or an integer aspect ratio taller than wide), and its mask family key (image size plus the SHA-256 of the opaque mask; identical keys share a family whose representative is the byte-smallest path). `--category` filters by exact match, `--page` starts at 1, `--page-size` caps at 1000 entries per page, and `--include-families` adds the family index. A tree without `assets/` or a scan above budget is `PACK_CATALOG_INVALID`.
 - `pack extract --jar <path> --output-dir <dir>` copies only `assets/` entries from a caller-specified client jar. Absolute paths, `..` segments, and encrypted entries are `PACK_ARCHIVE_INVALID`, as is a damaged central directory; entry counts and decompressed bytes follow the existing resource budgets. `--force` allows overwriting and `--mkdir` creates missing parents.
+- `pack check [--project <file>]` merges pack validation with per-texture style measurement. Findings group by code with counts; the fix list orders error codes first, then by descending count, then by code byte order. Each fix entry carries code, level, count, up to three sample paths, and a suggestion. The verdict fails when pack validation fails or any texture hits the color budget error, otherwise warnings stay warnings.
+- `pack package --output <file.zip>` writes the built pack directory as a reproducible zip: project documents, recipe directories, lock files, dot segments, and `__MACOSX` entries never ship; the zip root is `pack.mcmeta`; entries sort by UTF-8 byte order with fixed timestamps. The same output directory packages to identical bytes on every run.
 - Build error codes: `RECIPE_INVALID` (syntax, schema, unused variables, placeholder errors, unallowed namespace or missing `override`; exit 2), `RECIPE_UNSUPPORTED_VERSION` (recipe format version above supported; exit 5), `RECIPE_OUTPUT_CONFLICT` (duplicate output paths after expansion; exit 2), `RECIPE_VERSION_UNSUPPORTED` (output unsupported by target format, such as `items/` before pack format 46.0; exit 2), `RECIPE_SOURCE_MISSING` (source file or required `vanillaSource` missing; exit 4), `PACK_BUILD_CONFLICT` (output classified as own-modified or foreign; exit 4), `PACK_BROKEN_REFERENCE` (item definition references a missing model; exit 3), `PACK_LOCK_INVALID` (corrupted or unparseable lockfile; exit 4), and `PACK_LOCK_UNSUPPORTED_VERSION` (lockfile format version above supported; exit 5). Resource limits (max 4096 outputs, 256 MiB source bytes, 16M decoded pixels) trigger `RESOURCE_LIMIT_EXCEEDED` (exit 5).
 
 - `--source <path>` saves the editable `.mcpx` text source.
@@ -159,6 +165,7 @@ style show <style>
 style export-palette <style> --family <id|all> --output <file.mcpx> [--force] [--mkdir]
 style create --output <file.style.json> --id <id> [--name <name>] [--extends <id|path>] [--force] [--mkdir]
 style lint <path> [--style <id|path>] [--category <name>] [--json]
+style audit <paths...> [--style <id|path>] [--baseline <path>] [--json]
 ```
 
 - `quantize` needs exactly one of `--colors` or `--palette`: both is `ARGUMENT_CONFLICT`, neither is `INVALID_ARGUMENT`. `--palette` takes a builtin material name or an `.mcpx` path (at most 4096 colors, declared `[palette]` order, unused entries included). Each pixel maps to the nearest entry by integer squared RGBA distance; an exact tie takes the earlier entry, and hidden RGB under alpha 0 takes part.
@@ -172,6 +179,8 @@ style lint <path> [--style <id|path>] [--category <name>] [--json]
 - `style export-palette --family <id|all> --output <file.mcpx>` writes a palette document: one row per family and one column per role, `[palette]` in family-then-role order with `.` first as `#00000000`, and `kind = palette`. The result is accepted directly by `quantize --palette` and `generate --palette`. A family the style does not resolve is `STYLE_FAMILY_NOT_FOUND`; without `--output` the command is `OUTPUT_REQUIRED`.
 - `style create` writes `{formatVersion, id, name, extends}` (`extends` defaults to `vanilla`) after the document validates, then writes through the shared output guard: the target must end in `.style.json`, an existing file needs `--force`, a missing parent needs `--mkdir`, and a target may not be the style it extends. The tool never rewrites a style file it did not create; no other command writes one.
 - `style lint <path>` measures one image and compares it against a style (default `vanilla`). It reports `metrics` (opaque pixels, distinct colors, level count, dynamic range, TL-BR light direction, coverage, smallest margin, inside-outline pixels, outline gap and hue offset, hue bins, highlight pixels and ratio, buffer ratio, dither permille, main axis with its second moments, and `firstFrameOnly`), then `findings`. Every finding carries `code`, `level`, `measured`, `threshold`, `message`, and `suggestion`. All findings are warnings except `STYLE_COLOR_BUDGET`, the only code that can turn the run into a failure; the verdict is `pass`, `warnings`, or `fail`, and a `fail` verdict exits 3 like a failing validation. A metric with nothing to compare produces no finding and a `skipped` entry (`no-opaque-pixels`, `animation-first-frame-only`). `--category` applies that category's threshold overrides; without it the category-scoped rules (such as the main-axis angle check) stay quiet. An animation strip is measured as its first frame and says so through `firstFrameOnly`.
+- `style audit <paths...>` compares a texture group of 2 to 256 inputs against one baseline (explicit `--baseline`, or the first input). It reports per-texture sizes, every pair's mask overlap and palette overlap in permille, and the group minima. A size mismatch is `STYLE_FAMILY_SIZE_DRIFT`, the lowest mask overlap below 800 permille is `STYLE_FAMILY_SILHOUETTE_DRIFT`, and the lowest palette overlap below 500 permille is `STYLE_FAMILY_PALETTE_DRIFT`. Outputs follow input order.
+- `preview --contact-sheet` lays inputs out in row-major order: each cell holds one image scaled by the nearest integer plus a label band below it. The band is 8 pixels tall (scaled with the image) and uses the original 5x7 pixel font, one 6-pixel advance per character; the text is the file stem, truncated with an ellipsis when too wide, and characters the font lacks render as `?` with a `labelFallbacks` count. The background is `dark` (`#373737` sheet, `#C6C6C6` text) or `light` (swapped). `pairMode: sequential` places two inputs side by side in one cell. Every page stays within 1024x1024; overflow paginates in input order, and multi-page output requires `{page}` in the output path (`INVALID_ARGUMENT` otherwise). One input still lays a single cell; zero inputs are `INVALID_ARGUMENT`.
 - A style file is read in strict mode: an unknown field, a value outside its enumeration, or a color that is not `#RRGGBB` is `STYLE_INVALID` naming the field path (for example `palettes.stone.base: expected #RRGGBB, got "#12345"`). A file that cannot be read or parsed, a `formatVersion` above the supported one (`STYLE_UNSUPPORTED_VERSION`), an `extends` cycle (`STYLE_INHERITANCE_CYCLE`), an id that reuses a builtin name, and an unknown builtin id (`STYLE_NOT_FOUND`) each carry the document path, the field path, and the chain.
 
 ---
@@ -197,7 +206,7 @@ pixelize <image> --size <N|WxH> [--preset <item|block|gui|particle|generic>] <fi
 |---|---|---|---|
 | `tile <input>` | PNG, JPEG, WebP, `.mcpx` | Report only, or PNG | Seam analysis, edge repetition analysis, or tile fix/preview. |
 | `generate <pattern>` | None | PNG and/or `.mcpx` | Deterministic procedural texture generator. |
-| `preview <input>` | PNG, JPEG, WebP, `.mcpx` | Report only, or PNG | ASCII preview, palette map, 9-slice guide, or nearest upscale. |
+| `preview <input>` | PNG, JPEG, WebP, `.mcpx` | Report only, or PNG | ASCII preview, palette map, 9-slice guide, nearest upscale, or contact sheet. |
 | `gui-scale <input>` | PNG, JPEG, WebP, `.mcpx` | PNG | Scales a GUI sprite to an explicit target size with the mcmeta stretch/tile/nine_slice mapping. |
 
 ```text
@@ -207,6 +216,8 @@ generate <pattern> --size <N|WxH> --palette <name|path> --seed <int>
                   [--output <png>] [--source <mcpx>] [--stdout] <file flags>
 preview  <input> --ascii | --palette-map | --scale <N> | --nine-slice --mcmeta <path>
                   [--output <png>] [--stdout] <file flags>
+preview  --contact-sheet --inputs <paths...> [--columns <n>] [--background <name>]
+                  [--pair-mode <mode>] [--output <png> | --stdout] <file flags>
 gui-scale <input> --size <N|WxH> [--mcmeta <path>]
                   [--minecraft-version <v>|--resource-pack-version <f>]
                   [--output <png>] [--stdout] <file flags>

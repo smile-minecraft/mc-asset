@@ -64,6 +64,7 @@ import {
 	detectCleanup,
 	fixCleanup,
 } from "../core/cleanup.ts";
+import { buildContactSheet } from "../core/contact-sheet.ts";
 import { McAssetError } from "../core/errors.ts";
 import {
 	createFrameSet,
@@ -155,9 +156,12 @@ import { decodePng, encodePng, flattenCanvas } from "../io/png.ts";
 import { collectCanvasColors, colorKeyOf, parseMcpx } from "../mcpx/index.ts";
 import { executePackBuild, planPackBuild } from "../pack/build.ts";
 import { catalogVanillaTextures } from "../pack/catalog.ts";
+import { checkResourcePack } from "../pack/check.ts";
 import { extractVanillaJar } from "../pack/extract.ts";
 import { initializePackProject } from "../pack/index.ts";
+import { packageResourcePack } from "../pack/package.ts";
 import { GUI_STRETCH_INNER_FACT, isFactActive } from "../profiles/versions.ts";
+import { auditTextureFamily } from "../style/audit.ts";
 import { buildPaletteMcpx } from "../style/export-palette.ts";
 import { lintStyle } from "../style/lint.ts";
 import { resolveStyle } from "../style/load.ts";
@@ -1969,6 +1973,12 @@ export async function handlePreviewAsset(
 	try {
 		const profile = parseProfile(args.profile);
 		if (args.mode === "ascii" || args.mode === "palette-map") {
+			if (args.inputPath === undefined || args.inputPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					`preview_asset ${args.mode} mode needs inputPath.`,
+				);
+			}
 			const loaded = await loadEditableCanvas(args.inputPath);
 			const warnings: WarningNote[] = [...loaded.warnings];
 			const canvas = loaded.canvas;
@@ -2046,6 +2056,12 @@ export async function handlePreviewAsset(
 			if (args.outputPngPath !== undefined) {
 				assertMinecraftOutputPath(profile, args.outputPngPath);
 			}
+			if (args.inputPath === undefined || args.inputPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"preview_asset scale mode needs inputPath.",
+				);
+			}
 			const loaded = await loadEditableCanvas(args.inputPath);
 			const warnings: WarningNote[] = [...loaded.warnings];
 			const canvas = loaded.canvas;
@@ -2071,6 +2087,12 @@ export async function handlePreviewAsset(
 			});
 		}
 		if (args.mode === "nine-slice") {
+			if (args.inputPath === undefined || args.inputPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"preview_asset nine-slice mode needs inputPath.",
+				);
+			}
 			const mcmetaPath = args.mcmetaPath;
 			if (mcmetaPath === undefined || mcmetaPath === "") {
 				throw new McAssetError(
@@ -2166,9 +2188,71 @@ export async function handlePreviewAsset(
 					: { pngBase64: pngBase64(pngBytes) }),
 			});
 		}
+		if (args.mode === "contact-sheet") {
+			if (args.inputPath !== undefined && args.inputPath !== "") {
+				throw new McAssetError(
+					"ARGUMENT_CONFLICT",
+					"preview_asset contact-sheet takes inputPaths, not inputPath.",
+				);
+			}
+			const inputPaths = args.inputPaths ?? [];
+			if (inputPaths.length === 0) {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"preview_asset contact-sheet needs inputPaths.",
+				);
+			}
+			const canvases = [];
+			for (const p of inputPaths) {
+				const loaded = await loadRasterCanvas(p);
+				canvases.push(loaded.canvas);
+			}
+			const report = buildContactSheet({
+				inputs: canvases,
+				names: inputPaths,
+				columns: args.columns,
+				scale: args.scale,
+				background: args.background,
+				pairMode: args.pairMode,
+			});
+			if (
+				report.pageCount > 1 &&
+				args.outputPngPath !== undefined &&
+				!args.outputPngPath.includes("{page}")
+			) {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"Multi-page contact sheet outputPngPath must contain {page}.",
+				);
+			}
+			const pages = [];
+			for (let i = 0; i < report.pages.length; i += 1) {
+				const page = report.pages[i];
+				if (page === undefined) continue;
+				const pngBytes = encodePng(page.canvas);
+				if (args.outputPngPath !== undefined) {
+					const target = args.outputPngPath.includes("{page}")
+						? args.outputPngPath.replace("{page}", String(i + 1))
+						: args.outputPngPath;
+					await writeMcpArtifact(target, pngBytes);
+					pages.push({ path: target, labelFallbacks: page.labelFallbacks });
+				} else {
+					pages.push({
+						pngBase64: pngBase64(pngBytes),
+						labelFallbacks: page.labelFallbacks,
+					});
+				}
+			}
+			return textResult({
+				mode: "contact-sheet",
+				pageCount: report.pageCount,
+				labelFallbacks: report.labelFallbacks,
+				pages,
+			});
+		}
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"preview_asset mode must be ascii, palette-map, scale, or nine-slice.",
+			"preview_asset mode must be ascii, palette-map, scale, nine-slice, or contact-sheet.",
 			{ mode: args.mode },
 		);
 	} catch (error) {
@@ -2987,9 +3071,29 @@ export async function handleStyleAsset(
 			});
 			return textResult({ ...report });
 		}
+		if (args.mode === "audit") {
+			const inputPaths = args.inputPaths ?? [];
+			if (inputPaths.length < 2) {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"style_asset audit requires at least two inputPaths.",
+				);
+			}
+			const canvases = [];
+			for (const p of inputPaths) {
+				const loaded = await loadRasterCanvas(p);
+				canvases.push(loaded.canvas);
+			}
+			const report = auditTextureFamily({
+				inputs: canvases,
+				names: inputPaths,
+				baselinePath: args.baselinePath,
+			});
+			return textResult({ mode: "audit", ...report });
+		}
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"style_asset mode must be list, show, export-palette, create, or lint.",
+			"style_asset mode must be list, show, export-palette, create, lint, or audit.",
 			{ mode: args.mode },
 		);
 	} catch (error) {
@@ -3097,9 +3201,43 @@ export async function handlePackAsset(
 			});
 			return textResult({ mode: "extract", ...extracted });
 		}
+		if (args.mode === "check") {
+			if (args.projectPath === undefined || args.projectPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"pack_asset check needs a projectPath.",
+				);
+			}
+			const summary = await checkResourcePack({
+				projectPath: args.projectPath,
+				vanillaPath: args.vanillaPath,
+			});
+			return textResult({ mode: "check", ...summary });
+		}
+		if (args.mode === "package") {
+			if (args.projectPath === undefined || args.projectPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"pack_asset package needs a projectPath.",
+				);
+			}
+			if (args.outputPath === undefined || args.outputPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"pack_asset package needs an outputPath.",
+				);
+			}
+			const report = await packageResourcePack({
+				projectPath: args.projectPath,
+				outputPath: args.outputPath,
+				force: args.force,
+				mkdir: args.mkdir,
+			});
+			return textResult({ mode: "package", ...report });
+		}
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"pack_asset mode must be init, build, catalog, or extract.",
+			"pack_asset mode must be init, build, catalog, extract, check, or package.",
 			{ mode: args.mode },
 		);
 	} catch (error) {

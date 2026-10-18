@@ -536,8 +536,8 @@ Result (verbatim; `pngBase64` and the grid are truncated — the full
 ### preview_asset
 
 Read-only previews in one `mode`: `ascii` and `palette-map` return
-reports, while `scale` and `nine-slice` can write a PNG to an explicit
-path. The call below is the `ascii` report over `sword.mcpx`.
+reports, while `scale`, `nine-slice`, and `contact-sheet` can write a PNG
+to an explicit path. The call below is the `ascii` report over `sword.mcpx`.
 
 Call:
 
@@ -550,6 +550,15 @@ Result (verbatim):
 ```text
 {"mode":"ascii","profile":"generic","width":4,"height":4,"ascii":["[palette]",". = #00000000","R = #FF0000FF","G = #00FF00FF","","[grid]",".RR.","RGGR","RGGR",".RR."],"palette":{".":"#00000000","R":"#FF0000FF","G":"#00FF00FF"},"warnings":[]}
 ```
+
+`contact-sheet` lays `inputPaths` out in row-major order with a label band
+under each image; `inputPath` must be omitted when `inputPaths` is given
+(both is `ARGUMENT_CONFLICT`, neither `inputPaths` nor `inputPath` for
+`contact-sheet` is `INVALID_ARGUMENT`). The band is 8 pixels tall with the
+original 5x7 pixel font, over a `dark` or `light` background
+(`pairMode: sequential` places two inputs side by side in one cell). Every
+page stays within 1024x1024 with overflow paginating in input order, and
+multi-page output requires `{page}` in the output path.
 
 ### scale_gui_asset
 
@@ -799,6 +808,19 @@ threshold overrides, and an animation strip is measured as its first frame
 (`firstFrameOnly: true`). `analyze_asset` reports the same measurement
 block under `styleMetrics`; its other fields are unchanged.
 
+`audit` compares a texture group of 2 to 256 inputs against one baseline
+(`baselinePath`, or the first input):
+
+```json
+{"mode":"audit","inputPaths":["a.png","b.png","c.png"],"baselinePath":"a.png"}
+```
+
+The report carries per-texture sizes, every pair's mask overlap and palette
+overlap in permille, and the group minima. A size mismatch is
+`STYLE_FAMILY_SIZE_DRIFT`, the lowest mask overlap below 800 permille is
+`STYLE_FAMILY_SILHOUETTE_DRIFT`, and the lowest palette overlap below 500
+permille is `STYLE_FAMILY_PALETTE_DRIFT`.
+
 ### pack_asset
 
 Creates one resource pack project. `init` takes `projectDir`,
@@ -892,6 +914,22 @@ Each entry reports path, category, decoded size, animation flag (same-name `.mcm
 ```
 
 Absolute paths, `..` segments, and encrypted entries are `PACK_ARCHIVE_INVALID`, as is a damaged central directory. The result reports the extracted file count and byte total.
+
+`check` merges pack validation with per-texture style measurement:
+
+```json
+{"mode":"check","projectPath":"packs/aurelian-forge/mc-asset.pack.json"}
+```
+
+Findings group by code with counts; the fix list orders error codes first, then by descending count, then by code byte order. The verdict fails when pack validation fails or any texture hits the color budget error, otherwise warnings stay warnings.
+
+`package` writes the built pack directory as a reproducible zip:
+
+```json
+{"mode":"package","projectPath":"packs/aurelian-forge/mc-asset.pack.json","outputPath":"aurelian-forge.zip"}
+```
+
+Project documents, recipe directories, lock files, dot segments, and `__MACOSX` entries never ship; the zip root is `pack.mcmeta`; entries sort by UTF-8 byte order with fixed timestamps. The same output directory packages to identical bytes on every run.
 
 ## How failures come back
 

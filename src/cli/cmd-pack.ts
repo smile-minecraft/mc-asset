@@ -1,8 +1,10 @@
 import { McAssetError } from "../core/errors.ts";
 import { executePackBuild, planPackBuild } from "../pack/build.ts";
 import { catalogVanillaTextures } from "../pack/catalog.ts";
+import { checkResourcePack } from "../pack/check.ts";
 import { extractVanillaJar } from "../pack/extract.ts";
 import { initializePackProject, type PackInitRequest } from "../pack/index.ts";
+import { packageResourcePack } from "../pack/package.ts";
 import { emitCommandFailure } from "./artifacts.ts";
 import {
 	emitEnvelope,
@@ -182,9 +184,52 @@ export async function runPack(
 			}
 			return 0;
 		}
-		throw new McAssetError("INVALID_ARGUMENT", "pack takes init or build.", {
-			mode,
-		});
+		if (mode === "check") {
+			const projectPath = options.project ?? "./mc-asset.pack.json";
+			const summary = await checkResourcePack({
+				projectPath,
+				vanillaPath: options.vanilla,
+			});
+			const result = { command: "pack", mode: "check", ...summary };
+			if (globalJson) {
+				emitEnvelope(successEnvelope(result), streams, route);
+			} else {
+				emitLog(
+					`ok pack check verdict=${summary.verdict} groups=${summary.groups.length} fixes=${summary.fixList.length}`,
+					streams,
+					route,
+				);
+			}
+			return summary.verdict === "fail" ? 3 : 0;
+		}
+		if (mode === "package") {
+			const projectPath = options.project ?? "./mc-asset.pack.json";
+			const output = requiredFlag(options.output, "--output");
+			const report = await packageResourcePack({
+				projectPath,
+				outputPath: output,
+				force: options.force,
+				mkdir: options.mkdir,
+			});
+			const result = { command: "pack", mode: "package", ...report };
+			if (globalJson) {
+				emitEnvelope(successEnvelope(result), streams, route);
+			} else {
+				emitLog(
+					`ok pack package output=${report.outputPath} files=${report.fileCount} bytes=${report.totalBytes}`,
+					streams,
+					route,
+				);
+			}
+			return 0;
+		}
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			"pack takes init, build, catalog, extract, check, or package.",
+			{
+				mode,
+			},
+		);
 	} catch (error) {
 		return emitCommandFailure(streams, route, globalJson, error);
 	}

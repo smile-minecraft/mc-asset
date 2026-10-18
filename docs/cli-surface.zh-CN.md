@@ -77,6 +77,8 @@
 | `pack build` | 项目文件（`mc-asset.pack.json`）、配方 | 资源包贴图、物品定义与 lock 文件 | 按配方构建资源包项目，并以 lock 文件追踪产物。 |
 | `pack catalog` | 含 `assets/` 的原版资源树 | 只读贴图列表 | 列出贴图的分类、尺寸、动画标记与遮罩家族。 |
 | `pack extract` | 调用方指定的客户端 jar | 复制出的 `assets/` 文件 | 只取出 `assets/` 之下条目到输出目录。 |
+| `pack check` | 项目文件（`mc-asset.pack.json`） | 附修复列表的只读判定 | 合并资源包验证与风格检查，并生成有序修复列表。 |
+| `pack package` | 已构建的资源包目录 | 可重现的 `.zip` | 将资源包目录打包为逐字节相同的 zip 文件。 |
 
 ```text
 import <image> [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
@@ -87,6 +89,8 @@ pack init <dir> --namespace <ns> --minecraft-version <version> [--name <name>] [
 pack build [--project <file>] [--recipe <file>] [--dry-run] [--json]
 pack catalog --vanilla <path> [--category <c>] [--page <n>] [--page-size <n>] [--include-families] [--json]
 pack extract --jar <path> --output-dir <dir> [--force] [--mkdir]
+pack check [--project <file>] [--vanilla <path>] [--minecraft-version <v>] [--json]
+pack package [--project <file>] --output <file.zip> [--force] [--mkdir]
 ```
 
 - `pack init <dir>` 一次预检后整批写出骨架：项目根目录的项目文件 `mc-asset.pack.json`、按目标版本生成的 `pack/pack.mcmeta`、64x64 的 `pack/pack.png` 占位图标，以及目录 `recipes/`、`pack/assets/<ns>/textures/item`、`pack/assets/<ns>/textures/block`、`pack/assets/<ns>/models/item`，资源包格式 46.0 起再加上 `pack/assets/<ns>/items/`。`--namespace` 与 `--minecraft-version` 必填，其余设置都有默认值（项目名取自目录名、说明取自项目名、风格为 `vanilla`、输出目录为 `pack`、配方目录为 `recipes`）。
@@ -104,6 +108,8 @@ pack extract --jar <path> --output-dir <dir> [--force] [--mkdir]
 - `--dry-run` 执行至分类阶段为止，不写入任何文件与 lock 文件，仅报告分类统计与预定输出列表。
 - `pack catalog --vanilla <path>` 列出原版资源树下含 `assets/` 的 PNG 贴图。每条报告路径、分类（`textures/` 下第一段）、解码宽高、是否动画（同名 `.mcmeta` 或高宽比为整数倍且高大于宽），以及遮罩家族键（尺寸加不透明遮罩的 SHA-256；相同键属同一家族，代表为路径字节序最小者）。`--category` 精确匹配，`--page` 从 1 起算，`--page-size` 每页至多 1000 条，`--include-families` 附上家族索引。缺 `assets/` 或超出扫描预算报 `PACK_CATALOG_INVALID`。
 - `pack extract --jar <path> --output-dir <dir>` 只取出调用方指定 jar 内的 `assets/` 条目。绝对路径、`..` 片段与加密条目报 `PACK_ARCHIVE_INVALID`，中央目录损坏亦同；条目数与解压字节沿用既有资源预算。`--force` 允许覆盖，`--mkdir` 创建缺失的父目录。
+- `pack check [--project <file>]` 合并资源包验证与逐贴图风格度量。发现项目按代码计数分组；修复列表由 error 排在最前，其次按出现次数降序、代码字节序排序。每条条目含 code、level、count、最多三条 samplePaths 与建议。整包验证失败或有色彩预算超额时判定为 fail，其余 warning 保持原样。
+- `pack package --output <file.zip>` 将已构建的资源包目录打包为可重现的 zip 文件：项目文件、配方目录、lock 文件、点开头路径段与 `__MACOSX` 条目绝不打包；zip 根目录为 `pack.mcmeta`；条目按 UTF-8 字节序排序并使用固定时间戳。相同输出目录重复运行保证产生逐字节相同的 zip。
 - 构建错误码：`RECIPE_INVALID`（语法、字段、变量未用、占位符错误、不允许的命名空间或缺少 `override`；exit 2）、`RECIPE_UNSUPPORTED_VERSION`（配方文件版本过新；exit 5）、`RECIPE_OUTPUT_CONFLICT`（展开后输出路径重复；exit 2）、`RECIPE_VERSION_UNSUPPORTED`（目标格式不支持产物，如 46.0 前的物品定义；exit 2）、`RECIPE_SOURCE_MISSING`（源文件或原版素材目录不存在；exit 4）、`PACK_BUILD_CONFLICT`（产物分类冲突；exit 4）、`PACK_BROKEN_REFERENCE`（物品定义引用不存在模型；exit 3）、`PACK_LOCK_INVALID`（lock 文件损坏；exit 4）、`PACK_LOCK_UNSUPPORTED_VERSION`（lock 文件版本过新；exit 5）。资源预算上限（单次构建输出最多 4096 文件、源文件总计 256 MiB、解码像素 16M）触发 `RESOURCE_LIMIT_EXCEEDED`（exit 5）。
 
 - `--source <path>` 会保存可编辑的 `.mcpx` 文本源码。
@@ -159,6 +165,7 @@ style show <style>
 style export-palette <style> --family <id|all> --output <file.mcpx> [--force] [--mkdir]
 style create --output <file.style.json> --id <id> [--name <name>] [--extends <id|path>] [--force] [--mkdir]
 style lint <path> [--style <id|path>] [--category <name>] [--json]
+style audit <paths...> [--style <id|path>] [--baseline <path>] [--json]
 ```
 
 - `quantize` 必须恰好给出 `--colors` 或 `--palette` 之一：两者并用是 `ARGUMENT_CONFLICT`，都没给是 `INVALID_ARGUMENT`。`--palette` 接受内置材质名或 `.mcpx` 路径（最多 4096 色，按声明顺序，含未使用项）。每个像素按整数 RGBA 平方距离映射到最近的项；距离相同取靠前的项，alpha 为 0 的隐藏 RGB 也参与。
@@ -172,6 +179,8 @@ style lint <path> [--style <id|path>] [--category <name>] [--json]
 - `style export-palette --family <id|all> --output <file.mcpx>` 写出调色板文档：每行一个家族、每列一个角色，`[palette]` 按家族再按角色排序、`.` 排在最前对应 `#00000000`，并带 `kind = palette`。输出可直接喂给 `quantize --palette` 与 `generate --palette`。指定解析后不存在的家族是 `STYLE_FAMILY_NOT_FOUND`；没给 `--output` 则是 `OUTPUT_REQUIRED`。
 - `style create` 先让文档通过校验，再写出 `{formatVersion, id, name, extends}`（`extends` 默认为 `vanilla`），写入同样走共用输出保护：目标必须以 `.style.json` 结尾、已有文件需要 `--force`、父目录不存在需要 `--mkdir`，而且目标不得是它继承的来源。工具不会改写自己没有创建的风格文件，其他命令也不会写风格文件。
 - `style lint <path>` 会度量一张图片并对照指定风格（默认 `vanilla`）。报告先给 `metrics`（不透明像素数、不同颜色数、明度级数、动态范围、TL-BR 光向、覆盖率、最小边距、内侧外框像素数、外框明度差与色相差、色相箱、高光像素数与比例、缓冲率、抖动比例、主轴及其二阶矩、`firstFrameOnly`），再给 `findings`。每条 finding 都带 `code`、`level`、`measured`、`threshold`、`message` 与 `suggestion`。除 `STYLE_COLOR_BUDGET` 外全部是 warning，而它也是唯一能让本次运行失败的码；判定为 `pass`、`warnings` 或 `fail`，`fail` 的退出码与验证失败相同（3）。没有可比较对象的指标不产生 finding，只在 `skipped` 加一条（`no-opaque-pixels`、`animation-first-frame-only`）。`--category` 会套用该分类的阈值覆盖；未指定时，分类层级的规则（例如主轴角度）不检查。动画竖条只度量第一帧，并以 `firstFrameOnly` 标示。
+- `style audit <paths...>` 比对 2 到 256 张贴图组与基准（`--baseline`，或默认第一张）。报告各贴图尺寸、每对的遮罩重叠率与色板重叠率（千分率），以及全组最小值。尺寸不符报 `STYLE_FAMILY_SIZE_DRIFT`，遮罩重叠率低于 800‰ 报 `STYLE_FAMILY_SILHOUETTE_DRIFT`，色板重叠率低于 500‰ 报 `STYLE_FAMILY_PALETTE_DRIFT`。输出顺序与输入一致。
+- `preview --contact-sheet` 按顺序排布输入图像：每格包含一张按最近邻整数放大的图片及下方标签带。标签带高 8 像素（随图片放大）并使用原创 5x7 点阵字体（每字符宽 6 像素含间距）；文件名去扩展名，过长则截断加省略号，缺字以 `?` 替代并计入 `labelFallbacks`。底色可选 `dark`（`#373737`，文字 `#C6C6C6`）或 `light`（对调）。`pairMode: sequential` 将相邻两图并排于同一格。单页尺寸上限 1024x1024，超额时按输入顺序自动分页，多页输出需在路径中提供 `{page}`（否则返回 `INVALID_ARGUMENT`）。单图照排单格；零输入返回 `INVALID_ARGUMENT`。
 - 风格文件以严格模式读取：未知字段、枚举外的值，或不是 `#RRGGBB` 的颜色都是 `STYLE_INVALID`，并带字段路径（例如 `palettes.stone.base: expected #RRGGBB, got "#12345"`）。读不到或解析失败的文件、版本高于支持范围的 `formatVersion`（`STYLE_UNSUPPORTED_VERSION`）、`extends` 循环（`STYLE_INHERITANCE_CYCLE`）、`id` 撞到内置预设名称，以及查不到的内置 id（`STYLE_NOT_FOUND`），都会带上文件路径、字段路径与解析链。
 
 ---
@@ -197,7 +206,7 @@ pixelize <image> --size <N|WxH> [--preset <item|block|gui|particle|generic>] <fi
 |---|---|---|---|
 | `tile <input>` | PNG、JPEG、WebP、`.mcpx` | 仅报告，或 PNG | 接缝分析、边缘重复分析，或平铺修复与预览。 |
 | `generate <pattern>` | 无 | PNG 和／或 `.mcpx` | 确定性的程序化贴图生成器。 |
-| `preview <input>` | PNG、JPEG、WebP、`.mcpx` | 仅报告，或 PNG | ASCII 预览、调色板映射、九宫格参考线，或最近邻放大。 |
+| `preview <input>` | PNG、JPEG、WebP、`.mcpx` | 仅报告，或 PNG | ASCII 预览、调色板映射、九宫格参考线、最近邻放大，或总览图。 |
 | `gui-scale <input>` | PNG、JPEG、WebP、`.mcpx` | PNG | 以 mcmeta 的 stretch／tile／nine_slice 映射，把 GUI 精灵图缩放到明确的目标尺寸。 |
 
 ```text
@@ -207,6 +216,8 @@ generate <pattern> --size <N|WxH> --palette <name|path> --seed <int>
                   [--output <png>] [--source <mcpx>] [--stdout] <file flags>
 preview  <input> --ascii | --palette-map | --scale <N> | --nine-slice --mcmeta <path>
                   [--output <png>] [--stdout] <file flags>
+preview  --contact-sheet --inputs <paths...> [--columns <n>] [--background <name>]
+                  [--pair-mode <mode>] [--output <png> | --stdout] <file flags>
 gui-scale <input> --size <N|WxH> [--mcmeta <path>]
                   [--minecraft-version <v>|--resource-pack-version <f>]
                   [--output <png>] [--stdout] <file flags>

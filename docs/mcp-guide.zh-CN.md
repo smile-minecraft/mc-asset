@@ -403,7 +403,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 ### preview_asset
 
-用一种 `mode` 做只读预览：`ascii` 与 `palette-map` 返回报告，`scale` 与 `nine-slice` 可把 PNG 写到显式路径。以下调用是 `sword.mcpx` 的 `ascii` 报告。
+用一种 `mode` 做只读预览：`ascii` 与 `palette-map` 返回报告，`scale`、`nine-slice` 与 `contact-sheet` 可把 PNG 写到显式路径。以下调用是 `sword.mcpx` 的 `ascii` 报告。
 
 调用：
 
@@ -416,6 +416,8 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 ```text
 {"mode":"ascii","profile":"generic","width":4,"height":4,"ascii":["[palette]",". = #00000000","R = #FF0000FF","G = #00FF00FF","","[grid]",".RR.","RGGR","RGGR",".RR."],"palette":{".":"#00000000","R":"#FF0000FF","G":"#00FF00FF"},"warnings":[]}
 ```
+
+`contact-sheet` 顺序排布 `inputPaths`（不可与 `inputPath` 同时给出），每格包含按最近邻整数放大的图片及下方标签带。标签带高 8 像素（随图片放大）并使用原创 5x7 点阵字体，底色可选 `dark` 或 `light`（`pairMode: sequential` 将两图并排于同一格）。单页上限 1024x1024，超额时自动分页，多页输出需在路径中提供 `{page}`。
 
 ### scale_gui_asset
 
@@ -666,6 +668,14 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 
 结果带 `path`、`style`、`category`、`metrics`（与 `analyze_asset` 的 `styleMetrics` 同一组字段）、`findings`、`skipped` 与 `verdict`（`pass`、`warnings`、`fail`）。每条 finding 带 `code`、`level`、`measured`、`threshold`、`message` 与 `suggestion`；除 `STYLE_COLOR_BUDGET` 外都是 warning。没有可比较对象的指标只在 `skipped` 说明原因，`category` 会套用该分类的阈值覆盖，动画竖条只度量第一帧（`firstFrameOnly: true`）。`analyze_asset` 也会在 `styleMetrics` 返回同一组度量，其余字段不变。
 
+`audit` 比对 2 到 256 张贴图组与基准（`baselinePath`，或默认第一张）：
+
+```json
+{"mode":"audit","inputPaths":["a.png","b.png","c.png"],"baselinePath":"a.png"}
+```
+
+报告各贴图尺寸、每对的遮罩重叠率与色板重叠率（千分率），以及全组最小值。尺寸不符报 `STYLE_FAMILY_SIZE_DRIFT`，遮罩重叠率低于 800‰ 报 `STYLE_FAMILY_SILHOUETTE_DRIFT`，色板重叠率低于 500‰ 报 `STYLE_FAMILY_PALETTE_DRIFT`。
+
 ### pack_asset
 
 创建一个资源包项目。`init` 需要 `projectDir`、`namespace` 与 `minecraftVersion`，另有可选的 `name`、`description`、`style` 与 `resourcePackVersion`；使用 `namespace: minecraft` 时还需要 `allowMinecraftNamespace`。
@@ -740,3 +750,19 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 ```
 
 `jarPath` 与 `outputDir` 必填，另有可选的 `force` 与 `mkdir`。绝对路径、`..` 片段与加密条目报 `PACK_ARCHIVE_INVALID`，中央目录损坏亦同。结果报告取出文件数与字节总计。
+
+`check` 合并资源包验证与逐贴图风格度量：
+
+```json
+{"mode":"check","projectPath":"packs/aurelian-forge/mc-asset.pack.json"}
+```
+
+发现项按代码计数分组；修复列表由 error 排在最前，其次按出现次数降序、代码字节序排序。整包验证失败或有色彩预算超额时判定为 fail，其余 warning 保持原样。
+
+`package` 将已构建的资源包目录打包为可重现的 zip 文件：
+
+```json
+{"mode":"package","projectPath":"packs/aurelian-forge/mc-asset.pack.json","outputPath":"aurelian-forge.zip"}
+```
+
+项目文件、配方目录、lock 文件、点开头路径段与 `__MACOSX` 条目绝不打包；zip 根目录为 `pack.mcmeta`；条目按 UTF-8 字节序排序并使用固定时间戳。相同输出目录重复运行保证产生逐字节相同的 zip。

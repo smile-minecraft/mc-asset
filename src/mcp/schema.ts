@@ -1011,10 +1011,36 @@ export const TOOL_INPUT_SCHEMAS = {
 		inputPath: z
 			.string()
 			.min(1)
-			.describe("Raster image or .mcpx path to preview."),
+			.optional()
+			.describe(
+				"Raster image or .mcpx path to preview; omitted in contact-sheet mode.",
+			),
 		mode: z
-			.enum(["ascii", "palette-map", "scale", "nine-slice"])
-			.describe("Preview mode: ascii, palette-map, scale, or nine-slice."),
+			.enum(["ascii", "palette-map", "scale", "nine-slice", "contact-sheet"])
+			.describe(
+				"Preview mode: ascii, palette-map, scale, nine-slice, or contact-sheet.",
+			),
+		inputPaths: z
+			.array(z.string().min(1))
+			.min(1)
+			.max(256)
+			.optional()
+			.describe("contact-sheet only: input image paths in sheet order."),
+		columns: z
+			.number()
+			.int()
+			.min(1)
+			.max(16)
+			.optional()
+			.describe("contact-sheet only: grid columns, 1 to 16."),
+		background: z
+			.enum(["dark", "light"])
+			.optional()
+			.describe("contact-sheet only: sheet background."),
+		pairMode: z
+			.enum(["none", "sequential"])
+			.optional()
+			.describe("contact-sheet only: pair two inputs per cell."),
 		scale: z.number().optional().describe("Upscale factor for scale mode."),
 		mcmetaPath: z
 			.string()
@@ -1194,9 +1220,9 @@ export const TOOL_INPUT_SCHEMAS = {
 	},
 	style_asset: {
 		mode: z
-			.enum(["list", "show", "export-palette", "create", "lint"])
+			.enum(["list", "show", "export-palette", "create", "lint", "audit"])
 			.describe(
-				"Style subcommand: list, show, export-palette, create, or lint.",
+				"Style subcommand: list, show, export-palette, create, lint, or audit.",
 			),
 		inputPath: z
 			.string()
@@ -1205,6 +1231,17 @@ export const TOOL_INPUT_SCHEMAS = {
 			.describe(
 				"lint only: raster image path to measure and check; read only, never written.",
 			),
+		inputPaths: z
+			.array(z.string().min(1))
+			.min(2)
+			.max(256)
+			.optional()
+			.describe("audit only: texture paths in audit order."),
+		baselinePath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("audit only: baseline member, defaults to the first input."),
 		category: z
 			.string()
 			.min(1)
@@ -1274,8 +1311,10 @@ export const TOOL_INPUT_SCHEMAS = {
 	},
 	pack_asset: {
 		mode: z
-			.enum(["init", "build", "catalog", "extract"])
-			.describe("Pack subcommand: init, build, catalog, or extract."),
+			.enum(["init", "build", "catalog", "extract", "check", "package"])
+			.describe(
+				"Pack subcommand: init, build, catalog, extract, check, or package.",
+			),
 		projectDir: z
 			.string()
 			.min(1)
@@ -1388,5 +1427,15 @@ export const TOOL_INPUT_SCHEMAS = {
 			.boolean()
 			.optional()
 			.describe("extract only: create missing parent directories."),
+		outputPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("package only: explicit .zip output path."),
+		checkMinecraftVersion: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("check only: release version override."),
 	},
 } satisfies Record<McpToolName, Record<string, z.ZodTypeAny>>;

@@ -871,6 +871,27 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			);
 			process.exitCode = code;
 		});
+	style
+		.command("audit <paths...>")
+		.description("Audit a texture group for silhouette and palette drift.")
+		.option("--style <id|path>", "Builtin id or .style.json path.")
+		.option(
+			"--baseline <path>",
+			"Baseline member; defaults to the first input.",
+		)
+		.action(
+			async (paths: string[], options: StyleOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runStyle(
+					"audit",
+					undefined,
+					{ ...options, inputs: paths },
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
 
 	const pack = program
 		.command("pack")
@@ -960,6 +981,40 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
 			const code = await runPack(
 				"extract",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	pack
+		.command("check")
+		.description("Check a pack project with an ordered fix list.")
+		.option("--project <file>", "Project document (mc-asset.pack.json).")
+		.option("--vanilla <path>", "Vanilla tree containing assets/.")
+		.action(async (options: PackOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runPack(
+				"check",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	pack
+		.command("package")
+		.description("Package a built pack directory into a reproducible zip.")
+		.option("--project <file>", "Project document (mc-asset.pack.json).")
+		.requiredOption("--output <file.zip>", "Explicit .zip output path.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.action(async (options: PackOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runPack(
+				"package",
 				undefined,
 				options,
 				globals.json === true,
@@ -1200,7 +1255,7 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 	program
 		.command("preview <input>")
 		.description(
-			"Preview an image as a .grid-compatible ASCII document, a palette map report, a scaled PNG, or a nine-slice border report.",
+			"Preview an image as a .grid-compatible ASCII document, a palette map report, a scaled PNG, a nine-slice border report, or a contact sheet.",
 		)
 		.option(
 			"--ascii",
@@ -1215,6 +1270,14 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			"--nine-slice",
 			"Report the mcmeta nine-slice geometry, or write a 1:1 border-guide PNG with --output or --stdout; needs --mcmeta.",
 		)
+		.option(
+			"--contact-sheet",
+			"Write a labeled contact sheet PNG from --inputs; repeatable with {page} paging.",
+		)
+		.option("--inputs <paths...>", "Contact-sheet input image paths in order.")
+		.option("--columns <n>", "Contact-sheet grid columns, 1 to 16.")
+		.option("--background <name>", "Contact-sheet background: dark or light.")
+		.option("--pair-mode <mode>", "Contact-sheet pairing: none or sequential.")
 		.option(
 			"--mcmeta <path>",
 			"Explicit mcmeta path for --nine-slice; a sibling file is never derived.",

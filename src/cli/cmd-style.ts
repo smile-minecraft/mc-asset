@@ -1,5 +1,6 @@
 import { dirname, resolve as resolvePath } from "node:path";
 import { McAssetError } from "../core/errors.ts";
+import { auditTextureFamily } from "../style/audit.ts";
 import { buildPaletteMcpx } from "../style/export-palette.ts";
 import { lintStyle } from "../style/lint.ts";
 import {
@@ -47,6 +48,8 @@ export interface StyleOptions {
 	overrides?: Record<string, unknown> | undefined;
 	force?: boolean | undefined;
 	mkdir?: boolean | undefined;
+	inputs?: readonly string[] | undefined;
+	baseline?: string | undefined;
 }
 
 export interface StylePaletteWriteRequest {
@@ -334,9 +337,39 @@ export async function runStyle(
 			// outcome `validate` reports, so it shares that exit code.
 			return report.verdict === "fail" ? 3 : 0;
 		}
+		if (mode === "audit") {
+			const inputPaths = options.inputs ?? [];
+			if (inputPaths.length < 2) {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"style audit requires at least two input image paths.",
+				);
+			}
+			const loadedCanvases = [];
+			for (const p of inputPaths) {
+				const loaded = await loadRasterCanvas(p);
+				loadedCanvases.push(loaded.canvas);
+			}
+			const report = auditTextureFamily({
+				inputs: loadedCanvases,
+				names: inputPaths,
+				baselinePath: options.baseline,
+			});
+			const result = { command: "style", mode: "audit", ...report };
+			if (globalJson) {
+				emitEnvelope(successEnvelope(result), streams, route);
+			} else {
+				emitLog(
+					`ok style audit baseline=${report.baseline} pairs=${report.pairs.length} minOverlap=${report.minOverlapPermille} minPaletteOverlap=${report.minPaletteOverlapPermille}`,
+					streams,
+					route,
+				);
+			}
+			return report.findings.length > 0 ? 3 : 0;
+		}
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"style takes list, show, export-palette, create, or lint.",
+			"style takes list, show, export-palette, create, lint, or audit.",
 			{ mode },
 		);
 	} catch (error) {
