@@ -1,6 +1,6 @@
 {
 	"name": "mc-asset",
-	"version": "0.4.0",
+	"version": "0.5.0",
 	"description": "Pixel-native Minecraft asset toolchain — CLI and MCP server for deterministic pixel-art, animation, and resource-pack workflows",
 	"keywords": [
 		"minecraft",
