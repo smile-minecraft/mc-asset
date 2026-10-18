@@ -20,7 +20,7 @@ this table is the working summary.
 | `palette extract\|inspect` | `palette_asset` | color reports |
 | `material list\|show` | `material_asset` | the built-in ramps |
 | `tile <input>` | `tile_asset` | seam scores, edge match, tiled preview |
-| `preview <input>` | `preview_asset` | `--ascii`, `--palette-map`, `--scale N`, `--nine-slice` |
+| `preview <input>` / `preview contact-sheet` | `preview_asset` | `--ascii`, `--palette-map`, `--scale N`, `--nine-slice`, `contact-sheet` |
 | `inspect <input>` | `inspect_asset` | layer/region structure, or a composited `view` image |
 | `gui-scale <input>` | `scale_gui_asset` | stretch / tile / nine_slice scaling from an mcmeta |
 | `animate pack\|unpack\|reorder\|resize\|validate\|preview` | `animate_asset` | animation strips |
@@ -29,6 +29,8 @@ this table is the working summary.
 | `validate-pack <path>` | `validate_pack_asset` | a whole resource pack |
 | `optimize <input...>` | `optimize_asset` | lossless PNG re-encoding into the smallest exact encoding (or the source kept); `--dry-run` first |
 | `model inspect\|validate\|create\|apply\|export` | `model_asset` (`mode`) | Java block/item model JSON, cuboid `elements` only; structure and references are checked, not appearance |
+| `pack init\|build\|catalog\|extract\|check\|package` | `pack_asset` (`mode`) | complete resource pack project authoring, batch recipe builds, cataloging, health check, and zip packaging |
+| `style list\|show\|export-palette\|create\|lint\|audit` | `style_asset` (`mode`) | style presets, custom style authoring, palette export, style checking, and family silhouette audits |
 
 ## Reviewing a texture
 

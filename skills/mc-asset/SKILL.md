@@ -1,18 +1,35 @@
 ---
 name: mc-asset
-description: Author, render, inspect, and validate Minecraft Java Edition resource-pack textures with the mc-asset CLI or its MCP server — text-grid sprites (.grid), editable multi-layer sources (.mcpx), procedural block textures, material recolors and variants, tiling checks, animation strips, nine-slice GUI scaling, and whole-pack validation. Use when you need to produce or edit a pixel texture as text, check a texture or resource pack, or batch-edit pixels without a paint program. For how the art should look, also load the minecraft-pixel-art skill.
+description: Author, render, inspect, batch-build, check, and package Minecraft Java Edition resource-pack textures, models, and complete packs with the mc-asset CLI or its MCP server — text-grid sprites (.grid), editable multi-layer sources (.mcpx), procedural block textures, material recolors and variants, tiling checks, animation strips, nine-slice GUI scaling, declarative recipe batch builds, style auditing, contact sheets, and whole-pack validation. Use when you need to produce or edit textures as text, build a complete resource pack, or batch-edit pixels without a paint program. For how the art should look, also load the minecraft-pixel-art skill.
 ---
 
 # mc-asset
 
-mc-asset turns texture work into text and commands. You write a sprite as a
-character grid, render it to PNG, look at an upscaled preview, measure it, and
-iterate. The same inputs always produce the same bytes. Every command exists
-both as a CLI subcommand and as an MCP tool (`mc-asset mcp`); this skill shows
-the CLI form, and `references/commands.md` maps each one to its MCP tool.
+mc-asset turns texture and resource pack work into text and commands. You can
+draw single sprites as character grids, or author an entire resource pack
+declaratively from recipes with lockfile tracking, automated 2D/3D model
+generation, style auditing, contact sheets, and byte-reproducible zip packaging.
+The same inputs always produce the same bytes. Every command exists both as a
+CLI subcommand and as an MCP tool (`mc-asset mcp`); this skill shows the CLI
+form, and `references/commands.md` maps each one to its MCP tool.
 
 **Art direction lives in the `minecraft-pixel-art` skill.** Load it before you
 draw anything that should look like Minecraft; this skill only covers the tool.
+
+## Authoring complete resource packs
+
+To create and ship an entire resource pack project from scratch:
+1. **Initialize**: `mc-asset pack init <dir> --namespace <ns> --minecraft-version <v>`
+2. **Style & Presets**: `mc-asset style list` (`vanilla`, `soft`, `fairy-flat`, `dark-frame`)
+3. **Reference & Catalog**: `mc-asset pack catalog --vanilla <path>`
+4. **Recipes**: `recipes/*.recipe.json` with matrix variables, sweep animations, and item definitions
+5. **Batch Build**: `mc-asset pack build --project <file>` (three-stage safe build with lockfile)
+6. **Check & Audit**: `mc-asset pack check` (ordered fix list) and `mc-asset style audit`
+7. **Contact Sheet**: `mc-asset preview contact-sheet --inputs <paths...> --output <file.png>`
+8. **Package**: `mc-asset pack package --output <file.zip>` (deterministic zip delivery)
+
+See `references/pack-workflow.md` for the complete 8-step guide, full recipe
+examples, and failure recovery.
 
 ## Getting the tool
 
@@ -21,8 +38,8 @@ npx -y mc-asset --version        # run without installing
 npm install -g mc-asset          # or install the CLI
 ```
 
-Node.js 22 or newer. In a checkout of the mc-asset repository, use
-`node bin/mc-asset.js` after `bun run build`.
+Node.js 22 or newer. In a checkout of the mc-asset repository, run directly
+with `bun src/cli/index.ts`, or use `node bin/mc-asset.js` after `bun run build`.
 
 ## The drawing loop
 
@@ -98,6 +115,12 @@ Node.js 22 or newer. In a checkout of the mc-asset repository, use
 | Whole resource pack | `validate-pack ./MyPack --minecraft-version 26.3` |
 | Shrink a PNG losslessly | `optimize in.png --output-dir out --mkdir` (add `--dry-run` to preview) |
 | Validate a Java model | `model validate model.json --pack ./MyPack --minecraft-version 26.3` |
+| Initialize pack project | `pack init ./MyPack --namespace mypack --minecraft-version 1.21.9` |
+| Batch build from recipes | `pack build --project ./MyPack/mc-asset.pack.json` |
+| Style audit & check | `pack check --project ./MyPack/mc-asset.pack.json` |
+| Family silhouette audit | `style audit textures/item/*_sword.png` |
+| Contact sheet overview | `preview contact-sheet --inputs textures/item/*.png --output overview-{page}.png` |
+| Package pack zip | `pack package --project ./MyPack/mc-asset.pack.json --output MyPack.zip` |
 
 `references/commands.md` explains each one, its MCP twin, and the gotchas.
 
@@ -112,25 +135,27 @@ Node.js 22 or newer. In a checkout of the mc-asset repository, use
   on stdout. Exit codes: 0 ok, 2 bad invocation, 3 validation failed,
   4 filesystem refusal, 5 unsupported or over a limit.
 
-## Recolor and variants: plan the roles
+## Recolor and variants: understand the two paths
 
-`recolor` and `variant` map colors into a target material by **role**, or by
-luminance when a color has no role:
+`recolor` and `variant` have two separate execution paths with different role
+rules:
 
-- `shadow` and `dark` → the material's shadow color;
-- `base` → its base color;
-- `light` and `highlight` → its highlight color;
+### 1. Palette Family Path (`--family` / `--families`, used in pack recipes)
+- **Six direct roles**: `outline`, `shadow`, `dark`, `base`, `light`, and
+  `highlight` map directly to the target family's six ramp steps.
+- **Geometric boundary override**: Body pixels touching transparency or the
+  canvas edge are geometrically detected and forced to the family `outline` color.
+- **`accent` and `custom` are NOT preserved by default**: they map across the
+  six integer luminance bands (<43 outline, 43–85 shadow, 86–127 dark,
+  128–170 base, 171–213 light, ≥214 highlight).
+- **Protecting non-metal parts**: To prevent handles or inlays from being
+  recolored, you **must** explicitly specify `preserveRoles: ["custom"]`,
+  `preserveRegions: ["handle"]`, or pass a `--selection`.
+
+### 2. Builtin Material Path (`--material` / `--materials`)
+- Maps three tones: `shadow`/`dark` → material shadow; `base` → base;
+  `light`/`highlight` → highlight.
 - `outline`, `accent`, and `custom` stay exactly as drawn.
-
-So a recolored ramp collapses to three tones plus whatever you keep. To make a
-sprite that survives recoloring and still looks right:
-
-- tag the material's lit-edge outline and deep shades `shadow`/`dark`, its
-  midtones `base`, and its lights `highlight`;
-- tag the darkest outline `outline` and pick a near-neutral dark that suits
-  every target material;
-- tag a white specular `accent` so it stays white;
-- tag parts that must not change (a wooden grip, a gem inlay) `custom`.
 
 ## Gotchas
 

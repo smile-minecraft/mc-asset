@@ -49,6 +49,7 @@
 - 检查单张贴图或整个资源包（`validate`、`validate-pack`）
 - 无损压缩 PNG（`optimize`）
 - 创建、检查、预览 Java 方块模型（`model`）
+- 按声明式配方制作完整资源包、审计风格、盘点原版素材与导出可重现 zip（`pack`、`style`）
 - 以 MCP 服务器提供给 AI 助手使用（`mcp`）
 
 ---
@@ -152,7 +153,7 @@ bun run build
 ## 面向 AI 助手
 
 - [`llms.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms.txt)：给 AI 助手的项目精简索引。
-- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份信息的单文件版本，涵盖安装、25 个 MCP 工具、批量操作、错误模型与限制。
+- [`llms-full.txt`](https://github.com/smile-minecraft/mc-asset/blob/main/llms-full.txt)：同一份信息的单文件版本，涵盖安装、27 个 MCP 工具、批量操作、错误模型与限制。
 - [`docs/cli-surface.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/cli-surface.zh-CN.md)：已冻结的 CLI 命令、批量操作规范与状态码对照表。
 - [`docs/mcpx-format.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcpx-format.zh-CN.md)：可编辑的多图层 `.mcpx` 与 `.grid` 格式语法与规范。
 - [`docs/mcp-guide.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.zh-CN.md)：注册方式、每个 MCP 工具的实际调用记录，以及错误模型。
@@ -445,7 +446,7 @@ mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
 
 ## MCP 服务器
 
-`mc-asset mcp` 会启动一个 stdio MCP 服务器，底层和 CLI 共用同一个核心，因此 AI 助手调用工具和在终端运行命令会得到相同结果。服务器共提供 25 个工具。
+`mc-asset mcp` 会启动一个 stdio MCP 服务器，底层和 CLI 共用同一个核心，因此 AI 助手调用工具和在终端运行命令会得到相同结果。服务器共提供 27 个工具。
 
 ### 提供的 MCP 工具
 
@@ -476,6 +477,8 @@ mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
 | `optimize_asset` | 无损压缩 PNG（若无更小编码则保留原文件）；支持单文件、多文件、目录扫描（`inputDir`、`recursive`，上限 4096 个文件）与 `dryRun`。 |
 | `model_asset` | Java 方块／物品模型 JSON：`inspect`、`validate`、`create`、`apply`、`export`（含物品定义与 blockstate），以及 `preview`（生成三视图诊断 PNG）。 |
 | `compare_assets` | 比对两张同尺寸 PNG；返回原始 RGBA 与可见差异像素数、差异范围框，并可输出诊断标记图。 |
+| `style_asset` | 风格预设、自定义风格编写、调色板导出、风格检查与家族审计。 |
+| `pack_asset` | 资源包项目管理：创建骨架（`init`）、配方批量构建（`build`）、贴图盘点（`catalog`）、素材提取（`extract`）、排序修复列表（`check`）与可重现 zip 打包（`package`）。 |
 
 `inspect_asset` 有两种模式：`structure` 报告图层、区域、颜色用量与重叠；`view` 把合成后的画布以 PNG 图像块返回，可选 `crop` 与 `scale`（1–16）。边长超过 1024px 的 view 会被拒绝并提示改用裁剪，不会自动缩小。`apply_asset_operations` 可以带可选的 `feedback` 对象（见[实践 7](#实践-7批量编辑与视觉反馈build-与-apply_asset_operations)）；不带时结果完全不变。[`docs/mcp-guide.zh-CN.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.zh-CN.md) 收录了每个工具实际调用的输入与返回示例。
 

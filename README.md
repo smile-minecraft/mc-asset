@@ -49,6 +49,7 @@ Language models can't place pixels by eye, so `mc-asset` turns texture work into
 - Validate a single texture or a whole resource pack (`validate`, `validate-pack`)
 - Losslessly compress PNGs (`optimize`)
 - Create, validate, and preview Java block models (`model`)
+- Author complete resource packs from declarative recipes, audit styles, catalog vanilla assets, and export reproducible zips (`pack`, `style`)
 - Expose all capabilities to AI agents over an MCP server (`mcp`)
 
 ---
@@ -448,7 +449,7 @@ Exactly one of `--output` or `--stdout` is required. The report carries panel na
 
 ## MCP Server
 
-`mc-asset mcp` starts a stdio MCP server on the same core as the CLI, so a tool call and the matching command return the same result. It exposes 25 tools.
+`mc-asset mcp` starts a stdio MCP server on the same core as the CLI, so a tool call and the matching command return the same result. It exposes 27 tools.
 
 ### Exposed MCP Tools
 
@@ -479,6 +480,8 @@ Exactly one of `--output` or `--stdout` is required. The report carries panel na
 | `optimize_asset` | Lossless PNG re-encoding into the smallest exact encoding (or the source kept); per-file report, `dryRun`, explicit `outputPath` / `outputDir`, or whole-directory scan (`inputDir`, `recursive`, 4096 PNG limit). |
 | `model_asset` | Java block/item model JSON: `inspect`, `validate`, `create`, `apply`, `export` (with item definition and blockstate bindings), and `preview` (fixed diagnostic three-view PNG via `size` / `outputPngPath`). Reports structure and references, not rendered appearance. |
 | `compare_assets` | Compares same-size PNGs; reports raw RGBA and visible differences, bounds, and optional diagnostic diff image. |
+| `style_asset` | Style presets, custom style authoring, palette exports, linting, and texture family audits. |
+| `pack_asset` | Resource pack projects: scaffolding (`init`), recipe batch builds (`build`), texture cataloging (`catalog`), asset extraction (`extract`), whole-pack check with prioritized fixes (`check`), and reproducible zip packaging (`package`). |
 
 `inspect_asset` has two modes: `structure` reports layers, regions, color usage, and overlaps; `view` returns the composited canvas as a PNG image block, with optional `crop` and `scale` (1–16). A view wider than 1024px is refused with a crop hint instead of being downscaled. `apply_asset_operations` takes an optional `feedback` object ([Recipe 7](#recipe-7-batch-edits-with-visual-feedback-build--apply_asset_operations)); without it the result is unchanged. [`docs/mcp-guide.md`](https://github.com/smile-minecraft/mc-asset/blob/main/docs/mcp-guide.md) has one captured call per tool.
 

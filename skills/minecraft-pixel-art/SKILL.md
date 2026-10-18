@@ -43,15 +43,18 @@ Always read `references/anti-patterns.md` before you sign off on any texture.
    1× scale in an inventory slot before any shading exists. Items fill the
    canvas: tools and weapons run corner to corner (handle bottom-left, head or
    tip top-right); round objects span about 11–13 pixels.
+   *(Checked by `style audit`: `STYLE_FAMILY_SILHOUETTE_DRIFT` ≥800‰ mask overlap, `STYLE_FAMILY_SIZE_DRIFT`)*
 3. **Light comes from the top left.** Highlights sit on the top and left of each
    form, shadows on the bottom and right. Shade the *form* (a cylinder, a
    sphere, a bevelled blade), not the outline of the flat shape.
+   *(Style field: `light.minTlBrPermille`; checked by `style lint`: `STYLE_LIGHT_DIRECTION`)*
 4. **Outlines are the material's own darkest shades, not black.** An item
    outline uses the darkest one or two colors of the ramp it encloses: dark red
    around an apple, dark teal around a diamond, dark brown around a stick. The
    outline is lighter on the lit top-left edge and darkest on the bottom-right
    edge. Different materials in one item get different outline colors. Metals
    and stone can go near black (`#181818`), organics never do.
+   *(Style fields: `outline.mode`, `outline.luminanceDropPermille`, `outline.maxHueOffsetDegrees`; checked by `style lint`: `STYLE_OUTLINE_TINT`, `STYLE_OUTLINE_GAP`)*
 5. **Thin parts are not outlined all round.** A stick or handle is a 2-pixel
    diagonal: a lighter pixel on the upper-left side, a darker pixel on the
    lower-right side, the darkest color capping the bottom end.
@@ -59,13 +62,16 @@ Always read `references/anti-patterns.md` before you sign off on any texture.
    4–7 per material; a block face uses about 4–9. Start with midtone + one
    shadow + one highlight, shade, and only then add shades. Every color must
    earn its place: no near-duplicates.
+   *(Style fields: `limits.maxColors`, `limits.minLevels`, `limits.maxLevels`, `limits.minDynamicRangePermille`; checked by `style lint`: `STYLE_COLOR_BUDGET` [error], `STYLE_LEVEL_COUNT`, `STYLE_DYNAMIC_RANGE`)*
 7. **Ramps shift hue, not only value.** Organic and warm materials shift toward
    red/brown in the darks and toward yellow or pink in the lights; keep
    saturation highest in the midtones. Neutral metals (iron, stone) may use a
    straight gray ramp. See `references/palettes.md` for measured vanilla ramps.
+   *(Style families: `palettes.<family>`; checked by `style audit`: `STYLE_FAMILY_PALETTE_DRIFT` ≥500‰)*
 8. **Clusters, not noise.** Pixels read in groups. Every lone pixel must be
    deliberate (a specular glint, an eye, a seed). Texture comes from clusters
    of 2–5 pixels, never from random speckle.
+   *(Style fields: `dither.mode`, `dither.maxRatioPermille`; checked by `style lint`: `STYLE_DITHER_RATIO`)*
 9. **Hard edges against transparency.** Item textures are cutout: alpha is only
    0 or 255. No semi-transparent pixels and no anti-aliasing into the
    background.

@@ -106,6 +106,10 @@ export async function runPreview(
 	globalJson: boolean,
 	streams: OutputStreams,
 ): Promise<number> {
+	if (input === "contact-sheet") {
+		options = { ...options, contactSheet: true };
+		input = undefined;
+	}
 	const ascii = options.ascii === true;
 	const paletteMap = options.paletteMap === true;
 	const scaled = options.scale !== undefined;

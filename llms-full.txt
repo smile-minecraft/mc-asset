@@ -2,7 +2,7 @@
 
 > mc-asset is a pixel-native 2D asset engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs. It turns raster references, hand-authored ASCII grids, and editable `.mcpx` sources into byte-reproducible PNG textures, animation sheets, palette reports, and validated resource packs — for human creators and AI coding agents.
 
-This file collects, in one place, what an agent needs to use the tool: install, registration, the twenty-five MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest.
+This file collects, in one place, what an agent needs to use the tool: install, registration, the twenty-seven MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest.
 
 ## When to use it
 
@@ -68,7 +68,7 @@ check the client's own documentation when unsure. The guide at
 `docs/mcp-guide.md` carries per-client examples (Claude Code, Claude Desktop,
 Cursor, VS Code, Cline, OpenCode).
 
-## The twenty-five MCP tools
+## The twenty-seven MCP tools
 
 | Tool | What it does | Required inputs |
 |---|---|---|
@@ -89,7 +89,7 @@ Cursor, VS Code, Cline, OpenCode).
 | `material_asset` | Read-only `list` / `show` over the builtin materials. | `mode` (`name` for `show`) |
 | `tile_asset` | Seam, edge-repetition, and brightness analysis, with an optional tiled preview PNG. | `inputPath` |
 | `generate_asset` | Deterministic procedural texture from pattern, size, palette, and seed. | `pattern`, `size`, `palette`, `seed` |
-| `preview_asset` | `ascii` / `palette-map` reports, or `scale` / `nine-slice` guide PNGs. | `inputPath`, `mode` |
+| `preview_asset` | `ascii` / `palette-map` reports, `scale` / `nine-slice` guide PNGs, or `contact-sheet` pages. | `mode` (+ mode fields) |
 | `animate_asset` | Animation sheets: `pack`, `unpack`, `reorder`, `resize`, `validate`, `preview`. | `mode` + that mode's input path (`layout` for `pack` / `unpack` / `preview`) |
 | `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, dependency/vanilla resolution, version targeting, with a coverage object in the report. | `packPath` |
 | `inspect_asset` | Read-only `structure` (layers with bounds/area/visibility/raw RGBA color usage, regions with identity/bounds/area only, overlaps) or `view` (composited PNG image block plus six-key metadata). | `inputPath`, `mode` (`structure` / `view`; view-only `crop` and `scale`) |
@@ -97,6 +97,8 @@ Cursor, VS Code, Cline, OpenCode).
 | `model_asset` | Java block/item model JSON (cuboid `elements` only): `inspect`, `validate`, `create`, `apply`, `export`, `preview` (fixed diagnostic three-view PNG). Reports structure and reference validity, not rendered appearance. | `mode` (+ the mode's fields) |
 | `mcmeta_asset` | Generates `.mcmeta` animation or GUI scaling document from PNG dimensions; optional `outputPath` (`force`, `mkdir`). Without `outputPath` returns `mcmetaText`. | `mode` (`animation` / `gui`), `inputPath` |
 | `compare_assets` | Compares two same-size PNGs: raw RGBA and visible differences, bounds, and optional diagnostic PNG (`image: "diff"`, `scale`, optional `outputPath`). | `beforePath`, `afterPath` |
+| `style_asset` | Style presets (`list`/`show`), palette export (`export-palette`), document authoring (`create`), style check (`lint`), and silhouette/palette family comparison (`audit`). | `mode` (+ mode fields) |
+| `pack_asset` | Complete pack project authoring: scaffolding (`init`), recipe batch builds (`build`), texture cataloging (`catalog`), asset extraction (`extract`), prioritized fix lists (`check`), and deterministic zip delivery (`package`). | `mode` (+ mode fields) |
 
 `inspect_asset` takes `inputPath` (an `.mcpx` source or a raster image; raster reads as a single base layer) plus `mode`. `structure` takes no `crop` or `scale`. `view` accepts an optional `crop` selection expression and an optional integer `scale` 1–16 (default 1, nearest). The view returns the composited PNG as a standard image block (`type: "image"`, `mimeType: "image/png"`) plus metadata, with no duplicate `pngBase64` in the text block. Outputs wider than the 1024px edge are `RESOURCE_LIMIT_EXCEEDED` with a crop hint. The small-image auto-scale (a pre-scale long edge below 128 scales up toward 128, capped at 16) applies to `apply_asset_operations` feedback images only, never to inspect view.
 
@@ -126,9 +128,9 @@ bare array or an `{"operations": [...]}` envelope.
 ]
 ```
 
-There are twenty-five operation `type` values: the nine pixel operations
+There are twenty-six operation `type` values: the ten pixel operations
 `setPixel`, `clearPixel`, `drawLine`, `drawRect`, `fillRect`, `floodFill`,
-`ellipse`, `polygonFill`, and `strokeMask`, plus layer operations
+`ellipse`, `polygonFill`, `strokeMask`, and `outline`, plus layer operations
 (`createLayer`, `removeLayer`, `renameLayer`, `reorderLayer`,
 `duplicateLayer`, `mergeLayer`, `clearLayer`, `fillLayer`, `moveLayer`),
 region operations (`createRegion`, `removeRegion`, `renameRegion`,

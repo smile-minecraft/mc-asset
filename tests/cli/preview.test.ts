@@ -584,4 +584,26 @@ describe("preview wiring in process", () => {
 			await rm(dir, { recursive: true, force: true });
 		}
 	}, 30_000);
+
+	test("preview contact-sheet --inputs writes labeled sheet", async () => {
+		const dir = await mkdtemp(join(tmpdir(), "mc-asset-preview-sheet-"));
+		try {
+			const input = await writeChecker(dir);
+			const out = join(dir, "sheet.png");
+			const result = await runCli([
+				"preview",
+				"contact-sheet",
+				"--inputs",
+				input,
+				"--output",
+				out,
+			]);
+			expect(result.code).toBe(0);
+			const decoded = await decodeImage(await readFile(out));
+			expect(decoded.width).toBeGreaterThan(0);
+			expect(decoded.height).toBeGreaterThan(0);
+		} finally {
+			await rm(dir, { recursive: true, force: true });
+		}
+	}, 30_000);
 });
