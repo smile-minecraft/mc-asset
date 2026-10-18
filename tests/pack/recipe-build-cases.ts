@@ -1580,4 +1580,71 @@ export const RECIPE_BUILD_CASES = [
 			});
 		},
 	},
+	{
+		name: "operations step converts JSON operations and executes them",
+		async run() {
+			await withProject(async (projectDir) => {
+				const recipePath = join(projectDir, "recipes", "ops.recipe.json");
+				const outputRel = `assets/${NAMESPACE}/textures/item/ops_sword.png`;
+				await writeFile(
+					recipePath,
+					`${JSON.stringify(
+						{
+							formatVersion: 1,
+							id: "ops-recipe",
+							sources: {
+								grid: { kind: "grid", path: "sources/sword.grid" },
+							},
+							targets: [
+								{
+									id: "ops_target",
+									source: "grid",
+									output: outputRel,
+									steps: [
+										{
+											type: "operations",
+											operations: [
+												{
+													type: "setPixel",
+													layerId: "base",
+													color: "#FF00FFFF",
+													x: 0,
+													y: 0,
+												},
+											],
+										},
+									],
+								},
+							],
+						},
+						null,
+						2,
+					)}\n`,
+					"utf8",
+				);
+
+				const project = join(projectDir, "mc-asset.pack.json");
+				const plan = await planPackBuild(project, { recipe: recipePath });
+				const executed = await executePackBuild(plan);
+				assert.equal(executed.completed.length, 1);
+
+				const writtenBytes = await bytesAt(join(projectDir, "pack", outputRel));
+				assert.ok(writtenBytes, "output file exists");
+				const canvas = decodePng(writtenBytes).canvas;
+				const layer = canvas.layers[0];
+				assert.ok(layer);
+				const p = layer.pixels;
+				assert.equal(p[0], 255);
+				assert.equal(p[1], 0);
+				assert.equal(p[2], 255);
+				assert.equal(p[3], 255);
+
+				// Rerun writes nothing
+				const rerun = await executePackBuild(
+					await planPackBuild(project, { recipe: recipePath }),
+				);
+				assert.deepEqual(rerun.completed, [], "rerun writes nothing");
+			});
+		},
+	},
 ];

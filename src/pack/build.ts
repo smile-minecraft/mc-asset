@@ -12,12 +12,13 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { atomicWriteFile } from "../cli/filesystem.ts";
 import { parseGridFile } from "../cli/grid.ts";
+import { parseOperationsJson } from "../cli/operations-json.ts";
 import {
 	type OutputTarget,
 	planOutputTargets,
 	writePlannedTargets,
 } from "../cli/safe-output.ts";
-import { applyOperations, type BatchOperation } from "../core/batch.ts";
+import { applyOperations } from "../core/batch.ts";
 import { addLayer, createCanvas, replaceLayerPixels } from "../core/canvas.ts";
 import { McAssetError } from "../core/errors.ts";
 import { packFrameSet } from "../core/frameset.ts";
@@ -976,7 +977,12 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 						}
 					}
 				} else if (step.type === "operations") {
-					applyOperations(canvas, step.operations as BatchOperation[]);
+					const rawOps = Array.isArray(step.operations) ? step.operations : [];
+					const typedOps = parseOperationsJson(
+						JSON.stringify(rawOps),
+						canvas.layers.length === 1 ? canvas.layers[0]?.id : undefined,
+					);
+					applyOperations(canvas, typedOps);
 				} else {
 					throw new McAssetError(
 						"RECIPE_INVALID",
