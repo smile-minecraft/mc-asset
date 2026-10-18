@@ -775,7 +775,9 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 
 	const style = program
 		.command("style")
-		.description("Style presets, the palette library, and custom style files.");
+		.description(
+			"Style presets, the palette library, custom style files, and per-asset checks.",
+		);
 	style
 		.command("list")
 		.description("List the builtin style presets.")
@@ -841,6 +843,28 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			const code = await runStyle(
 				"create",
 				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	style
+		.command("lint <path>")
+		.description("Measure one image and check it against a style.")
+		.option(
+			"--style <id|path>",
+			"Builtin id or .style.json path; defaults to vanilla.",
+		)
+		.option(
+			"--category <name>",
+			"Item category id, so its threshold overrides apply.",
+		)
+		.action(async (source: string, options: StyleOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runStyle(
+				"lint",
+				source,
 				options,
 				globals.json === true,
 				realStreams(),

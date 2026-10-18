@@ -650,6 +650,14 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 
 风格文件以严格模式读取：未知字段、枚举外的值，或不是 `#RRGGBB` 的颜色都是带字段路径的 `STYLE_INVALID`（`palettes.stone.base: expected #RRGGBB, got "#12345"`）。其余错误码为 `STYLE_NOT_FOUND`（查不到的 id）、`STYLE_INHERITANCE_CYCLE`、`STYLE_UNSUPPORTED_VERSION` 与 `STYLE_FAMILY_NOT_FOUND`（解析后不存在的家族）。只有 `export-palette` 与 `create` 会写入，且只写显式指定的输出路径；`force` 覆盖该文件，`mkdir` 创建缺少的父目录。
 
+`lint` 会度量一张图片并对照一个风格，返回冻结的报告：
+
+```json
+{"mode":"lint","inputPath":"assets/pack/textures/item/ruby_sword.png","style":"vanilla","category":"sword"}
+```
+
+结果带 `path`、`style`、`category`、`metrics`（与 `analyze_asset` 的 `styleMetrics` 同一组字段）、`findings`、`skipped` 与 `verdict`（`pass`、`warnings`、`fail`）。每条 finding 带 `code`、`level`、`measured`、`threshold`、`message` 与 `suggestion`；除 `STYLE_COLOR_BUDGET` 外都是 warning。没有可比较对象的指标只在 `skipped` 说明原因，`category` 会套用该分类的阈值覆盖，动画竖条只度量第一帧（`firstFrameOnly: true`）。`analyze_asset` 也会在 `styleMetrics` 返回同一组度量，其余字段不变。
+
 ### pack_asset
 
 创建一个资源包项目。`init` 需要 `projectDir`、`namespace` 与 `minecraftVersion`，另有可选的 `name`、`description`、`style` 与 `resourcePackVersion`；使用 `namespace: minecraft` 时还需要 `allowMinecraftNamespace`。

@@ -152,6 +152,7 @@ import { collectCanvasColors, colorKeyOf, parseMcpx } from "../mcpx/index.ts";
 import { initializePackProject } from "../pack/index.ts";
 import { GUI_STRETCH_INNER_FACT, isFactActive } from "../profiles/versions.ts";
 import { buildPaletteMcpx } from "../style/export-palette.ts";
+import { lintStyle } from "../style/lint.ts";
 import { resolveStyle } from "../style/load.ts";
 import { listStylePresets } from "../style/presets.ts";
 import type { StyleSummary } from "../style/types.ts";
@@ -2855,9 +2856,26 @@ export async function handleStyleAsset(
 			});
 			return textResult({ mode: "create", ...written });
 		}
+		if (args.mode === "lint") {
+			if (args.inputPath === undefined || args.inputPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"style_asset lint needs an inputPath.",
+				);
+			}
+			const loaded = await loadRasterCanvas(args.inputPath);
+			const style = await resolveStyle(args.style ?? "vanilla");
+			const report = lintStyle({
+				canvas: loaded.canvas,
+				path: args.inputPath,
+				style,
+				category: args.category ?? null,
+			});
+			return textResult({ ...report });
+		}
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"style_asset mode must be list, show, export-palette, or create.",
+			"style_asset mode must be list, show, export-palette, create, or lint.",
 			{ mode: args.mode },
 		);
 	} catch (error) {

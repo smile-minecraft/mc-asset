@@ -1,4 +1,5 @@
 import type { AnalyzeReport } from "../../src/analyze/metrics.ts";
+import { emptyStyleMetrics } from "../../src/analyze/style-metrics.ts";
 import {
 	addLayer,
 	createCanvas,
@@ -292,6 +293,7 @@ export const VALIDATE_CASES: ValidateCase[] = [
 					cleanup: { classes: [] },
 					resize: { mode: "nearest" },
 				},
+				styleMetrics: emptyStyleMetrics(),
 				warnings: [],
 			};
 			const ok = validateReport(base, { filename: "sword.png" });

@@ -131,6 +131,7 @@ transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
 | `style show <style>` | None | Report only | Resolves one style (builtin id or `.style.json` path) into its full JSON. |
 | `style export-palette <style>` | None | `.mcpx` palette file | Writes the palette of one family, or of every family, as `.mcpx`. |
 | `style create` | None | `.style.json` file | Writes a new style document. |
+| `style lint <path>` | PNG, JPEG, WebP, `.mcpx` | Report only | Measures one image against a style and reports findings. |
 
 ```text
 quantize <input> (--colors <N> | --palette <name|path>) [--keep-color <r,g,b,a> ...] [--selection <scope>] <file flags>
@@ -141,6 +142,7 @@ style list
 style show <style>
 style export-palette <style> --family <id|all> --output <file.mcpx> [--force] [--mkdir]
 style create --output <file.style.json> --id <id> [--name <name>] [--extends <id|path>] [--force] [--mkdir]
+style lint <path> [--style <id|path>] [--category <name>] [--json]
 ```
 
 - `quantize` needs exactly one of `--colors` or `--palette`: both is `ARGUMENT_CONFLICT`, neither is `INVALID_ARGUMENT`. `--palette` takes a builtin material name or an `.mcpx` path (at most 4096 colors, declared `[palette]` order, unused entries included). Each pixel maps to the nearest entry by integer squared RGBA distance; an exact tie takes the earlier entry, and hidden RGB under alpha 0 takes part.
@@ -153,6 +155,7 @@ style create --output <file.style.json> --id <id> [--name <name>] [--extends <id
 - `style list` and `style show` report only and write nothing. `style show` prints the resolved document: `formatVersion`, `id`, `name`, `description`, `palettes`, `outline`, `light`, `limits`, `highlight`, `dither`, `animation`, `categoryOverrides`, and the `extendsChain` it walked from the requested source down to the base.
 - `style export-palette --family <id|all> --output <file.mcpx>` writes a palette document: one row per family and one column per role, `[palette]` in family-then-role order with `.` first as `#00000000`, and `kind = palette`. The result is accepted directly by `quantize --palette` and `generate --palette`. A family the style does not resolve is `STYLE_FAMILY_NOT_FOUND`; without `--output` the command is `OUTPUT_REQUIRED`.
 - `style create` writes `{formatVersion, id, name, extends}` (`extends` defaults to `vanilla`) after the document validates, then writes through the shared output guard: the target must end in `.style.json`, an existing file needs `--force`, a missing parent needs `--mkdir`, and a target may not be the style it extends. The tool never rewrites a style file it did not create; no other command writes one.
+- `style lint <path>` measures one image and compares it against a style (default `vanilla`). It reports `metrics` (opaque pixels, distinct colors, level count, dynamic range, TL-BR light direction, coverage, smallest margin, inside-outline pixels, outline gap and hue offset, hue bins, highlight pixels and ratio, buffer ratio, dither permille, main axis with its second moments, and `firstFrameOnly`), then `findings`. Every finding carries `code`, `level`, `measured`, `threshold`, `message`, and `suggestion`. All findings are warnings except `STYLE_COLOR_BUDGET`, the only code that can turn the run into a failure; the verdict is `pass`, `warnings`, or `fail`, and a `fail` verdict exits 3 like a failing validation. A metric with nothing to compare produces no finding and a `skipped` entry (`no-opaque-pixels`, `animation-first-frame-only`). `--category` applies that category's threshold overrides; without it the category-scoped rules (such as the main-axis angle check) stay quiet. An animation strip is measured as its first frame and says so through `firstFrameOnly`.
 - A style file is read in strict mode: an unknown field, a value outside its enumeration, or a color that is not `#RRGGBB` is `STYLE_INVALID` naming the field path (for example `palettes.stone.base: expected #RRGGBB, got "#12345"`). A file that cannot be read or parsed, a `formatVersion` above the supported one (`STYLE_UNSUPPORTED_VERSION`), an `extends` cycle (`STYLE_INHERITANCE_CYCLE`), an id that reuses a builtin name, and an unknown builtin id (`STYLE_NOT_FOUND`) each carry the document path, the field path, and the chain.
 
 ---

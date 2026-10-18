@@ -131,6 +131,7 @@ transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
 | `style show <style>` | 无 | 仅报告 | 把某个风格（内置 id 或 `.style.json` 路径）解析为完整 JSON。 |
 | `style export-palette <style>` | 无 | `.mcpx` 调色板文件 | 把单个家族或全部家族的调色板写成 `.mcpx`。 |
 | `style create` | 无 | `.style.json` 文件 | 写出新的风格文件。 |
+| `style lint <path>` | PNG、JPEG、WebP、`.mcpx` | 仅报告 | 度量一张图片并对照风格报告 findings。 |
 
 ```text
 quantize <input> (--colors <N> | --palette <name|path>) [--keep-color <r,g,b,a> ...] [--selection <scope>] <file flags>
@@ -141,6 +142,7 @@ style list
 style show <style>
 style export-palette <style> --family <id|all> --output <file.mcpx> [--force] [--mkdir]
 style create --output <file.style.json> --id <id> [--name <name>] [--extends <id|path>] [--force] [--mkdir]
+style lint <path> [--style <id|path>] [--category <name>] [--json]
 ```
 
 - `quantize` 必须恰好给出 `--colors` 或 `--palette` 之一：两者并用是 `ARGUMENT_CONFLICT`，都没给是 `INVALID_ARGUMENT`。`--palette` 接受内置材质名或 `.mcpx` 路径（最多 4096 色，按声明顺序，含未使用项）。每个像素按整数 RGBA 平方距离映射到最近的项；距离相同取靠前的项，alpha 为 0 的隐藏 RGB 也参与。
@@ -153,6 +155,7 @@ style create --output <file.style.json> --id <id> [--name <name>] [--extends <id
 - `style list` 与 `style show` 只输出报告，不写任何文件。`style show` 打印解析后的文档：`formatVersion`、`id`、`name`、`description`、`palettes`、`outline`、`light`、`limits`、`highlight`、`dither`、`animation`、`categoryOverrides`，以及从所求来源一路走到基底的 `extendsChain`。
 - `style export-palette --family <id|all> --output <file.mcpx>` 写出调色板文档：每行一个家族、每列一个角色，`[palette]` 按家族再按角色排序、`.` 排在最前对应 `#00000000`，并带 `kind = palette`。输出可直接喂给 `quantize --palette` 与 `generate --palette`。指定解析后不存在的家族是 `STYLE_FAMILY_NOT_FOUND`；没给 `--output` 则是 `OUTPUT_REQUIRED`。
 - `style create` 先让文档通过校验，再写出 `{formatVersion, id, name, extends}`（`extends` 默认为 `vanilla`），写入同样走共用输出保护：目标必须以 `.style.json` 结尾、已有文件需要 `--force`、父目录不存在需要 `--mkdir`，而且目标不得是它继承的来源。工具不会改写自己没有创建的风格文件，其他命令也不会写风格文件。
+- `style lint <path>` 会度量一张图片并对照指定风格（默认 `vanilla`）。报告先给 `metrics`（不透明像素数、不同颜色数、明度级数、动态范围、TL-BR 光向、覆盖率、最小边距、内侧外框像素数、外框明度差与色相差、色相箱、高光像素数与比例、缓冲率、抖动比例、主轴及其二阶矩、`firstFrameOnly`），再给 `findings`。每条 finding 都带 `code`、`level`、`measured`、`threshold`、`message` 与 `suggestion`。除 `STYLE_COLOR_BUDGET` 外全部是 warning，而它也是唯一能让本次运行失败的码；判定为 `pass`、`warnings` 或 `fail`，`fail` 的退出码与验证失败相同（3）。没有可比较对象的指标不产生 finding，只在 `skipped` 加一条（`no-opaque-pixels`、`animation-first-frame-only`）。`--category` 会套用该分类的阈值覆盖；未指定时，分类层级的规则（例如主轴角度）不检查。动画竖条只度量第一帧，并以 `firstFrameOnly` 标示。
 - 风格文件以严格模式读取：未知字段、枚举外的值，或不是 `#RRGGBB` 的颜色都是 `STYLE_INVALID`，并带字段路径（例如 `palettes.stone.base: expected #RRGGBB, got "#12345"`）。读不到或解析失败的文件、版本高于支持范围的 `formatVersion`（`STYLE_UNSUPPORTED_VERSION`）、`extends` 循环（`STYLE_INHERITANCE_CYCLE`）、`id` 撞到内置预设名称，以及查不到的内置 id（`STYLE_NOT_FOUND`），都会带上文件路径、字段路径与解析链。
 
 ---

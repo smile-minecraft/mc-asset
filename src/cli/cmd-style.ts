@@ -1,6 +1,7 @@
 import { dirname, resolve as resolvePath } from "node:path";
 import { McAssetError } from "../core/errors.ts";
 import { buildPaletteMcpx } from "../style/export-palette.ts";
+import { lintStyle } from "../style/lint.ts";
 import {
 	buildStyleFileText,
 	isStyleSource,
@@ -14,6 +15,7 @@ import {
 	type StyleSummary,
 } from "../style/types.ts";
 import { emitCommandFailure } from "./artifacts.ts";
+import { loadRasterCanvas } from "./canvas-input.ts";
 import {
 	emitEnvelope,
 	emitLog,
@@ -35,7 +37,9 @@ import {
  */
 
 export interface StyleOptions {
+	category?: string | undefined;
 	family?: string | undefined;
+	style?: string | undefined;
 	output?: string | undefined;
 	id?: string | undefined;
 	name?: string | undefined;
@@ -294,9 +298,45 @@ export async function runStyle(
 			}
 			return 0;
 		}
+		if (mode === "lint") {
+			if (source === undefined || source === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"style lint needs an image path.",
+				);
+			}
+			const loaded = await loadRasterCanvas(source);
+			const style = await resolveStyle(options.style ?? "vanilla");
+			const report = lintStyle({
+				canvas: loaded.canvas,
+				path: source,
+				style,
+				category: options.category ?? null,
+			});
+			const result = { command: "style", ...report };
+			if (globalJson) {
+				emitEnvelope(successEnvelope(result), streams, route);
+			} else {
+				emitLog(
+					`ok style lint path=${report.path} style=${report.style} category=${report.category ?? "-"} findings=${report.findings.length} verdict=${report.verdict}`,
+					streams,
+					route,
+				);
+				for (const finding of report.findings) {
+					emitLog(
+						`${finding.level} ${finding.code} measured=${finding.measured} threshold=${finding.threshold} ${finding.message}`,
+						streams,
+						route,
+					);
+				}
+			}
+			// An error-level finding is an asset validation failure, the same
+			// outcome `validate` reports, so it shares that exit code.
+			return report.verdict === "fail" ? 3 : 0;
+		}
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"style takes list, show, export-palette, or create.",
+			"style takes list, show, export-palette, create, or lint.",
 			{ mode },
 		);
 	} catch (error) {

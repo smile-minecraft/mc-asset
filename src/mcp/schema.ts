@@ -1123,8 +1123,24 @@ export const TOOL_INPUT_SCHEMAS = {
 	},
 	style_asset: {
 		mode: z
-			.enum(["list", "show", "export-palette", "create"])
-			.describe("Style subcommand: list, show, export-palette, or create."),
+			.enum(["list", "show", "export-palette", "create", "lint"])
+			.describe(
+				"Style subcommand: list, show, export-palette, create, or lint.",
+			),
+		inputPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"lint only: raster image path to measure and check; read only, never written.",
+			),
+		category: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"lint only: item category id, so its threshold overrides apply; omitted means category-scoped rules do not run.",
+			),
 		paths: z
 			.array(z.string().min(1))
 			.optional()

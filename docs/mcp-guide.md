@@ -766,6 +766,22 @@ resolved style does not carry). Only `export-palette` and `create` write,
 and only to their explicit output path; `force` replaces that file and
 `mkdir` creates missing parents.
 
+`lint` measures one image against one style and returns the frozen report:
+
+```json
+{"mode":"lint","inputPath":"assets/pack/textures/item/ruby_sword.png","style":"vanilla","category":"sword"}
+```
+
+The result carries `path`, `style`, `category`, the `metrics` block (the same
+fields `analyze_asset` reports as `styleMetrics`), `findings`, `skipped`,
+and `verdict` (`pass`, `warnings`, `fail`). Each finding carries `code`,
+`level`, `measured`, `threshold`, `message`, and `suggestion`; every code is
+a warning except `STYLE_COLOR_BUDGET`. A metric with nothing to compare adds
+a `skipped` reason instead of a finding, `category` applies that category's
+threshold overrides, and an animation strip is measured as its first frame
+(`firstFrameOnly: true`). `analyze_asset` reports the same measurement
+block under `styleMetrics`; its other fields are unchanged.
+
 ### pack_asset
 
 Creates one resource pack project. `init` takes `projectDir`,

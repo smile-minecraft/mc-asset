@@ -51,7 +51,7 @@ is no `set_pixel` tool on purpose.
 | `model_asset` | Java block/item model JSON, one `mode` (`inspect` / `validate` / `create` / `apply` / `export` / `preview`), optional pack, vanilla, and dependency roots | Optional explicit `.json` paths (model, item definition, blockstate), or an explicit `.png` path (`preview`) | Read-only report (`inspect`, `validate`), the model document and generated bindings (`create`, `apply`, `export`), or a diagnostic three-view PNG (`preview`) |
 | `mcmeta_asset` | PNG sprite sheet (`animation`) or design sprite (`gui`), mode-specific parameters, version fields | Optional explicit `.mcmeta` output path (`force`, `mkdir`) | Generated `.mcmeta` text and metadata summary (writes file only with `outputPath`) |
 | `compare_assets` | Two same-size PNGs, `image` (`none` / `diff`), `scale` (1–16) | Optional explicit PNG output path (`force`, `mkdir`; only with `image: "diff"`) | Comparison report (dimensions, raw and visible difference counts, bounds) plus optional standard PNG image block (writes file only with `outputPath`) |
-| `style_asset` | Style presets and `.style.json` sources, one `mode` (`list` / `show` / `export-palette` / `create`) | Optional explicit `.mcpx` path (`export-palette`) or `.style.json` path (`create`) | Preset list, resolved style, palette `.mcpx` text or file, or the written style document |
+| `style_asset` | Style presets and `.style.json` sources, or one raster image (`lint`), one `mode` (`list` / `show` / `export-palette` / `create` / `lint`) | Optional explicit `.mcpx` path (`export-palette`) or `.style.json` path (`create`) | Preset list, resolved style, palette `.mcpx` text or file, the written style document, or a style report |
 | `pack_asset` | Nothing; one `mode` (`init`) plus a project directory, namespace, and release version | The new project directory and nothing else | Report of the created project skeleton, or a refusal with the conflicting paths |
 
 ## Input semantics
@@ -67,7 +67,7 @@ is no `set_pixel` tool on purpose.
   normalized to `major.minor`. Omitted means engine defaults.
 - Subcommand tools merge CLI modes into a `mode` field: `palette_asset`
   (`extract` / `inspect`), `material_asset` (`list` / `show`),
-  `style_asset` (`list` / `show` / `export-palette` / `create`),
+  `style_asset` (`list` / `show` / `export-palette` / `create` / `lint`),
   `pack_asset` (`init`),
   `preview_asset` (`ascii` / `palette-map` / `scale` / `nine-slice`),
   `animate_asset` (`pack` / `unpack` / `reorder` / `resize` /
@@ -91,6 +91,16 @@ is no `set_pixel` tool on purpose.
   (`STYLE_UNSUPPORTED_VERSION`), and a family the style does not resolve
   (`STYLE_FAMILY_NOT_FOUND`). The tool never rewrites a style file it did
   not create.
+- `style_asset` in `lint` mode takes `inputPath` plus the optional `style`
+  (default `vanilla`) and `category`, and returns the frozen report: `mode`,
+  `path`, `style`, `category`, the same `metrics` block `analyze_asset`
+  reports under `styleMetrics`, `findings`, `skipped`, and `verdict`
+  (`pass`, `warnings`, `fail`). Each finding carries `code`, `level`,
+  `measured`, `threshold`, `message`, and `suggestion`; every code is a
+  warning except `STYLE_COLOR_BUDGET`. A metric with nothing to compare
+  reports no finding and a `skipped` reason instead. `category` applies that
+  category's threshold overrides, and an animation strip is measured as its
+  first frame (`firstFrameOnly: true`). The image is read only.
 - `pack_asset` creates one resource pack project. `init` takes
   `projectDir`, `namespace`, and `minecraftVersion` (all required) plus
   optional `name` (defaults to the directory name), `description`
@@ -213,6 +223,11 @@ is no `set_pixel` tool on purpose.
 
 ## Output semantics
 
+- `analyze_asset` adds one block to its report, `styleMetrics`: the frozen
+  integer style measurement (opaque pixels, colors, levels, dynamic range,
+  TL-BR, coverage, margin, outline pixels, outline gap and hue offset, hue
+  bins, highlight and buffer, dither, main axis, and `firstFrameOnly`). Its
+  existing fields are unchanged, and the image is still only read.
 - Read-only tools (`analyze_asset`, `validate_asset`, `palette_asset`,
   `material_asset`, `validate_pack_asset`) return reports;
   `validate_asset` reports `fail` with findings rather than raising.

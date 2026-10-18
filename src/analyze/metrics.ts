@@ -9,6 +9,8 @@ import {
 } from "../profiles/classify.ts";
 import { describeAssetProfilePredicted } from "../profiles/profiles.ts";
 import { pendingSourceWarnings } from "../profiles/versions.ts";
+import type { StyleMetrics } from "./style-metrics.ts";
+import { measureStyleMetrics } from "./style-metrics.ts";
 
 /**
  * Analyze metrics engine. Pure and read-only: the canvas is only read
@@ -25,6 +27,11 @@ export const RATIO_DECIMALS = 4;
 export interface AnalyzeOptions {
 	profile?: string | undefined;
 	packFormat?: string | undefined;
+	/**
+	 * Set when the analyzed image is one frame of an animation strip, so
+	 * `styleMetrics` can say it only measured the first frame.
+	 */
+	styleFirstFrameOnly?: boolean | undefined;
 	/**
 	 * Normalization notes from the decoder (gAMA / iCCP on the PNG path).
 	 * Passed in so the engine stays pure: it never touches the file or
@@ -121,6 +128,12 @@ export interface AnalyzeReport {
 	pixelArtCharacteristics: AnalyzePixelArtCharacteristics;
 	recommended: AnalyzeRecommended;
 	warnings: AnalyzeWarning[];
+	/**
+	 * Frozen style measurement block; existing fields above are unchanged.
+	 * `analyzeCanvas` always fills it, so a consumer reads one object
+	 * instead of guarding for its absence.
+	 */
+	styleMetrics: StyleMetrics;
 }
 
 function byteToHex(value: number): string {
@@ -323,6 +336,9 @@ export function analyzeCanvas(
 		)
 		.map(([role, count]) => ({ role, count }));
 	const divisor = gcd(canvas.width, canvas.height);
+	const styleMetrics = measureStyleMetrics(canvas, {
+		firstFrameOnly: options.styleFirstFrameOnly === true,
+	});
 	return {
 		dimensions: { width: canvas.width, height: canvas.height },
 		totalPixels: total,
@@ -367,6 +383,7 @@ export function analyzeCanvas(
 			cleanup: { classes: [] },
 			resize: { mode: "nearest" },
 		},
+		styleMetrics,
 		warnings,
 	};
 }
