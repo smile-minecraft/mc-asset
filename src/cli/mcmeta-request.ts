@@ -3,6 +3,7 @@ import type { McmetaAnimationFrame, NineSliceBorder } from "../core/mcmeta.ts";
 import {
 	generateAnimationMcmeta,
 	generateGuiMcmeta,
+	type TimelinePreset,
 } from "../core/mcmeta-generate.ts";
 import { decodePng } from "../io/png.ts";
 import { readInputFile } from "./artifacts.ts";
@@ -33,6 +34,8 @@ export interface McmetaRequest {
 	frameSize?: string | undefined;
 	frametime?: number | undefined;
 	frames?: ReadonlyArray<number | McmetaAnimationFrame> | undefined;
+	preset?: TimelinePreset | undefined;
+	holdTicks?: number | undefined;
 	interpolate?: boolean | undefined;
 	type?: string | undefined;
 	border?: number | NineSliceBorder | undefined;
@@ -51,7 +54,14 @@ export interface PreparedMcmeta {
 	target: string;
 }
 
-const ANIMATION_ONLY = ["frameSize", "frametime", "frames", "interpolate"];
+const ANIMATION_ONLY = [
+	"frameSize",
+	"frametime",
+	"frames",
+	"preset",
+	"holdTicks",
+	"interpolate",
+];
 const GUI_ONLY = ["type", "border", "stretchInner"];
 
 function assertApplicableFields(request: McmetaRequest): void {
@@ -87,6 +97,8 @@ export async function prepareMcmeta(
 					frameSize: request.frameSize ?? "",
 					frametime: request.frametime,
 					frames: request.frames,
+					preset: request.preset,
+					holdTicks: request.holdTicks,
 					interpolate: request.interpolate,
 				})
 			: generateGuiMcmeta({

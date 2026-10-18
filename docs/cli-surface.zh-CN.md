@@ -216,24 +216,32 @@ gui-scale <input> --size <N|WxH> [--mcmeta <path>]
 | 命令 | 输入 | 输出 | 说明 |
 |---|---|---|---|
 | `animate pack` | 帧目录（`.mcpx`） | PNG 精灵图集 | 将单张帧合并为精灵图集。 |
-| `animate unpack <sheet>` | PNG 精灵图集 | 帧目录（`.mcpx`） | 将动画图集切分为单张帧。 |
+| `animate sweep <image>` | PNG 静态图 | 垂直精灵图集 PNG（可另附 `.mcmeta`） | 让一条反光带扫过一张静态图，第 0 帧是原图。 |
+| `animate unpack <sheet>` | PNG 精灵图集 | 帧目录（`.mcpx`，`--format png` 时每帧一张 PNG） | 将动画图集切分为单张帧。 |
 | `animate reorder` | 帧目录 | 帧目录 | 按索引列表重新排列动画帧。 |
 | `animate resize` | 帧目录 | 帧目录 | 缩放动画组内的所有帧。 |
 | `animate validate` | 帧目录（加 `.mcmeta`） | 仅报告 | 按 `.mcmeta` 验证帧尺寸、播放序列索引与每步时间；重复或部分播放序列合法。 |
-| `animate preview` | 帧目录 | 报告或 ASCII 预览 | 预览动画序列。 |
+| `animate preview` | 帧目录 | 报告或 ASCII 预览，`--output` 另写出图集 PNG | 预览动画序列。 |
 
 ```text
 animate pack     --frames-dir <dir> --layout <vertical|horizontal|grid> [--columns <N>]
                  [--output <png>] [--stdout] <file flags>
+animate sweep    <image.png> [--angle <45|90|135|180>] [--width <N>] [--color <#RRGGBB>]
+                 [--frames <N>] [--frametime <N>] [--hold-ticks <N>] [--style <id|path>]
+                 [--output <png>] [--stdout] [--output-mcmeta <path>] <file flags>
 animate unpack   <sheet.png> --layout <vertical|horizontal|grid> --frame-size <N|WxH>
-                 [--columns <N>] [--mcmeta <path>] --output-dir <dir> <file flags>
+                 [--columns <N>] [--format <mcpx|png>] [--mcmeta <path>] --output-dir <dir> <file flags>
 animate reorder  --frames-dir <dir> --order <i,j,...> --output-dir <dir> <file flags>
 animate resize   --frames-dir <dir> --frame-size <N|WxH> [--resize-mode <nearest|box|pixel-aware>]
                  --output-dir <dir> <file flags>
 animate validate --frames-dir <dir> [--mcmeta <path>] [--profile <name>] [--json]
 animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--columns <N>]
-                 [--ascii] [--profile <name>] [--json]
+                 [--output <png>] [--ascii] [--profile <name>] [--json]
 ```
+
+- `animate sweep` 输出一张垂直图集：第 0 帧是原图，之后每一帧把反光带往下一个位置推进。`--angle` 只接受 45、90、135、180，其他角度直接拒绝；条带坐标在 135 度是 `x - y`、45 度是 `x + y`、90 度是 `x`、180 度是 `y`，两个对角角度每帧前进两个坐标单位，水平与垂直每帧前进一个。`--width` 是条带宽度像素数（1 到 8），`--color` 是一个不透明的 `#RRGGBB`，`--frames` 是含第 0 帧的总帧数（1 到 64）。只有完全不透明的来源像素会被覆盖，所以整张图集的轮廓、透明度平面与 alpha 0 之下的隐藏色维持逐位元组相同。`--style` 指定内建预设 id 或 `.style.json` 文件（预设 `vanilla`）以取得动画预设值，单一旗标只覆盖其中一项。`--output-mcmeta` 另写出同伴文件，其中的 `frames` 依解析后风格的时间轴预设展开。`--output` 与 `--stdout` 至少要有一个。
+- `mcmeta animation` 的 `--preset` 用具名时间轴展开 `frames`，取代手写清单：`hold-and-sweep` 让第 0 帧停留 `--hold-ticks`（预设 100）拍再往前播，`ping-pong` 去程与回程不重复两端，`pulse` 在去程与回程于两端各停一拍。`--preset` 与 `--frames` 互斥（`ARGUMENT_CONFLICT`）；单帧或两帧的图集展开时不会重复端点；清单中的裸索引维持原样，由 `--frametime` 决定它们的停留时间。
+- `animate unpack --format png` 在 `--output-dir` 下每帧写出一张 PNG；预设仍是 `.mcpx`，其他值一律 `INVALID_ARGUMENT`。文件名沿用既有的补零规则（`frame_0.png` 到 `frame_9.png`）。`animate preview --output <png>` 依报告描述的同一种版面写出图集图片；不带 `--output` 时不写任何文件，报告内容完全不变。
 
 ---
 
@@ -484,7 +492,7 @@ mc-asset mcmeta animation sheet.png --frame-size 16 --frametime 2 --frames '[0,{
 mc-asset mcmeta gui panel.png --type nine_slice --border 4 --stretch-inner --resource-pack-version 42 --stdout
 ```
 
-动画必须指定 `--frame-size <N|WxH>`，帧只支持单排或单列，尺寸必须整除 PNG；不接受网格。`frametime` 默认 1，`frames` 接受索引或 `{index,time}` 对象，可重复或只播放部分帧；省略时依序播放全部帧。时間必须是正整数，索引不得越界；`--interpolate` 启用插值。GUI 必须指定 `--type <stretch|tile|nine_slice>`，tile 与 nine_slice 以 PNG 尺寸作设计尺寸。nine_slice 必须指定 `--border <N|json>`，四边 left、top、right、bottom 为非负整数，中央必须保留正面积；只有 nine_slice 接受 `--stretch-inner`。
+动画必须指定 `--frame-size <N|WxH>`，帧只支持单排或单列，尺寸必须整除 PNG；不接受网格。`frametime` 默认 1，`frames` 接受索引或 `{index,time}` 对象，可重复或只播放部分帧；省略时依序播放全部帧。时間必须是正整数，索引不得越界；`--interpolate` 启用插值。`--preset <hold-and-sweep|ping-pong|pulse>` 以具名时间轴展开播放顺序，取代手写 `frames`，并让两端或首帧停留 `--hold-ticks`，不能与 `--frames` 同时使用。GUI 必须指定 `--type <stretch|tile|nine_slice>`，tile 与 nine_slice 以 PNG 尺寸作设计尺寸。nine_slice 必须指定 `--border <N|json>`，四边 left、top、right、bottom 为非负整数，中央必须保留正面积；只有 nine_slice 接受 `--stretch-inner`。
 
 CLI 必须明确选择 `--output <path.mcmeta>` 或 `--stdout` 其中之一，不猜同名路径。已存在的目标需要 `--force`，它会整个文件替换，不保留其他区段；`--mkdir` 允许建立缺少的父目录。来源 PNG 与无关的同名设置不变，输入别名与符号链接会被拒绝。输出只含指定区段，以固定键顺序的紧凑 JSON 加一个结尾换行生成。
 

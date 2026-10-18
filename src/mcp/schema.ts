@@ -586,6 +586,20 @@ export const mcmetaAssetInput = {
 		.describe(
 			"animation: playback order of indices and/or {index,time}; repeats and partial lists are valid. Omitted means all frames in order.",
 		),
+	preset: z
+		.enum(["hold-and-sweep", "ping-pong", "pulse"])
+		.optional()
+		.describe(
+			"animation: expand frames from a named timeline shape; conflicts with frames.",
+		),
+	holdTicks: z
+		.number()
+		.int()
+		.min(1)
+		.optional()
+		.describe(
+			"animation preset: ticks the first frame rests for, default 100.",
+		),
 	interpolate: z.boolean().optional().describe("animation: blend frames."),
 	type: z
 		.enum(["stretch", "tile", "nine_slice"])
@@ -1012,10 +1026,23 @@ export const TOOL_INPUT_SCHEMAS = {
 	},
 	animate_asset: {
 		mode: z
-			.enum(["pack", "unpack", "reorder", "resize", "validate", "preview"])
+			.enum([
+				"pack",
+				"sweep",
+				"unpack",
+				"reorder",
+				"resize",
+				"validate",
+				"preview",
+			])
 			.describe(
-				"Animation subcommand: pack, unpack, reorder, resize, validate, or preview.",
+				"Animation subcommand: pack, sweep, unpack, reorder, resize, validate, or preview.",
 			),
+		inputPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("sweep: still image to sweep; read only, never written."),
 		framesDir: z
 			.string()
 			.min(1)
@@ -1036,6 +1063,45 @@ export const TOOL_INPUT_SCHEMAS = {
 			),
 		columns: z.number().optional().describe("Grid column count."),
 		frameSize: z.string().min(1).optional().describe("Frame size as N or WxH."),
+		format: z
+			.enum(["mcpx", "png"])
+			.optional()
+			.describe("unpack: per-frame output format, mcpx by default."),
+		angle: z
+			.union([z.literal(45), z.literal(90), z.literal(135), z.literal(180)])
+			.optional()
+			.describe("sweep: band angle in degrees; only 45, 90, 135, and 180."),
+		width: z
+			.number()
+			.int()
+			.min(1)
+			.max(8)
+			.optional()
+			.describe("sweep: band width in pixels, 1 to 8."),
+		color: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("sweep: opaque #RRGGBB band colour."),
+		frames: z
+			.number()
+			.int()
+			.min(1)
+			.max(64)
+			.optional()
+			.describe("sweep: frame count including the untouched first frame."),
+		holdTicks: z
+			.number()
+			.int()
+			.min(1)
+			.optional()
+			.describe("sweep: ticks the first frame rests for."),
+		frametime: z
+			.number()
+			.int()
+			.min(1)
+			.optional()
+			.describe("sweep: ticks per frame of the generated document."),
 		resizeMode: z
 			.enum(["nearest", "box", "pixel-aware"])
 			.optional()
@@ -1050,6 +1116,11 @@ export const TOOL_INPUT_SCHEMAS = {
 			.min(1)
 			.optional()
 			.describe("Explicit .mcmeta path used by unpack and validate."),
+		outputMcmetaPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("sweep: optional companion .mcmeta output path."),
 		profile: profileField,
 		outputPngPath: outputPngField,
 		outputDir: z

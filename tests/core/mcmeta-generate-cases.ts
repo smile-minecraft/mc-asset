@@ -372,4 +372,132 @@ export const MCMETA_GENERATE_CORE_CASES: {
 			}
 		},
 	},
+	{
+		name: "timeline: hold-and-sweep holds the first frame, then plays forward",
+		run() {
+			assert.equal(
+				animation({ preset: "hold-and-sweep", holdTicks: 100 }).text,
+				animation({
+					frames: [{ index: 0, time: 100 }, 1, 2, 3],
+				}).text,
+			);
+			assert.equal(
+				animation({
+					sheetWidth: 16,
+					sheetHeight: 160,
+					preset: "hold-and-sweep",
+					frametime: 3,
+					holdTicks: 40,
+				}).text,
+				'{"animation":{"width":16,"height":16,"frametime":3,"frames":[{"index":0,"time":40},1,2,3,4,5,6,7,8,9]}}\n',
+			);
+			rejectsWith("ARGUMENT_CONFLICT", () =>
+				animation({ preset: "pulse", frames: [0, 1, 2, 3] }),
+			);
+			rejectsWith("ARGUMENT_CONFLICT", () =>
+				animation({ preset: "hold-and-sweep", frames: [{ index: 0 }] }),
+			);
+		},
+	},
+	{
+		name: "timeline: ping-pong plays forward and back without repeating the ends",
+		run() {
+			assert.equal(
+				animation({ preset: "ping-pong", holdTicks: 100 }).text,
+				animation({ frames: [0, 1, 2, 3, 2, 1] }).text,
+			);
+			assert.equal(
+				animation({
+					sheetWidth: 16,
+					sheetHeight: 160,
+					frametime: 2,
+					preset: "ping-pong",
+					holdTicks: 100,
+				}).text,
+				'{"animation":{"width":16,"height":16,"frametime":2,"frames":[0,1,2,3,4,5,6,7,8,9,8,7,6,5,4,3,2,1]}}\n',
+			);
+		},
+	},
+	{
+		name: "timeline: pulse holds both ends while going out and back",
+		run() {
+			assert.equal(
+				animation({ preset: "pulse", holdTicks: 60 }).text,
+				animation({
+					frames: [
+						{ index: 0, time: 60 },
+						1,
+						2,
+						3,
+						{ index: 3, time: 60 },
+						2,
+						1,
+					],
+				}).text,
+			);
+			assert.equal(
+				animation({
+					sheetWidth: 16,
+					sheetHeight: 160,
+					frametime: 2,
+					preset: "pulse",
+					holdTicks: 60,
+				}).text,
+				'{"animation":{"width":16,"height":16,"frametime":2,"frames":[{"index":0,"time":60},1,2,3,4,5,6,7,8,9,{"index":9,"time":60},8,7,6,5,4,3,2,1]}}\n',
+			);
+		},
+	},
+	{
+		name: "timeline: a preset and an explicit frame list conflict",
+		run() {
+			rejectsWith("ARGUMENT_CONFLICT", () =>
+				animation({ preset: "pulse", frames: [0, 1, 2, 3] }),
+			);
+			rejectsWith("ARGUMENT_CONFLICT", () =>
+				animation({ preset: "hold-and-sweep", frames: [{ index: 0 }] }),
+			);
+		},
+	},
+	{
+		name: "timeline: a preset needs a hold time, a frametime, and interpolate is opt-in",
+		run() {
+			rejectsWith("INVALID_ARGUMENT", () =>
+				animation({ preset: "ping-pong", holdTicks: 0 }),
+			);
+			rejectsWith("INVALID_ARGUMENT", () =>
+				animation({ preset: "ping-pong", frametime: 0 }),
+			);
+			rejectsWith("INVALID_ARGUMENT", () =>
+				animation({ preset: "bounce" as never }),
+			);
+			rejectsWith("INVALID_ARGUMENT", () => animation({ preset: "" as never }));
+			assert.equal(
+				animation({ preset: "ping-pong", interpolate: true }).text,
+				'{"animation":{"width":16,"height":16,"frametime":1,"interpolate":true,"frames":[0,1,2,3,2,1]}}\n',
+			);
+			assert.equal(
+				animation({ preset: "ping-pong", interpolate: false }).text,
+				animation({ frames: [0, 1, 2, 3, 2, 1] }).text,
+			);
+		},
+	},
+	{
+		name: "timeline: short sheets keep their presets well formed",
+		run() {
+			for (const preset of ["hold-and-sweep", "ping-pong", "pulse"] as const) {
+				assert.equal(
+					animation({ sheetWidth: 16, sheetHeight: 16, preset }).text,
+					'{"animation":{"width":16,"height":16,"frametime":1,"frames":[{"index":0,"time":100}]}}\n',
+					`${preset} on one frame holds it once`,
+				);
+				assert.equal(
+					animation({ sheetWidth: 16, sheetHeight: 32, preset }).text,
+					preset === "hold-and-sweep"
+						? '{"animation":{"width":16,"height":16,"frametime":1,"frames":[{"index":0,"time":100},1]}}\n'
+						: '{"animation":{"width":16,"height":16,"frametime":1,"frames":[0,1]}}\n',
+					`${preset} on two frames has no repeated end`,
+				);
+			}
+		},
+	},
 ];

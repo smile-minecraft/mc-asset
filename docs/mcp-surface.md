@@ -44,7 +44,7 @@ is no `set_pixel` tool on purpose.
 | `tile_asset` | Raster image or `.mcpx`, optional preview grid and match axes | Optional explicit PNG path | Seam and edge report, or preview PNG |
 | `generate_asset` | None (pattern + size + palette + seed) | Optional explicit PNG / `.mcpx` paths | Deterministic procedural PNG bytes and/or editable source |
 | `preview_asset` | Raster image or `.mcpx`, one `mode` (`ascii` / `palette-map` / `scale` / `nine-slice`) | Optional explicit PNG path (`scale`, `nine-slice`) | Read-only report, or preview PNG |
-| `animate_asset` | Frames directory or sprite sheet, one `mode` (`pack` / `unpack` / `reorder` / `resize` / `validate` / `preview`) | Explicit PNG path (`pack`) or output directory (`unpack`, `reorder`, `resize`) | Sheet PNG, frames, or read-only report |
+| `animate_asset` | Frames directory, sprite sheet, or one still image (`sweep`), one `mode` (`pack` / `sweep` / `unpack` / `reorder` / `resize` / `validate` / `preview`) | Explicit PNG path (`pack`, `sweep`, `preview`) or output directory (`unpack`, `reorder`, `resize`) | Sheet PNG, frames, or read-only report |
 | `validate_pack_asset` | Resource pack root, plus optional vanilla tree and dependency roots | Nothing | Read-only verdict with findings and a coverage object |
 | `inspect_asset` | Editable `.mcpx` source or raster image (raster reads as a single base layer), one `mode` (`structure` / `view`), view-only `crop` and `scale` | Nothing | Read-only report (structure), or composited PNG image block plus metadata (view) |
 | `optimize_asset` | PNG files (1 to 256 explicit paths) or a directory (`inputDir`, up to 4096 PNGs, optional `recursive`) | Optional explicit PNG output path (single explicit input), or an existing output directory | Per-file report (source and result size, mode, candidates, chunks, warnings) plus totals; PNG bytes embedded for one input without an output |
@@ -70,7 +70,7 @@ is no `set_pixel` tool on purpose.
   `style_asset` (`list` / `show` / `export-palette` / `create` / `lint`),
   `pack_asset` (`init`),
   `preview_asset` (`ascii` / `palette-map` / `scale` / `nine-slice`),
-  `animate_asset` (`pack` / `unpack` / `reorder` / `resize` /
+  `animate_asset` (`pack` / `sweep` / `unpack` / `reorder` / `resize` /
   `validate` / `preview`).
 - `style_asset` carries the four builtin presets (`vanilla`, `soft`,
   `fairy-flat`, `dark-frame`), each with twelve families and six roles
@@ -275,7 +275,7 @@ Use one of `--minecraft-version` or `--resource-pack-version`. GUI scaling requi
 
 ### mcmeta_asset
 
-Use `mode` (`animation` or `gui`) and `inputPath` (PNG). `animation`: `frameSize`, `frametime`, `frames`, `interpolate`; `gui`: `type`, `border`, `stretchInner`. `minecraftVersion` / `resourcePackVersion` select the target. Fields belonging to the other mode are `INVALID_ARGUMENT`, including false values. `outputPath` writes an explicit `.mcmeta` file with optional `force` / `mkdir`; without `outputPath`, the result includes `mcmetaText` and writes nothing (`force` / `mkdir` require a path). Results include `mode`, `width`, `height`, `versionChecked`, `version`, `target`, `warnings`, and either `output` or `mcmetaText`.
+Use `mode` (`animation` or `gui`) and `inputPath` (PNG). `animation`: `frameSize`, `frametime`, `frames`, `preset`, `holdTicks`, `interpolate`; `gui`: `type`, `border`, `stretchInner`. `preset` (`hold-and-sweep`, `ping-pong`, or `pulse`) expands `frames` from a named timeline, resting frame 0 or both ends for `holdTicks` (default 100) instead of taking a list; `preset` and `frames` together are `ARGUMENT_CONFLICT`. `minecraftVersion` / `resourcePackVersion` select the target. Fields belonging to the other mode are `INVALID_ARGUMENT`, including false values. `outputPath` writes an explicit `.mcmeta` file with optional `force` / `mkdir`; without `outputPath`, the result includes `mcmetaText` and writes nothing (`force` / `mkdir` require a path). Results include `mode`, `width`, `height`, `versionChecked`, `version`, `target`, `warnings`, and either `output` or `mcmetaText`.
 
 ```json
 {"mode":"gui","inputPath":"panel.png","type":"nine_slice","border":4,"stretchInner":true,"resourcePackVersion":"42"}

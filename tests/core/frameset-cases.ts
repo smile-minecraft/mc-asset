@@ -8,9 +8,11 @@ import {
 	createFrameSet,
 	describeFrameSet,
 	frameFileName,
+	frameOutputFileName,
 	packFrameSet,
 	parseAnimationLayout,
 	parseFrameOrder,
+	parseFrameOutputFormat,
 	parseFrameSize,
 	parseGridColumns,
 	reorderFrames,
@@ -590,6 +592,52 @@ export const FRAMESET_CASES: ModelCase[] = [
 			check.equal(first.verdict, "pass", "verdict");
 			check.equal(first.frameCount, 2, "count");
 			check.deepEqual(first.findings, [], "no findings");
+		},
+	},
+	{
+		name: "unpack output format defaults to mcpx and names PNG frames",
+		run(check) {
+			check.equal(
+				parseFrameOutputFormat(undefined),
+				"mcpx",
+				"omitted format stays mcpx",
+			);
+			check.equal(
+				parseFrameOutputFormat(""),
+				"mcpx",
+				"empty format stays mcpx",
+			);
+			check.equal(parseFrameOutputFormat("png"), "png", "png parses");
+			check.throwsCode(
+				() => parseFrameOutputFormat("gif"),
+				"INVALID_ARGUMENT",
+				"unknown format",
+			);
+			check.throwsCode(
+				() => parseFrameOutputFormat("PNG"),
+				"INVALID_ARGUMENT",
+				"format spelling is exact",
+			);
+			check.equal(
+				frameOutputFileName(0, 10, "mcpx"),
+				frameFileName(0, 10),
+				"mcpx names match the historical naming",
+			);
+			check.equal(
+				frameOutputFileName(1, 10, "png"),
+				"frame_1.png",
+				"png names pad like the mcpx names",
+			);
+			check.equal(
+				frameOutputFileName(9, 10, "png"),
+				"frame_9.png",
+				"the last frame keeps the count width",
+			);
+			check.equal(
+				frameOutputFileName(1, 12, "png"),
+				"frame_01.png",
+				"counts above ten pad to two digits",
+			);
 		},
 	},
 ];

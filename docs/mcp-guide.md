@@ -586,6 +586,23 @@ Result (verbatim; `pngBase64` is truncated):
 {"mode":"pack","profile":"generic","frameCount":2,"frameWidth":4,"frameHeight":4,"layout":"vertical","width":4,"height":8,"warnings":[],"pngBase64":"iVBORw0KGgoAAAANSUhEUgAAAAQAAAAI… (truncated) …"}
 ```
 
+`sweep` turns one still image into a highlight band that walks across it:
+`inputPath` plus the optional `angle` (45, 90, 135, or 180; default 135),
+`width` (1 to 8), `color` (`#RRGGBB`), `frames` (including the untouched
+frame 0), `frametime`, and `holdTicks`, with `outputPngPath` and
+`outputMcmetaPath` as the optional targets. Frame 0 is the source and only
+fully opaque pixels are repainted, so the silhouette and the alpha plane
+never move. Parameters left out take the builtin default style's animation
+rules. `unpack` takes `format` (`mcpx` by default, or `png`), and `preview`
+writes its sheet image when `outputPngPath` is given and reports only
+without it.
+
+Call:
+
+```json
+{"mode":"sweep","inputPath":"gem.png","angle":45,"width":2,"frames":8,"outputPngPath":"gem_sweep.png","outputMcmetaPath":"gem_sweep.png.mcmeta"}
+```
+
 ### validate_pack_asset
 
 Read-only verdict over a whole resource pack root; never writes. An
@@ -930,7 +947,7 @@ Use one of `--minecraft-version` or `--resource-pack-version`. GUI scaling requi
 
 ### mcmeta_asset
 
-Use `mode` (`animation` or `gui`) and `inputPath` (PNG). `animation`: `frameSize`, `frametime`, `frames`, `interpolate`; `gui`: `type`, `border`, `stretchInner`. `minecraftVersion` / `resourcePackVersion` select the target. Fields belonging to the other mode are `INVALID_ARGUMENT`, including false values. `outputPath` writes an explicit `.mcmeta` file with optional `force` / `mkdir`; without `outputPath`, the result includes `mcmetaText` and writes nothing (`force` / `mkdir` require a path). Results include `mode`, `width`, `height`, `versionChecked`, `version`, `target`, `warnings`, and either `output` or `mcmetaText`.
+Use `mode` (`animation` or `gui`) and `inputPath` (PNG). `animation`: `frameSize`, `frametime`, `frames`, `preset`, `holdTicks`, `interpolate`; `preset` (`hold-and-sweep`, `ping-pong`, or `pulse`) expands `frames` from a named timeline and cannot be combined with `frames`; `gui`: `type`, `border`, `stretchInner`. `minecraftVersion` / `resourcePackVersion` select the target. Fields belonging to the other mode are `INVALID_ARGUMENT`, including false values. `outputPath` writes an explicit `.mcmeta` file with optional `force` / `mkdir`; without `outputPath`, the result includes `mcmetaText` and writes nothing (`force` / `mkdir` require a path). Results include `mode`, `width`, `height`, `versionChecked`, `version`, `target`, `warnings`, and either `output` or `mcmetaText`.
 
 ```json
 {"mode":"gui","inputPath":"panel.png","type":"nine_slice","border":4,"stretchInner":true,"resourcePackVersion":"42"}

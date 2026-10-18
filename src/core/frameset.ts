@@ -222,6 +222,51 @@ export function frameFileName(index: number, count: number): string {
 }
 
 /**
+ * What an unpack writes per frame: the historical `.mcpx` text, or one PNG
+ * per frame. Only the writer layer encodes PNG bytes; the geometry and the
+ * naming stay here.
+ */
+export type FrameOutputFormat = "mcpx" | "png";
+
+export const FRAME_OUTPUT_FORMATS: readonly FrameOutputFormat[] = [
+	"mcpx",
+	"png",
+];
+
+/** Parse an output format; an omitted or empty value keeps the `.mcpx` default. */
+export function parseFrameOutputFormat(
+	raw: string | undefined,
+): FrameOutputFormat {
+	if (raw === undefined || raw === "") {
+		return "mcpx";
+	}
+	if (!(FRAME_OUTPUT_FORMATS as ReadonlyArray<string>).includes(raw)) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			`Unknown frame output format "${raw}". Formats: mcpx, png.`,
+			{ format: raw, supported: [...FRAME_OUTPUT_FORMATS] },
+		);
+	}
+	return raw as FrameOutputFormat;
+}
+
+/**
+ * The frame file name for one output format. The `.mcpx` branch is exactly
+ * the historical `frameFileName` string, byte for byte.
+ */
+export function frameOutputFileName(
+	index: number,
+	count: number,
+	format: FrameOutputFormat,
+): string {
+	if (format === "png") {
+		const width = String(Math.max(0, count - 1)).length;
+		return `frame_${String(index).padStart(width, "0")}.png`;
+	}
+	return frameFileName(index, count);
+}
+
+/**
  * Validate the memory model: count >= 1, every frame a valid canvas of the
  * shared frameWidth x frameHeight. Mismatches are INVALID_ANIMATION_FRAME
  * with the frame index plus expected / actual dimensions.

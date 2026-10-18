@@ -3,6 +3,7 @@ import {
 	parseBorderOption,
 	parseFramesOption,
 	parsePositiveIntOption,
+	parseTimelinePreset,
 } from "../core/mcmeta-generate.ts";
 import { emitCommandFailure, resolveInputPath } from "./artifacts.ts";
 import {
@@ -26,6 +27,8 @@ export interface McmetaCliOptions {
 	frameSize?: string | undefined;
 	frametime?: string | undefined;
 	frames?: string | undefined;
+	preset?: string | undefined;
+	holdTicks?: string | undefined;
 	interpolate?: boolean | undefined;
 	type?: string | undefined;
 	border?: string | undefined;
@@ -55,6 +58,14 @@ function toRequest(
 			options.frames === undefined
 				? undefined
 				: parseFramesOption(options.frames),
+		preset:
+			options.preset === undefined
+				? undefined
+				: parseTimelinePreset(options.preset),
+		holdTicks:
+			options.holdTicks === undefined
+				? undefined
+				: parsePositiveIntOption(options.holdTicks, "--hold-ticks"),
 		interpolate: options.interpolate,
 		type: options.type,
 		border:

@@ -216,24 +216,34 @@ gui-scale <input> --size <N|WxH> [--mcmeta <path>]
 | 指令 | 輸入 | 輸出 | 說明 |
 |---|---|---|---|
 | `animate pack` | 影格目錄（`.mcpx`） | PNG 精靈圖集 | 將單張影格合併成精靈圖集。 |
-| `animate unpack <sheet>` | PNG 精靈圖集 | 影格目錄（`.mcpx`） | 將動畫圖集切成單張影格。 |
+| `animate sweep <image>` | PNG 靜態圖 | 垂直精靈圖集 PNG（可另加 `.mcmeta`） | 讓一條反光帶掃過一張靜態圖，第 0 格是原圖。 |
+| `animate unpack <sheet>` | PNG 精靈圖集 | 影格目錄（`.mcpx`，`--format png` 時每格一張 PNG） | 將動畫圖集切成單張影格。 |
 | `animate reorder` | 影格目錄 | 影格目錄 | 依索引清單重新排列動畫影格。 |
 | `animate resize` | 影格目錄 | 影格目錄 | 縮放動畫組內的所有影格。 |
 | `animate validate` | 影格目錄（加 `.mcmeta`） | 僅報告 | 依 `.mcmeta` 驗證影格尺寸、播放序列索引與每步時間；重複或部分的播放序列合法。 |
-| `animate preview` | 影格目錄 | 報告或 ASCII 預覽 | 預覽動畫序列。 |
+| `animate preview` | 影格目錄 | 報告或 ASCII 預覽，`--output` 另寫出圖集 PNG | 預覽動畫序列。 |
+| `mcmeta animation` | PNG 精靈圖集（單行或單列，不接受 `.mcpx`） | `.mcmeta` 文字（不接受 `.json`） | 依 PNG 尺寸產生 `animation` 區段，或以時間軸預設展開 `frames`。只讀取 PNG。 |
+| `mcmeta gui` | PNG 設計圖 | `.mcmeta` 文字（不接受 `.json`） | 依設計尺寸產生 `gui.scaling`。只讀取 PNG。 |
 
 ```text
 animate pack     --frames-dir <dir> --layout <vertical|horizontal|grid> [--columns <N>]
                  [--output <png>] [--stdout] <file flags>
+animate sweep    <image.png> [--angle <45|90|135|180>] [--width <N>] [--color <#RRGGBB>]
+                 [--frames <N>] [--frametime <N>] [--hold-ticks <N>] [--style <id|path>]
+                 [--output <png>] [--stdout] [--output-mcmeta <path>] <file flags>
 animate unpack   <sheet.png> --layout <vertical|horizontal|grid> --frame-size <N|WxH>
-                 [--columns <N>] [--mcmeta <path>] --output-dir <dir> <file flags>
+                 [--columns <N>] [--format <mcpx|png>] [--mcmeta <path>] --output-dir <dir> <file flags>
 animate reorder  --frames-dir <dir> --order <i,j,...> --output-dir <dir> <file flags>
 animate resize   --frames-dir <dir> --frame-size <N|WxH> [--resize-mode <nearest|box|pixel-aware>]
                  --output-dir <dir> <file flags>
 animate validate --frames-dir <dir> [--mcmeta <path>] [--profile <name>] [--json]
 animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--columns <N>]
-                 [--ascii] [--profile <name>] [--json]
+                 [--output <png>] [--ascii] [--profile <name>] [--json]
 ```
+
+- `animate sweep` 輸出一張垂直圖集：第 0 格是原圖，之後每一格把反光帶往下一個位置推進。`--angle` 只接受 45、90、135、180，其餘角度直接拒絕；條帶座標在 135 度是 `x - y`、45 度是 `x + y`、90 度是 `x`、180 度是 `y`，兩個對角角度每格前進兩個座標單位，水平與垂直每格前進一個。`--width` 是條帶寬度像素數（1 到 8），`--color` 是一個不透明的 `#RRGGBB`，`--frames` 是含第 0 格的總格數（1 到 64）。只有完全不透明的來源像素會被覆蓋，所以整張圖集的輪廓、透明度平面與 alpha 0 底下的隱藏色維持逐位元組相同。`--style` 指定內建預設 id 或 `.style.json` 檔案（預設 `vanilla`）以取得動畫預設值，單一旗標只覆蓋其中一項。`--output-mcmeta` 另外寫出同伴文件，其中的 `frames` 依解析後風格的時間軸預設展開。`--output` 與 `--stdout` 至少要有一個。
+- `mcmeta animation` 的 `--preset` 用具名時間軸展開 `frames`，取代手寫清單：`hold-and-sweep` 讓第 0 格停留 `--hold-ticks`（預設 100）拍再往前播，`ping-pong` 去程與回程不重複兩端，`pulse` 在去程與回程於兩端各停一拍。`--preset` 與 `--frames` 互斥（`ARGUMENT_CONFLICT`）；單格或兩格的圖集展開時不會重複端點；清單中的裸索引維持原樣，由 `--frametime` 決定它們的停留時間。
+- `animate unpack --format png` 在 `--output-dir` 下每格寫出一張 PNG；預設仍是 `.mcpx`，其他值一律 `INVALID_ARGUMENT`。檔名沿用既有的補零規則（`frame_0.png` 到 `frame_9.png`）。`animate preview --output <png>` 依報告描述的同一種版面寫出圖集圖片；不帶 `--output` 時不寫任何檔案，報告內容完全不變。
 
 ---
 
@@ -484,7 +494,7 @@ mc-asset mcmeta animation sheet.png --frame-size 16 --frametime 2 --frames '[0,{
 mc-asset mcmeta gui panel.png --type nine_slice --border 4 --stretch-inner --resource-pack-version 42 --stdout
 ```
 
-動畫必須指定 `--frame-size <N|WxH>`，影格只支援單排或單列，尺寸必須整除 PNG；不接受網格。`frametime` 預設 1，`frames` 接受索引或 `{index,time}` 物件，可重複或只播放部分影格；省略時依序播放全部影格。時間必須是正整數，索引不得越界；`--interpolate` 啟用插值。GUI 必須指定 `--type <stretch|tile|nine_slice>`，tile 與 nine_slice 以 PNG 尺寸作設計尺寸。nine_slice 必須指定 `--border <N|json>`，四邊 left、top、right、bottom 為非負整數，中央必須保留正面積；只有 nine_slice 接受 `--stretch-inner`。
+動畫必須指定 `--frame-size <N|WxH>`，影格只支援單排或單列，尺寸必須整除 PNG；不接受網格。`frametime` 預設 1，`frames` 接受索引或 `{index,time}` 物件，可重複或只播放部分影格；省略時依序播放全部影格。時間必須是正整數，索引不得越界；`--interpolate` 啟用插值。`--preset <hold-and-sweep|ping-pong|pulse>` 以具名時間軸展開播放順序，取代手寫 `frames`，並在兩端或首格停留 `--hold-ticks`，不能與 `--frames` 同時使用。GUI 必須指定 `--type <stretch|tile|nine_slice>`，tile 與 nine_slice 以 PNG 尺寸作設計尺寸。nine_slice 必須指定 `--border <N|json>`，四邊 left、top、right、bottom 為非負整數，中央必須保留正面積；只有 nine_slice 接受 `--stretch-inner`。
 
 CLI 必須明確選擇 `--output <path.mcmeta>` 或 `--stdout` 其中之一，不猜同名路徑。已存在的目標需要 `--force`，它會整檔替換，不保留其他區段；`--mkdir` 允許建立缺少的父目錄。來源 PNG 與無關的同名設定不變，輸入別名與符號連結會被拒絕。輸出只含指定區段，以固定鍵順序的緊湊 JSON 加一個結尾換行產生。
 

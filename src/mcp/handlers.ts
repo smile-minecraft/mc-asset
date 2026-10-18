@@ -69,9 +69,11 @@ import {
 	createFrameSet,
 	describeFrameSet,
 	frameFileName,
+	frameOutputFileName,
 	packFrameSet,
 	parseAnimationLayout,
 	parseFrameOrder,
+	parseFrameOutputFormat,
 	parseFrameSize,
 	parseGridColumns,
 	reorderFrames,
@@ -99,6 +101,7 @@ import {
 	paintNineSliceGuides,
 	parseMcmetaText,
 } from "../core/mcmeta.ts";
+import { generateAnimationMcmeta } from "../core/mcmeta-generate.ts";
 import { POLYGON_MAX_POINTS } from "../core/ops.ts";
 import { extractPalette, inspectPalette } from "../core/palette.ts";
 import {
@@ -121,6 +124,7 @@ import {
 	recolorLayer,
 	recolorRolelessCanvas,
 } from "../core/recolor.ts";
+import { generateSweepFrames, parseSweepColor } from "../core/sweep.ts";
 import {
 	applyTileCorrections,
 	buildTilePreview,
@@ -322,6 +326,18 @@ async function writeMcpArtifact(
 	data: Uint8Array | string,
 ): Promise<void> {
 	await atomicWriteFile(path, data, {});
+}
+
+/** One sheet buffer as PNG bytes, 1:1 and never resampled. */
+function sheetPngBytes(
+	pixels: Uint8Array,
+	width: number,
+	height: number,
+): Uint8Array {
+	const canvas = createCanvas(width, height);
+	const layer = addLayer(canvas, { id: "base" });
+	replaceLayerPixels(canvas, layer.id, pixels);
+	return encodePng(canvas);
 }
 
 async function assertOutputDirectory(outputDir: string): Promise<void> {
@@ -2268,6 +2284,77 @@ export async function handleAnimateAsset(
 					: { pngBase64: pngBase64(pngBytes) }),
 			});
 		}
+		if (args.mode === "sweep") {
+			if (args.inputPath === undefined || args.inputPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"animate_asset sweep needs inputPath with a still image.",
+				);
+			}
+			// The tool surface carries no style field: the band takes the
+			// builtin default style's animation rules, and every given field
+			// overrides exactly one of them.
+			const style = await resolveStyle("vanilla");
+			const rules = style.animation;
+			const angle = args.angle ?? rules.sweepAngleDegrees;
+			const width = args.width ?? rules.sweepWidthPixels;
+			const frames = args.frames ?? rules.sweepFrames;
+			const frametime = args.frametime ?? rules.frametime;
+			const holdTicks = args.holdTicks ?? rules.holdTicks;
+			const colorSource = args.color ?? rules.sweepColor;
+			const sweep = generateSweepFrames({
+				canvas: decodePng(await readInputFile(args.inputPath, "sweep input"))
+					.canvas,
+				angleDegrees: angle,
+				widthPixels: width,
+				color: parseSweepColor(colorSource),
+				frames,
+			});
+			const sheet = packFrameSet(sweep.frameSet, "vertical");
+			const pngBytes = sheetPngBytes(sheet.pixels, sheet.width, sheet.height);
+			const document = generateAnimationMcmeta({
+				sheetWidth: sheet.width,
+				sheetHeight: sheet.height,
+				frameSize: `${sweep.frameSet.frameWidth}`,
+				frametime,
+				preset: rules.timelinePreset,
+				holdTicks,
+				interpolate: rules.interpolate,
+			}).text;
+			if (args.outputPngPath !== undefined) {
+				assertMinecraftOutputPath(profile, args.outputPngPath);
+				await writeMcpArtifact(args.outputPngPath, pngBytes);
+			}
+			if (args.outputMcmetaPath !== undefined) {
+				const plan = await planMcmetaOutput({
+					output: args.outputMcmetaPath,
+					inputPath: args.inputPath,
+					force: false,
+					mkdir: false,
+				});
+				await writeMcmetaOutput(plan, document, false);
+			}
+			return textResult({
+				mode: "sweep",
+				profile,
+				frameCount: sweep.frameSet.frames.length,
+				frameWidth: sweep.frameSet.frameWidth,
+				frameHeight: sweep.frameSet.frameHeight,
+				layout: "vertical",
+				angle,
+				width,
+				color: colorSource,
+				sheetWidth: sheet.width,
+				sheetHeight: sheet.height,
+				...(args.outputPngPath !== undefined
+					? { output: args.outputPngPath }
+					: { pngBase64: pngBase64(pngBytes) }),
+				...(args.outputMcmetaPath !== undefined
+					? { outputMcmeta: args.outputMcmetaPath, mcmetaText: document }
+					: { mcmetaText: document }),
+				warnings: [],
+			});
+		}
 		if (args.mode === "unpack") {
 			const layout = parseAnimationLayout(args.layout);
 			const columns = parseGridColumns(
@@ -2343,12 +2430,23 @@ export async function handleAnimateAsset(
 				size.height,
 				columns,
 			);
+			const format = parseFrameOutputFormat(args.format);
 			const files: string[] = [];
 			for (let index = 0; index < frameSet.frames.length; index += 1) {
 				const frame = frameSet.frames[index] as PixelCanvas;
-				const name = frameFileName(index, frameSet.frames.length);
-				const text = ensureMcpxText(frame, () => {});
-				await writeMcpArtifact(joinPath(args.outputDir, name), text);
+				const name = frameOutputFileName(index, frameSet.frames.length, format);
+				const source = frame.layers[0];
+				if (source === undefined) {
+					throw new McAssetError(
+						"INTERNAL_ERROR",
+						"Unpacked frame has no layer to write.",
+					);
+				}
+				const payload =
+					format === "png"
+						? sheetPngBytes(source.pixels, frame.width, frame.height)
+						: ensureMcpxText(frame, () => {});
+				await writeMcpArtifact(joinPath(args.outputDir, name), payload);
 				files.push(name);
 			}
 			return textResult({
@@ -2359,6 +2457,7 @@ export async function handleAnimateAsset(
 				frameHeight: frameSet.frameHeight,
 				layout,
 				...(columns !== undefined ? { columns } : {}),
+				format,
 				outputDir: args.outputDir,
 				files,
 				warnings: [],
@@ -2504,6 +2603,15 @@ export async function handleAnimateAsset(
 			const loaded = await loadMcpFramesDir(args.framesDir);
 			const frameSet = createFrameSet(loaded.frames);
 			const sheet = packFrameSet(frameSet, layout, columns);
+			let output: string | undefined;
+			if (args.outputPngPath !== undefined) {
+				assertMinecraftOutputPath(profile, args.outputPngPath);
+				await writeMcpArtifact(
+					args.outputPngPath,
+					sheetPngBytes(sheet.pixels, sheet.width, sheet.height),
+				);
+				output = args.outputPngPath;
+			}
 			return textResult({
 				mode: "preview",
 				profile,
@@ -2515,12 +2623,13 @@ export async function handleAnimateAsset(
 				sheetWidth: sheet.width,
 				sheetHeight: sheet.height,
 				frames: frameSet.frames.map((_, index) => ({ index })),
+				...(output !== undefined ? { output } : {}),
 				warnings: loaded.warnings,
 			});
 		}
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			"animate_asset mode must be pack, unpack, reorder, resize, validate, or preview.",
+			"animate_asset mode must be pack, sweep, unpack, reorder, resize, validate, or preview.",
 			{ mode: args.mode },
 		);
 	} catch (error) {
@@ -2713,6 +2822,8 @@ export async function handleMcmetaAsset(
 			frameSize: args.frameSize,
 			frametime: args.frametime,
 			frames: args.frames,
+			preset: args.preset,
+			holdTicks: args.holdTicks,
 			interpolate: args.interpolate,
 			type: args.type,
 			border: args.border,

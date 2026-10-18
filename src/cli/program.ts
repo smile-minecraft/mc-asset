@@ -1184,7 +1184,7 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 	const animate = program
 		.command("animate")
 		.description(
-			"FrameSet animation: pack / unpack / reorder / resize / validate / preview.",
+			"FrameSet animation: pack / sweep / unpack / reorder / resize / validate / preview.",
 		);
 	animate
 		.command("pack")
@@ -1212,11 +1212,58 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			process.exitCode = code;
 		});
 	animate
+		.command("sweep <input>")
+		.description(
+			"Sweep a highlight band across one still image into a vertical sheet PNG.",
+		)
+		.option(
+			"--style <id|path>",
+			"Style preset id or .style.json path (default vanilla).",
+		)
+		.option("--angle <degrees>", "Band angle: 45, 90, 135, or 180.")
+		.option("--width <N>", "Band width in pixels, 1 to 8.")
+		.option("--color <#RRGGBB>", "Opaque band colour.")
+		.option(
+			"--frames <N>",
+			"Frame count including the untouched first frame, 1 to 64.",
+		)
+		.option("--frametime <N>", "Ticks per frame of the generated document.")
+		.option("--hold-ticks <N>", "Ticks the first frame rests for.")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option(
+			"--output-mcmeta <path>",
+			"Optional companion .mcmeta output file path.",
+		)
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
+		.action(
+			async (input: string, options: AnimateOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runAnimate(
+					"sweep",
+					input,
+					options,
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+	animate
 		.command("unpack <sheet>")
 		.description("Unpack a sprite sheet PNG into a frames directory.")
 		.option("--layout <layout>", "Sheet layout: vertical, horizontal, grid.")
 		.option("--frame-size <size>", "Frame size: N or WxH.")
 		.option("--columns <N>", "Grid column count (required with grid).")
+		.option(
+			"--format <format>",
+			"Per-frame output format: mcpx (default) or png.",
+		)
 		.option("--output-dir <path>", "Required explicit output directory.")
 		.option("--output <path>", "Rejected on unpack (ARGUMENT_CONFLICT).")
 		.option(
@@ -1329,7 +1376,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--layout <layout>", "Sheet layout: vertical, horizontal, grid.")
 		.option("--columns <N>", "Grid column count (required with grid).")
 		.option("--ascii", "Sheet pixels as a .grid-compatible ASCII document.")
-		.option("--output <path>", "Rejected: reports take no file flags.")
+		.option(
+			"--output <path>",
+			"Optional sheet PNG; without it nothing is written.",
+		)
 		.option("--stdout", "Rejected: reports take no file flags.")
 		.option("--output-dir <path>", "Rejected: reports take no file flags.")
 		.option("--force", "Rejected: reports take no file flags.")
@@ -1462,6 +1512,14 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 				.option(
 					"--frames <json>",
 					"Playback order: JSON array of indices and/or {index,time} objects.",
+				)
+				.option(
+					"--preset <preset>",
+					"Timeline shape: hold-and-sweep, ping-pong, or pulse; conflicts with --frames.",
+				)
+				.option(
+					"--hold-ticks <N>",
+					"Ticks the first frame rests for with --preset.",
 				)
 				.option("--interpolate", "Blend between frames.");
 		} else {

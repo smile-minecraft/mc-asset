@@ -6,9 +6,12 @@ import {
 	createFrameSet,
 	describeFrameSet,
 	frameFileName,
+	frameOutputFileName,
+	type PackedSheet,
 	packFrameSet,
 	parseAnimationLayout,
 	parseFrameOrder,
+	parseFrameOutputFormat,
 	parseFrameSize,
 	parseGridColumns,
 	reorderFrames,
@@ -21,10 +24,23 @@ import {
 	extractAnimationSection,
 	parseMcmetaText,
 } from "../core/mcmeta.ts";
+import {
+	generateAnimationMcmeta,
+	type TimelinePreset,
+} from "../core/mcmeta-generate.ts";
+import {
+	generateSweepFrames,
+	parseSweepAngleDegrees,
+	parseSweepColor,
+	parseSweepFrameCount,
+	parseSweepWidthPixels,
+	type SweepAngleDegrees,
+} from "../core/sweep.ts";
 import type { ResizeMode } from "../core/transform.ts";
 import type { PixelCanvas } from "../core/types.ts";
 import { decodePng, encodePng } from "../io/png.ts";
 import { parseMcpx } from "../mcpx/index.ts";
+import { resolveStyle } from "../style/load.ts";
 import {
 	assertMinecraftOutputPath,
 	emitCommandFailure,
@@ -47,7 +63,9 @@ import {
 	type StreamRoute,
 } from "./channels.ts";
 import { successEnvelope } from "./envelope.ts";
+import { planMcmetaOutput, writeMcmetaOutput } from "./mcmeta-request.ts";
 import { parseProfile } from "./profiles.ts";
+import type { PlannedTarget } from "./safe-output.ts";
 
 export type AnimateMode =
 	| "pack"
@@ -55,7 +73,8 @@ export type AnimateMode =
 	| "reorder"
 	| "resize"
 	| "validate"
-	| "preview";
+	| "preview"
+	| "sweep";
 
 export interface AnimateOptions {
 	framesDir?: string | undefined;
@@ -72,6 +91,24 @@ export interface AnimateOptions {
 	ascii?: boolean | undefined;
 	profile?: string | undefined;
 	mcmeta?: string | undefined;
+	/** sweep: band width in pixels. */
+	width?: string | undefined;
+	/** sweep: band angle in degrees. */
+	angle?: string | undefined;
+	/** sweep: band colour as #RRGGBB. */
+	color?: string | undefined;
+	/** sweep: how many frames to emit. */
+	frames?: string | undefined;
+	/** sweep: ticks per frame of the generated document. */
+	frametime?: string | undefined;
+	/** sweep: ticks the first frame rests for. */
+	holdTicks?: string | undefined;
+	/** sweep: preset id or .style.json path holding the animation defaults. */
+	style?: string | undefined;
+	/** sweep: explicit .mcmeta output path. */
+	outputMcmeta?: string | undefined;
+	/** unpack: per-frame output format, mcpx by default. */
+	format?: string | undefined;
 }
 
 /** Byte-lexicographic order per section 100.3 (UTF-8 bytes, not UTF-16 units). */
@@ -141,18 +178,29 @@ async function loadFramesDir(framesDir: string): Promise<LoadedFrames> {
 	return { frames, texts, names, warnings };
 }
 
-/** Read-only modes take no file flags; the writer owns the file channel. */
+/**
+ * Modes that only report take no file flags; the writer owns the file
+ * channel. `preview` is the one reporting mode that may write: `--output`
+ * takes its sheet image, with `--force` and `--mkdir` as the companions.
+ */
 function rejectFileFlags(options: AnimateOptions, mode: AnimateMode): void {
-	if (
-		(options.output !== undefined && options.output !== "") ||
-		options.stdout === true ||
-		options.force === true ||
-		options.mkdir === true ||
-		(options.outputDir !== undefined && options.outputDir !== "")
-	) {
+	const outputGiven = options.output !== undefined && options.output !== "";
+	const writable = mode === "preview" && outputGiven;
+	const flags: [string, boolean, boolean][] = [
+		["--output", outputGiven, false],
+		["--stdout", options.stdout === true, false],
+		["--force", options.force === true, true],
+		["--mkdir", options.mkdir === true, true],
+		["--output-dir", (options.outputDir ?? "") !== "", false],
+	];
+	for (const [flag, given, followsOutput] of flags) {
+		if (!given) continue;
+		if (writable && (flag === "--output" || followsOutput)) continue;
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			`animate ${mode} is read-only and takes no file flags.`,
+			mode === "preview"
+				? `animate ${mode} accepts only --output with --force or --mkdir; ${flag} needs an output.`
+				: `animate ${mode} is read-only and takes no file flags.`,
 		);
 	}
 }
@@ -289,6 +337,8 @@ interface DirPayload {
 	targets: FileTarget[];
 	data: Uint8Array | string;
 	file: string;
+	/** PNG payloads are preflighted on the PNG channel; the rest on the source channel. */
+	kind?: "png" | "mcpx";
 }
 
 async function writeDirPayloads(
@@ -299,17 +349,48 @@ async function writeDirPayloads(
 	const withForce = payloads.map((payload) => ({
 		targets: payload.targets.map((target) => ({ ...target, force })),
 		data: payload.data,
+		kind: payload.kind ?? "mcpx",
 	}));
+	const pngTargets: FileTarget[] = [];
+	const sourceTargets: FileTarget[] = [];
+	for (const payload of withForce) {
+		const bucket = payload.kind === "png" ? pngTargets : sourceTargets;
+		bucket.push(...payload.targets);
+	}
 	await preflightArtifactTargets(
 		{
 			pngStdout: false,
-			pngFiles: [],
-			mcpxFiles: withForce.flatMap((payload) => payload.targets),
+			pngFiles: pngTargets,
+			mcpxFiles: sourceTargets,
 		},
 		{ mkdir: options.mkdir },
 	);
 	await writeArtifactPayloads(withForce, options.mkdir);
 	return { files: payloads.map((payload) => payload.file) };
+}
+
+/** One single-layer frame as PNG bytes, 1:1 and never resampled. */
+function framePngBytes(frame: PixelCanvas): Uint8Array {
+	const source = frame.layers[0];
+	if (source === undefined) {
+		throw new McAssetError("INTERNAL_ERROR", "Frame has no layer to encode.");
+	}
+	const canvas = createCanvas(frame.width, frame.height);
+	const layer = addLayer(canvas, { id: "base" });
+	replaceLayerPixels(canvas, layer.id, source.pixels);
+	return encodePng(canvas);
+}
+
+/** One sheet buffer as PNG bytes, 1:1 and never resampled. */
+function sheetPngBytes(
+	pixels: Uint8Array,
+	width: number,
+	height: number,
+): Uint8Array {
+	const canvas = createCanvas(width, height);
+	const layer = addLayer(canvas, { id: "base" });
+	replaceLayerPixels(canvas, layer.id, pixels);
+	return encodePng(canvas);
 }
 
 function requireOutputDir(options: AnimateOptions, mode: AnimateMode): string {
@@ -340,6 +421,7 @@ async function runUnpack(
 		const layout = parseAnimationLayout(options.layout);
 		const columns = parseGridColumns(layout, options.columns);
 		const size = parseFrameSize(options.frameSize);
+		const format = parseFrameOutputFormat(options.format);
 		if (sheet === undefined || sheet === "") {
 			throw new McAssetError(
 				"INVALID_ARGUMENT",
@@ -398,8 +480,16 @@ async function runUnpack(
 			columns,
 		);
 		const payloads: DirPayload[] = frameSet.frames.map((frame, index) => {
-			const name = frameFileName(index, frameSet.frames.length);
+			const name = frameOutputFileName(index, frameSet.frames.length, format);
 			const path = joinPath(outputDir, name);
+			if (format === "png") {
+				return {
+					targets: [{ path, force: false }],
+					data: framePngBytes(frame),
+					file: name,
+					kind: "png",
+				};
+			}
 			const text = ensureMcpxText(frame, () => {});
 			return { targets: [{ path, force: false }], data: text, file: name };
 		});
@@ -413,6 +503,7 @@ async function runUnpack(
 			frameHeight: frameSet.frameHeight,
 			layout,
 			...(columns !== undefined ? { columns } : {}),
+			format,
 			outputDir,
 			files,
 			warnings: [],
@@ -421,7 +512,7 @@ async function runUnpack(
 			emitEnvelope(successEnvelope(result), streams, route);
 		} else {
 			emitLog(
-				`ok animate mode=unpack profile=${profile} frames=${frameSet.frames.length} layout=${layout} outputDir=${outputDir}`,
+				`ok animate mode=unpack profile=${profile} frames=${frameSet.frames.length} layout=${layout} format=${format} outputDir=${outputDir}`,
 				streams,
 				route,
 			);
@@ -637,6 +728,13 @@ async function runPreview(
 		const frameSet = createFrameSet(loaded.frames);
 		const sheet = packFrameSet(frameSet, layout, columns);
 		const frameList = frameSet.frames.map((_, index) => ({ index }));
+		const outputPath =
+			options.output === undefined || options.output === ""
+				? undefined
+				: options.output;
+		if (outputPath !== undefined) {
+			assertMinecraftOutputPath(profile, outputPath);
+		}
 		if (ascii) {
 			const doc = buildAsciiDoc([], sheet.pixels, sheet.width, sheet.height);
 			if (globalJson) {
@@ -669,6 +767,10 @@ async function runPreview(
 			}
 			return 0;
 		}
+		const written =
+			outputPath === undefined
+				? undefined
+				: await writeSheetImage(sheet, outputPath, options);
 		const result = {
 			command: "animate",
 			mode: "preview",
@@ -681,6 +783,7 @@ async function runPreview(
 			sheetWidth: sheet.width,
 			sheetHeight: sheet.height,
 			frames: frameList,
+			...(written !== undefined ? { output: written } : {}),
 			warnings: loaded.warnings,
 		};
 		if (globalJson) {
@@ -700,10 +803,221 @@ async function runPreview(
 }
 
 /**
- * FrameSet command family: pack / unpack / reorder / resize write files
- * under the §98 guards, validate and preview stay read-only. `unpack` and
- * `validate` take an explicit `--mcmeta` for the read-only frame geometry
- * correspondence; no mode derives a sibling file and no mode writes JSON.
+ * Write the packed sheet as a PNG through the shared target guards. Used by
+ * `animate preview --output`; the sheet layout is exactly the one the report
+ * describes, so the image never resamples or reorders anything.
+ */
+async function writeSheetImage(
+	sheet: PackedSheet,
+	outputPath: string,
+	options: AnimateOptions,
+): Promise<string> {
+	const pngBytes = sheetPngBytes(sheet.pixels, sheet.width, sheet.height);
+	const resolved: ResolvedArtifacts = {
+		pngStdout: false,
+		pngFiles: [{ path: outputPath, force: options.force === true }],
+		mcpxFiles: [],
+	};
+	await preflightArtifactTargets(resolved, { mkdir: options.mkdir });
+	await writeArtifactPayloads(
+		[{ targets: resolved.pngFiles, data: pngBytes }],
+		options.mkdir,
+	);
+	return outputPath;
+}
+
+/** The effective sweep parameters after style defaults and flag overrides. */
+interface SweepOptions {
+	readonly preset: TimelinePreset;
+	readonly frametime: number;
+	readonly holdTicks: number;
+	readonly frames: number;
+	readonly angle: SweepAngleDegrees;
+	readonly width: number;
+	readonly color: string;
+	readonly interpolate: boolean;
+}
+
+/**
+ * Resolve the band defaults: a builtin style id or a `.style.json` path
+ * (default `vanilla`), then every flag overrides one field of the resolved
+ * animation rules. The core engine only ever receives integers.
+ */
+async function resolveSweepOptions(
+	options: AnimateOptions,
+): Promise<SweepOptions> {
+	const style = await resolveStyle(
+		options.style === undefined || options.style === ""
+			? "vanilla"
+			: options.style,
+	);
+	const rules = style.animation;
+	return {
+		preset: rules.timelinePreset,
+		frametime:
+			options.frametime === undefined || options.frametime === ""
+				? rules.frametime
+				: Number(options.frametime),
+		holdTicks:
+			options.holdTicks === undefined || options.holdTicks === ""
+				? rules.holdTicks
+				: Number(options.holdTicks),
+		frames:
+			options.frames === undefined || options.frames === ""
+				? rules.sweepFrames
+				: parseSweepFrameCount(options.frames),
+		angle:
+			options.angle === undefined || options.angle === ""
+				? rules.sweepAngleDegrees
+				: parseSweepAngleDegrees(options.angle),
+		width:
+			options.width === undefined || options.width === ""
+				? rules.sweepWidthPixels
+				: parseSweepWidthPixels(options.width),
+		color:
+			options.color === undefined || options.color === ""
+				? rules.sweepColor
+				: options.color,
+		interpolate: rules.interpolate,
+	};
+}
+
+/**
+ * `animate sweep`: one still image in, a vertical sheet of sweep frames plus
+ * an optional companion document out. The band parameters come from the
+ * style's animation rules unless a flag overrides one; the document follows
+ * the same style's timeline preset and hold ticks.
+ */
+async function runSweep(
+	source: string | undefined,
+	options: AnimateOptions,
+	globalJson: boolean,
+	streams: OutputStreams,
+): Promise<number> {
+	const route = routeStreams({
+		json: globalJson,
+		stdoutArtifact: options.stdout === true && !globalJson,
+	});
+	try {
+		const profile = parseProfile(options.profile);
+		if (source === undefined || source === "") {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				"animate sweep needs a source image path argument.",
+			);
+		}
+		if (
+			(options.output === undefined || options.output === "") &&
+			options.stdout !== true
+		) {
+			throw new McAssetError(
+				"OUTPUT_REQUIRED",
+				"animate sweep needs --output or --stdout.",
+			);
+		}
+		const resolved = await resolveSweepOptions(options);
+		const color = parseSweepColor(resolved.color);
+		const bytes = await readInputFile(source, "sweep input");
+		const decoded = decodePng(bytes);
+		const sweep = generateSweepFrames({
+			canvas: decoded.canvas,
+			angleDegrees: resolved.angle,
+			widthPixels: resolved.width,
+			color,
+			frames: resolved.frames,
+		});
+		const sheet = packFrameSet(sweep.frameSet, "vertical");
+		const pngBytes = sheetPngBytes(sheet.pixels, sheet.width, sheet.height);
+		const document = generateAnimationMcmeta({
+			sheetWidth: sheet.width,
+			sheetHeight: sheet.height,
+			frameSize: `${sweep.frameSet.frameWidth}`,
+			frametime: resolved.frametime,
+			preset: resolved.preset,
+			holdTicks: resolved.holdTicks,
+			interpolate: resolved.interpolate,
+		}).text;
+		if (options.output !== undefined && options.output !== "") {
+			assertMinecraftOutputPath(profile, options.output);
+		}
+		const pngTargets: FileTarget[] =
+			options.output === undefined || options.output === ""
+				? []
+				: [{ path: options.output, force: options.force === true }];
+		const artifacts: ResolvedArtifacts = {
+			pngStdout: options.stdout === true,
+			pngFiles: pngTargets,
+			mcpxFiles: [],
+		};
+		const mcmetaPlan: readonly PlannedTarget[] =
+			options.outputMcmeta === undefined || options.outputMcmeta === ""
+				? []
+				: await planMcmetaOutput({
+						output: options.outputMcmeta,
+						inputPath: source,
+						force: options.force === true,
+						mkdir: options.mkdir === true,
+					});
+		await preflightArtifactTargets(artifacts, {
+			mkdir: options.mkdir,
+			inputPath: source,
+		});
+		if (artifacts.pngStdout) {
+			emitArtifact(pngBytes, streams, route);
+		}
+		await writeArtifactPayloads(
+			pngTargets.length > 0 ? [{ targets: pngTargets, data: pngBytes }] : [],
+			options.mkdir,
+		);
+		if (mcmetaPlan.length > 0) {
+			await writeMcmetaOutput(mcmetaPlan, document, options.mkdir === true);
+		}
+		const result = {
+			command: "animate",
+			mode: "sweep",
+			profile,
+			frameCount: sweep.frameSet.frames.length,
+			frameWidth: sweep.frameSet.frameWidth,
+			frameHeight: sweep.frameSet.frameHeight,
+			layout: "vertical",
+			angle: resolved.angle,
+			width: resolved.width,
+			color: resolved.color,
+			sheetWidth: sheet.width,
+			sheetHeight: sheet.height,
+			...(pngTargets[0] !== undefined ? { output: pngTargets[0].path } : {}),
+			...(options.stdout === true ? { stdout: true as const } : {}),
+			...(mcmetaPlan[0] !== undefined
+				? { outputMcmeta: mcmetaPlan[0].path }
+				: {}),
+			warnings: [],
+		};
+		if (globalJson) {
+			emitEnvelope(successEnvelope(result), streams, route);
+		} else {
+			const parts = [
+				`ok animate mode=sweep profile=${profile} frames=${result.frameCount} angle=${resolved.angle} width=${resolved.width} sheet=${sheet.width}x${sheet.height}`,
+			];
+			if (pngTargets[0] !== undefined)
+				parts.push(`output=${pngTargets[0].path}`);
+			if (options.stdout === true) parts.push("stdout=true");
+			if (mcmetaPlan[0] !== undefined) {
+				parts.push(`outputMcmeta=${mcmetaPlan[0].path}`);
+			}
+			emitLog(parts.join(" "), streams, route);
+		}
+		return 0;
+	} catch (error) {
+		return emitCommandFailure(streams, route, globalJson, error);
+	}
+}
+
+/**
+ * FrameSet command family: pack / sweep / unpack / reorder / resize write
+ * files under the §98 guards, validate stays read-only and preview writes
+ * only when asked for an image. `unpack` and `validate` take an explicit
+ * `--mcmeta` for the read-only frame geometry correspondence; no mode
+ * derives a sibling file and no mode writes JSON.
  */
 export async function runAnimate(
 	mode: AnimateMode,
@@ -725,5 +1039,7 @@ export async function runAnimate(
 			return runValidate(options, globalJson, streams);
 		case "preview":
 			return runPreview(options, globalJson, streams);
+		case "sweep":
+			return runSweep(positional, options, globalJson, streams);
 	}
 }

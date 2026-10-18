@@ -449,6 +449,14 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 {"mode":"pack","profile":"generic","frameCount":2,"frameWidth":4,"frameHeight":4,"layout":"vertical","width":4,"height":8,"warnings":[],"pngBase64":"iVBORw0KGgoAAAANSUhEUgAAAAQAAAAI… (truncated) …"}
 ```
 
+`sweep` 把一张静态图变成一条扫过它的反光带：`inputPath` 加上可选的 `angle`（45、90、135、180，默认 135）、`width`（1 到 8）、`color`（`#RRGGBB`）、`frames`（含未改动的第 0 帧）、`frametime` 与 `holdTicks`，输出可选的 `outputPngPath` 与 `outputMcmetaPath`。第 0 帧是原图，只有完全不透明的像素会被覆盖，轮廓与透明度平面都不会移动；没给的参数取内置默认风格的动画预设值。`unpack` 可给 `format`（默认 `mcpx`，或 `png`）；`preview` 给了 `outputPngPath` 就写出图集图片，没给时只有报告。
+
+调用：
+
+```json
+{"mode":"sweep","inputPath":"gem.png","angle":45,"width":2,"frames":8,"outputPngPath":"gem_sweep.png","outputMcmetaPath":"gem_sweep.png.mcmeta"}
+```
+
 ### validate_pack_asset
 
 针对整个资源包根目录的只读判定，绝不写入。可选的 `resourcePackVersion` 可选择兼容性目标。`fail` 判定是正常结果，不是错误。可选的 `vanillaPath` 提供原版资源树，`dependencyPaths`（有序，排前者优先）加入依赖根目录；报告带 `coverage` 对象，提供原版树后，原本会跳过的 atlas 检查即可完成。
@@ -600,7 +608,7 @@ CLI 必须明确选择 `--output <path.mcmeta>` 或 `--stdout` 其中之一，�
 
 ### mcmeta_asset
 
-指定 `mode`（`animation` 或 `gui`）与 `inputPath`（PNG）。 `animation`: `frameSize`, `frametime`, `frames`, `interpolate`; `gui`: `type`, `border`, `stretchInner`. 指定版本可用 `minecraftVersion` 或 `resourcePackVersion`。另一种模式的字段（即使为 false）会返回 `INVALID_ARGUMENT`。`outputPath` 明确指定 `.mcmeta`，另可用 `force`、`mkdir`；省略路径则返回 `mcmetaText`，不写文件。`force`、`mkdir` 必须搭配路径。结果含 `mode`、`width`、`height`、`versionChecked`、`version`、`target`、`warnings`，以及 `output` 或 `mcmetaText`。
+指定 `mode`（`animation` 或 `gui`）与 `inputPath`（PNG）。 `animation`: `frameSize`, `frametime`, `frames`, `preset`, `holdTicks`, `interpolate`; `preset`（`hold-and-sweep`、`ping-pong` 或 `pulse`）以具名时间轴展开 `frames`，不能与 `frames` 同时指定； `gui`: `type`, `border`, `stretchInner`. 指定版本可用 `minecraftVersion` 或 `resourcePackVersion`。另一种模式的字段（即使为 false）会返回 `INVALID_ARGUMENT`。`outputPath` 明确指定 `.mcmeta`，另可用 `force`、`mkdir`；省略路径则返回 `mcmetaText`，不写文件。`force`、`mkdir` 必须搭配路径。结果含 `mode`、`width`、`height`、`versionChecked`、`version`、`target`、`warnings`，以及 `output` 或 `mcmetaText`。
 
 ```json
 {"mode":"gui","inputPath":"panel.png","type":"nine_slice","border":4,"stretchInner":true,"resourcePackVersion":"42"}

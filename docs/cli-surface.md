@@ -216,26 +216,34 @@ gui-scale <input> --size <N|WxH> [--mcmeta <path>]
 | Command | Input | Output | Description |
 |---|---|---|---|
 | `animate pack` | Frames directory (`.mcpx`) | PNG sprite sheet | Combines individual frames into a sprite sheet. |
-| `animate unpack <sheet>` | PNG sprite sheet | Frames directory (`.mcpx`) | Slices an animation sheet into individual frames. |
+| `animate sweep <image>` | PNG still image | Vertical sprite sheet PNG (plus an optional `.mcmeta`) | Sweeps a highlight band across one still image, frame 0 being the untouched source. |
+| `animate unpack <sheet>` | PNG sprite sheet | Frames directory (`.mcpx`, or one PNG per frame with `--format png`) | Slices an animation sheet into individual frames. |
 | `animate reorder` | Frames directory | Frames directory | Re-sequences animation frames according to index list. |
 | `animate resize` | Frames directory | Frames directory | Rescales all frames in an animation set. |
 | `animate validate` | Frames directory (+ `.mcmeta`) | Report only | Validates frame dimensions, playback-sequence indices, and per-step times against `.mcmeta`; repeated or partial playback sequences are legal. |
-| `animate preview` | Frames directory | Report or ASCII preview | Previews animation sequence. |
-| `mcmeta animation` | PNG sprite sheet (one column or horizontal row, `.mcpx` not accepted) | `.mcmeta` text (`.json` not accepted) | Generates the `animation` section from PNG dimensions. The PNG is only read. |
+| `animate preview` | Frames directory | Report or ASCII preview, plus the sheet PNG with `--output` | Previews animation sequence. |
+| `mcmeta animation` | PNG sprite sheet (one column or horizontal row, `.mcpx` not accepted) | `.mcmeta` text (`.json` not accepted) | Generates the `animation` section from PNG dimensions, or expands a timeline preset into `frames`. The PNG is only read. |
 | `mcmeta gui` | PNG design sprite | `.mcmeta` text (`.json` not accepted) | Generates `gui.scaling` with its design dimensions. The PNG is only read. |
 
 ```text
 animate pack     --frames-dir <dir> --layout <vertical|horizontal|grid> [--columns <N>]
                  [--output <png>] [--stdout] <file flags>
+animate sweep    <image.png> [--angle <45|90|135|180>] [--width <N>] [--color <#RRGGBB>]
+                 [--frames <N>] [--frametime <N>] [--hold-ticks <N>] [--style <id|path>]
+                 [--output <png>] [--stdout] [--output-mcmeta <path>] <file flags>
 animate unpack   <sheet.png> --layout <vertical|horizontal|grid> --frame-size <N|WxH>
-                 [--columns <N>] [--mcmeta <path>] --output-dir <dir> <file flags>
+                 [--columns <N>] [--format <mcpx|png>] [--mcmeta <path>] --output-dir <dir> <file flags>
 animate reorder  --frames-dir <dir> --order <i,j,...> --output-dir <dir> <file flags>
 animate resize   --frames-dir <dir> --frame-size <N|WxH> [--resize-mode <nearest|box|pixel-aware>]
                  --output-dir <dir> <file flags>
 animate validate --frames-dir <dir> [--mcmeta <path>] [--profile <name>] [--json]
 animate preview  --frames-dir <dir> --layout <vertical|horizontal|grid> [--columns <N>]
-                 [--ascii] [--profile <name>] [--json]
+                 [--output <png>] [--ascii] [--profile <name>] [--json]
 ```
+
+- `animate sweep` writes one vertical sheet whose frame 0 is the untouched source and whose later frames carry the band further along its axis. `--angle` takes 45, 90, 135, or 180 and refuses every other angle; the band coordinate is `x - y` at 135, `x + y` at 45, `x` at 90, and `y` at 180, and it advances two coordinate units per frame on the two diagonals and one on the straight angles. `--width` is the band width in pixels (1 to 8), `--color` one opaque `#RRGGBB`, and `--frames` the number of frames including frame 0 (1 to 64). Only fully opaque source pixels are repainted, so the silhouette, the alpha plane, and every hidden colour under alpha 0 stay byte-identical across the whole sheet. `--style` names a builtin preset id or a `.style.json` file (default `vanilla`) and supplies the animation defaults; a flag overrides exactly one of them. `--output-mcmeta` writes the companion document, whose `frames` follow the resolved style's timeline preset. One of `--output` or `--stdout` is required.
+- `--preset` on `mcmeta animation` expands a named timeline into `frames` instead of taking an explicit list: `hold-and-sweep` rests frame 0 for `--hold-ticks` (default 100) and then plays forward, `ping-pong` plays forward and back without repeating either end, and `pulse` rests both ends for `--hold-ticks` on the way out and back. `--preset` and `--frames` are exclusive (`ARGUMENT_CONFLICT`), a sheet of one or two frames expands without repeating an end, and plain entries stay bare indices so `--frametime` applies to them.
+- `animate unpack --format png` writes one PNG per frame under `--output-dir`; the default stays `.mcpx` and every other value is `INVALID_ARGUMENT`. Frame names keep the historical zero padding (`frame_0.png` … `frame_9.png`). `animate preview --output <png>` writes the sheet image in exactly the layout the report describes; without `--output` nothing is written and the report is unchanged.
 
 ---
 
@@ -486,7 +494,7 @@ mc-asset mcmeta animation sheet.png --frame-size 16 --frametime 2 --frames '[0,{
 mc-asset mcmeta gui panel.png --type nine_slice --border 4 --stretch-inner --resource-pack-version 42 --stdout
 ```
 
-Animation requires `--frame-size <N|WxH>` and a single row or column of equal-sized frames that divide the PNG exactly; grids are rejected. `frametime` defaults to 1. `frames` accepts indices or `{index,time}` objects, including repeated or partial sequences; omitted means all frames in order. Times are positive integers and indices must be in range. `--interpolate` enables interpolation. GUI requires `--type <stretch|tile|nine_slice>`; tile and nine_slice use the PNG dimensions as design dimensions. Nine_slice requires `--border <N|json>` (four nonnegative sides: left, top, right, bottom) with a positive center. Only nine_slice accepts `--stretch-inner`.
+Animation requires `--frame-size <N|WxH>` and a single row or column of equal-sized frames that divide the PNG exactly; grids are rejected. `frametime` defaults to 1. `frames` accepts indices or `{index,time}` objects, including repeated or partial sequences; omitted means all frames in order. Times are positive integers and indices must be in range. `--interpolate` enables interpolation. `--preset <hold-and-sweep|ping-pong|pulse>` expands the playback order instead of an explicit `frames` list, resting the ends for `--hold-ticks` ticks or holding frame 0, and cannot be combined with `--frames`. GUI requires `--type <stretch|tile|nine_slice>`; tile and nine_slice use the PNG dimensions as design dimensions. Nine_slice requires `--border <N|json>` (four nonnegative sides: left, top, right, bottom) with a positive center. Only nine_slice accepts `--stretch-inner`.
 
 CLI requires exactly one explicit `--output <path.mcmeta>` or `--stdout`; it never guesses a sibling name. Existing outputs require `--force`, which replaces the entire file and preserves no other sections. `--mkdir` permits missing parent directories. Inputs and unrelated sibling metadata remain unchanged; aliases and symbolic links are refused. Output is compact JSON with fixed key order and one trailing newline, containing only the requested section.
 

@@ -33,7 +33,107 @@ export interface GenerateAnimationInput {
 	frametime?: number | undefined;
 	/** Bare indices and/or `{ index, time? }` entries; undefined = all frames in order. */
 	frames?: ReadonlyArray<number | McmetaAnimationFrame> | undefined;
+	/** Expand `frames` from a named timeline shape; conflicts with `frames`. */
+	preset?: TimelinePreset | undefined;
+	/** Ticks the first frame of a preset expansion rests for. */
+	holdTicks?: number | undefined;
 	interpolate?: boolean | undefined;
+}
+
+/** The three named playback shapes a sheet can be expanded from. */
+export type TimelinePreset = "hold-and-sweep" | "ping-pong" | "pulse";
+
+export const TIMELINE_PRESETS: readonly TimelinePreset[] = [
+	"hold-and-sweep",
+	"ping-pong",
+	"pulse",
+];
+
+export interface ExpandTimelineInput {
+	readonly preset: TimelinePreset;
+	/** Physical frame count of the sheet. */
+	readonly frameCount: number;
+	/** Ticks every plain entry rests for. */
+	readonly frametime: number;
+	/** Ticks the first frame rests for. */
+	readonly holdTicks: number;
+}
+
+/** Parse a timeline preset name; anything else is INVALID_ARGUMENT. */
+export function parseTimelinePreset(raw: string): TimelinePreset {
+	if (!(TIMELINE_PRESETS as ReadonlyArray<string>).includes(raw)) {
+		throw invalidArgument(
+			`--preset must be hold-and-sweep, ping-pong, or pulse, got "${raw}".`,
+			{ preset: raw, supported: [...TIMELINE_PRESETS] },
+		);
+	}
+	return raw as TimelinePreset;
+}
+
+/**
+ * Expand a named timeline shape into the `frames` list of a document.
+ *
+ * hold-and-sweep rests the first frame for `holdTicks` and then plays
+ * forward; ping-pong plays forward and back without repeating either end;
+ * pulse rests both ends for `holdTicks` on the way out and back. Plain
+ * entries stay bare indices so the document's frametime applies.
+ *
+ * The skeleton returns the plain forward list; the three shapes land with the
+ * implementation that paints them.
+ */
+export function expandTimelinePreset(
+	input: ExpandTimelineInput,
+): Array<number | McmetaAnimationFrame> {
+	if (!(TIMELINE_PRESETS as ReadonlyArray<string>).includes(input.preset)) {
+		throw invalidArgument(
+			`--preset must be hold-and-sweep, ping-pong, or pulse, got "${String(input.preset)}".`,
+			{ preset: input.preset, supported: [...TIMELINE_PRESETS] },
+		);
+	}
+	if (!isPositiveInt(input.frameCount)) {
+		throw invalidArgument("The frame count must be a positive integer.", {
+			frameCount: input.frameCount,
+		});
+	}
+	if (!isPositiveInt(input.frametime)) {
+		throw invalidArgument("frametime must be a positive integer.", {
+			frametime: input.frametime,
+		});
+	}
+	if (!isPositiveInt(input.holdTicks)) {
+		throw invalidArgument("holdTicks must be a positive integer.", {
+			holdTicks: input.holdTicks,
+		});
+	}
+	const n = input.frameCount;
+	const frames: Array<number | McmetaAnimationFrame> = [];
+	if (n === 1) {
+		frames.push({ index: 0, time: input.holdTicks });
+		return frames;
+	}
+	switch (input.preset) {
+		case "hold-and-sweep": {
+			frames.push({ index: 0, time: input.holdTicks });
+			for (let i = 1; i < n; i += 1) frames.push(i);
+			return frames;
+		}
+		case "ping-pong": {
+			for (let i = 0; i < n; i += 1) frames.push(i);
+			for (let i = n - 2; i >= 1; i -= 1) frames.push(i);
+			return frames;
+		}
+		case "pulse": {
+			if (n === 2) {
+				frames.push(0, 1);
+				return frames;
+			}
+			frames.push({ index: 0, time: input.holdTicks });
+			for (let i = 1; i < n; i += 1) frames.push(i);
+			frames.push({ index: n - 1, time: input.holdTicks });
+			for (let i = n - 2; i >= 1; i -= 1) frames.push(i);
+			return frames;
+		}
+	}
 }
 
 export interface GenerateGuiInput {
@@ -248,6 +348,13 @@ export function generateAnimationMcmeta(
 			interpolate: input.interpolate,
 		});
 	}
+	if (input.preset !== undefined && input.frames !== undefined) {
+		throw new McAssetError(
+			"ARGUMENT_CONFLICT",
+			"A timeline preset and an explicit frames list are exclusive.",
+			{ preset: input.preset, path: "animation.frames" },
+		);
+	}
 	if (input.frames !== undefined) {
 		if (!Array.isArray(input.frames) || input.frames.length === 0) {
 			throw invalidArgument("frames must be a non-empty list when present.", {
@@ -289,7 +396,14 @@ export function generateAnimationMcmeta(
 	);
 	const frameCount = geometry.frameCount;
 	let frames: Array<number | McmetaAnimationFrame>;
-	if (input.frames === undefined) {
+	if (input.preset !== undefined) {
+		frames = expandTimelinePreset({
+			preset: input.preset,
+			frameCount,
+			frametime,
+			holdTicks: input.holdTicks ?? 100,
+		});
+	} else if (input.frames === undefined) {
 		frames = [];
 		for (let index = 0; index < frameCount; index += 1) {
 			frames.push(index);
