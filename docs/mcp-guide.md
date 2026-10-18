@@ -13,7 +13,7 @@
 
 `mc-asset mcp` starts a stdio MCP server: stdout carries only MCP JSON-RPC,
 diagnostics go to stderr, and the process ends when stdin closes. The frozen
-surface — twenty-five tool names, their inputs, and the read/write contract — lives
+surface — twenty-six tool names, their inputs, and the read/write contract — lives
 in `docs/mcp-surface.md`; the input fields are frozen in `src/mcp/schema.ts`.
 This guide covers registration, one capture per tool (image bytes are
 abbreviated where noted, never verbatim), the error model, and the limits.
@@ -129,7 +129,7 @@ the local source server — the same server code runs either way.
 | [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
 | [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | [`mcmeta_asset`](#mcmeta_asset) |
-| [`compare_assets`](#compare_assets) | | |
+| [`compare_assets`](#compare_assets) | [`style_asset`](#style_asset) | |
 
 ### analyze_asset
 
@@ -708,6 +708,41 @@ pixels square. Only axis-aligned cuboids with exact 1/256 coordinates draw;
 `size` accepts 64, 128, or 256 (default 64). This is a diagnostic view:
 `display` transforms and game lighting are not applied, and nothing in a
 game client verified the appearance.
+
+### style_asset
+
+Style presets and the palette library. `list` names the four builtin
+presets (`vanilla`, `soft`, `fairy-flat`, `dark-frame`), each with twelve
+families and six roles; adding `paths` also reports the custom
+`.style.json` sources it can load, and one that cannot load fails the call
+with `STYLE_INVALID`. `show` resolves a builtin id or a `.style.json` path
+through its `extends` chain (at most eight levels) and returns the whole
+document plus that chain. `export-palette` writes the palette of one family,
+or of every family, as `.mcpx` — returning the text when `outputMcpxPath` is
+omitted. `create` writes a new `.style.json` document.
+
+Call:
+
+```json
+{"mode":"export-palette","style":"vanilla","family":"iron"}
+```
+
+The palette is one `.mcpx` document: one row per family, one column per
+role, `[palette]` in family-then-role order with `.` first as `#00000000`,
+and `kind = palette`. Hand it to `quantize` or `generate` as a palette file.
+
+```json
+{"mode":"create","outputPath":"styles/iron-tide.style.json","id":"iron-tide","name":"Iron Tide","extends":"vanilla","overrides":{"limits":{"maxColors":12}}}
+```
+
+A style file is read strictly: an unknown field, a value outside its
+enumeration, or a color that is not `#RRGGBB` is `STYLE_INVALID` naming the
+field path (`palettes.stone.base: expected #RRGGBB, got "#12345"`). The
+other codes are `STYLE_NOT_FOUND` (unknown id), `STYLE_INHERITANCE_CYCLE`,
+`STYLE_UNSUPPORTED_VERSION`, and `STYLE_FAMILY_NOT_FOUND` (a family the
+resolved style does not carry). Only `export-palette` and `create` write,
+and only to their explicit output path; `force` replaces that file and
+`mkdir` creates missing parents.
 
 ## How failures come back
 

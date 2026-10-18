@@ -41,13 +41,15 @@ Minecraft 目標版本涵蓋 `1.19.3` 到 `26.3`。工具中，有十二個（`i
 | `model_asset` | Java 方塊／物品模型 JSON、一種 `mode`（`inspect`／`validate`／`create`／`apply`／`export`／`preview`），可選的資源包、原版與依賴根目錄 | 選用的明確 `.json` 路徑（模型、物品定義、blockstate），或明確的 `.png` 路徑（`preview`） | 唯讀報告（`inspect`、`validate`），模型文件與產生的 binding（`create`、`apply`、`export`），或診斷三視圖 PNG（`preview`） |
 | `mcmeta_asset` | PNG 精靈圖集（`animation`）或設計精靈圖（`gui`）、各模式參數、版本欄位 | 選用的明確 `.mcmeta` 輸出路徑（`force`、`mkdir`） | 產生的 `.mcmeta` 文字與中繼資料摘要（僅在有 `outputPath` 時寫檔） |
 | `compare_assets` | 兩張同尺寸 PNG、`image`（`none`／`diff`）、`scale`（1–16） | 選用的明確 PNG 輸出路徑（`force`、`mkdir`；僅限 `image: "diff"`） | 比對報告（尺寸、原始與可見差異數、邊界框）及選用的標準 PNG 影像區塊（僅在有 `outputPath` 時寫檔） |
+| `style_asset` | 內建風格預設與 `.style.json` 來源、一個 `mode`（`list`／`show`／`export-palette`／`create`） | 選用的明確 `.mcpx` 路徑（`export-palette`）或 `.style.json` 路徑（`create`） | 預設清單、解析後的風格、調色盤 `.mcpx` 文字或檔案，或已寫出的風格檔 |
 
 ## 輸入語意
 
 - 每個檔案路徑都要明確指定。會產生檔案的工具不會自行決定檔名，唯讀工具則絕不寫入。
 - `profile` 為 `generic`、`minecraft:item`、`minecraft:block`、`minecraft:gui`、`minecraft:particle` 其中之一；省略時視為 `generic`。
 - `minecraftVersion`／`resourcePackVersion`（analyze、validate、validate-pack）用來選擇相容性行為，接受 release 版本 `1.19.3` 到 `26.3`（例如 `1.19.3`、`1.21.4`、`26.3`），以及資源包版本 `N` 或 `N.M`（例如 `84`、`97.1`），會正規化為 `major.minor`。省略時使用引擎預設值。
-- 子命令工具把 CLI 模式合併為 `mode` 欄位：`palette_asset`（`extract`／`inspect`）、`material_asset`（`list`／`show`）、`preview_asset`（`ascii`／`palette-map`／`scale`／`nine-slice`）、`animate_asset`（`pack`／`unpack`／`reorder`／`resize`／`validate`／`preview`）。
+- 子命令工具把 CLI 模式合併為 `mode` 欄位：`palette_asset`（`extract`／`inspect`）、`material_asset`（`list`／`show`）、`style_asset`（`list`／`show`／`export-palette`／`create`）、`preview_asset`（`ascii`／`palette-map`／`scale`／`nine-slice`）、`animate_asset`（`pack`／`unpack`／`reorder`／`resize`／`validate`／`preview`）。
+- `style_asset` 內建四個預設（`vanilla`、`soft`、`fairy-flat`、`dark-frame`），每個預設含十二家族與六角色（`outline`、`shadow`、`dark`、`base`、`light`、`highlight`）。`list` 回報預設，並可給 `paths` 一併回報能載入的自訂 `.style.json`；`paths` 中無法載入的檔案會讓整個呼叫以 `STYLE_INVALID` 失敗。`show` 取 `style`（內建 id 或 `.style.json` 路徑），回傳解析後的文件與 `extendsChain`。`export-palette` 取 `style` 與 `family`（家族 id 或 `all`）：沒有 `outputMcpxPath` 時回傳調色盤 `.mcpx` 文字，給了路徑則寫檔（`force` 可覆寫）。`create` 取 `outputPath` 與 `id`，另有選用的 `name`（預設為 id）、`extends`（預設 `vanilla`）、合併進文件的 `overrides`、`force` 與 `mkdir`。風格檔以嚴格模式讀取：未知欄位、列舉外的值，或不是 `#RRGGBB` 的顏色都是帶欄位路徑的 `STYLE_INVALID`；其餘另有查不到的 id（`STYLE_NOT_FOUND`）、`extends` 循環（`STYLE_INHERITANCE_CYCLE`）、版本過高（`STYLE_UNSUPPORTED_VERSION`）與家族不存在（`STYLE_FAMILY_NOT_FOUND`）。工具不會改寫自己沒有建立的風格檔。
 - `apply_asset_operations` 接收操作物件陣列，每個物件都有一個 `type`（Core 批次詞彙：九個像素操作 `setPixel`、`clearPixel`、`drawLine`、`drawRect`、`fillRect`、`floodFill`、`ellipse`、`polygonFill`、`strokeMask`，另有圖層與區域操作、`stampRect`、`regionFromSelection` 等），再加該類型的參數。`atomic` 預設為 true；設為 false 時會跑完每個操作，以各操作的 applied／failed 狀態回報，不再回復。像素操作可附選用的 `selection` 表示式；空匹配以 `EMPTY_SELECTION` 拒絕寫入並回復整批。
 - `apply_asset_operations` 另接受選用的 `feedback` 物件（`image`：`none`／`full`／`changed`；`scale`：整數 1–16；`crop`：選取範圍表示式；`diff`：`none`／`summary`）。不給 `feedback` 時，輸出欄位與位元組與過去完全相同。給了 `feedback` 時，結果攜帶 `feedback` 物件（`image`、`imageIncluded`、選用的 `noVisibleChange`、選用的 `diff`，含 `raw`／`composited`／`structural`／`outsideSelectionUnchanged`），且絕不內嵌 `pngBase64`：附帶的圖以標準 image content block（`type: "image"`、`mimeType: "image/png"`）傳送，文字區塊不重複攜帶位元組。`changed` 算繪合成後的變更邊界（忽略 crop），可見範圍沒有變化時以 `noVisibleChange` 代替圖片回報；參考線像素（格線、棋盤格）絕不寫入作品位元組。`crop` 配 `none` 為 `INVALID_ARGUMENT`。
 - `inspect_asset` 接收 `inputPath` 加 `mode`：`structure` 回傳圖層（邊界、面積、可見性、原始 RGBA 色彩用量）、區域（識別、邊界，只報面積）與重疊；`view` 以 image block 回傳合成 PNG 加六鍵 metadata，crop／scale／1024px 邊界規則與頂層 `inspect` 指令相同。view 的 scale 預設為 1；長邊自動縮放只適用於 `apply_asset_operations` 的 feedback 圖。
@@ -73,7 +75,7 @@ Minecraft 目標版本涵蓋 `1.19.3` 到 `26.3`。工具中，有十二個（`i
 
 - 唯讀工具（`analyze_asset`、`validate_asset`、`palette_asset`、`material_asset`、`validate_pack_asset`、`inspect_asset`）回傳報告；`validate_asset` 以 `fail` 加發現項目表示失敗，不會拋出錯誤。
 - 驗證類報告帶 `coverage: {status, skipped}`；`partial` 會逐項列出略過的檢查及其種類與原因，且不改變狀態碼。
-- 混合工具（`tile_asset`、`preview_asset`、`animate_asset`）在唯讀模式回傳報告，在寫入模式只寫入明確指定的輸出路徑或目錄。
+- 混合工具（`tile_asset`、`preview_asset`、`animate_asset`、`style_asset`）在唯讀模式回傳報告，在寫入模式只寫入明確指定的輸出路徑或目錄。`style_asset` 的 `list` 與 `show` 為唯讀，`export-palette` 與 `create` 只寫入明確指定的輸出路徑，它們讀取的風格來源檔不會被改寫。
 - 會產生檔案的工具回傳已套用的數量、各操作的狀態、警告，以及實際寫出的明確路徑或內嵌的成品。
 - `optimize_asset` 與 `model_asset` 不接受 `force`、`mkdir` 或原地覆寫：輸出已存在是 `OUTPUT_EXISTS`，缺少父目錄是 `FILESYSTEM_ERROR`。第一個位元組寫出之前，所有目標都已檢查完畢；與輸入互為別名、符號連結目標，以及父目錄是符號連結的情況都會被拒絕。多檔案寫入為逐檔原子提交，非跨檔交易：寫入中途失敗時已寫入的檔案保留，錯誤 details 回報 `completed`、`failedTarget` 與 `notStarted`。沒有輸出路徑時，結果內嵌成品（`pngBase64`、`modelText`、`itemText`、`blockstateText`）。
 - `optimize_asset` 與 `model_asset` 只回報像素是否相同、結構與引用是否有效。沒有遊戲用戶端渲染過結果，所以外觀與遊戲內行為都未驗證。`preview` 模式的 `model_asset` 是診斷視圖，不是遊戲渲染器。

@@ -11,7 +11,7 @@
 
 ---
 
-`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十五個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。
+`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十六個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。
 
 伺服器直接掛在 Core 上，所以每個工具都跑與 CLI 指令相同的引擎。像素層級的創作，透過 ASCII Grid 文件、批次操作陣列，或內嵌回傳的可編輯 `.mcpx` 來源來完成；刻意不提供 `set_pixel` 工具。
 
@@ -110,7 +110,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
 | [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | [`mcmeta_asset`](#mcmeta_asset) |
-| [`compare_assets`](#compare_assets) | | |
+| [`compare_assets`](#compare_assets) | [`style_asset`](#style_asset) | |
 
 ### analyze_asset
 
@@ -629,3 +629,21 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 ```json
 {"beforePath":"before.png","afterPath":"after.png","image":"diff","scale":4}
 ```
+
+### style_asset
+
+風格預設與調色盤庫。`list` 回報四個內建預設（`vanilla`、`soft`、`fairy-flat`、`dark-frame`），每個預設含十二家族與六角色；加上 `paths` 會一併回報能載入的自訂 `.style.json`，其中一個載不進來就讓整個呼叫以 `STYLE_INVALID` 失敗。`show` 把內建 id 或 `.style.json` 路徑沿 `extends` 鏈（最多八層）解析，回傳整份文件與該鏈。`export-palette` 把單一家族或全部家族的調色盤寫成 `.mcpx`，未給 `outputMcpxPath` 時回傳文字。`create` 寫出新的 `.style.json` 文件。
+
+呼叫：
+
+```json
+{"mode":"export-palette","style":"vanilla","family":"iron"}
+```
+
+調色盤是一份 `.mcpx` 文件：每列一個家族、每欄一個角色，`[palette]` 依家族再角色排序、`.` 排在最前對應 `#00000000`，並帶 `kind = palette`，可直接當成調色盤檔餵給 `quantize` 或 `generate`。
+
+```json
+{"mode":"create","outputPath":"styles/iron-tide.style.json","id":"iron-tide","name":"鐵潮","extends":"vanilla","overrides":{"limits":{"maxColors":12}}}
+```
+
+風格檔以嚴格模式讀取：未知欄位、列舉外的值，或不是 `#RRGGBB` 的顏色都是帶欄位路徑的 `STYLE_INVALID`（`palettes.stone.base: expected #RRGGBB, got "#12345"`）。其餘碼為 `STYLE_NOT_FOUND`（查不到的 id）、`STYLE_INHERITANCE_CYCLE`、`STYLE_UNSUPPORTED_VERSION` 與 `STYLE_FAMILY_NOT_FOUND`（解析後不存在的家族）。只有 `export-palette` 與 `create` 會寫入，且只寫明確指定的輸出路徑；`force` 覆寫該檔、`mkdir` 建立缺少的父目錄。

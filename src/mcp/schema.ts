@@ -1,12 +1,13 @@
 import { z } from "zod";
 
 /**
- * Frozen MCP tool surface: twenty-five tools for agent authoring — the
+ * Frozen MCP tool surface: twenty-six tools for agent authoring — the
  * intake and inspection pair, raster transforms, palette and quantization,
  * the deterministic pixelize pipeline, procedural generation, tiling and
  * preview, animation sheets, single-asset and whole-pack validation, model
- * and `.mcmeta` authoring, and PNG comparison. `MCP_TOOL_NAMES` below is
- * the registry this count is checked against.
+ * and `.mcmeta` authoring, style presets and palette export, and PNG
+ * comparison. `MCP_TOOL_NAMES` below is the registry this count is checked
+ * against.
  * The product document once listed `edit_asset` for the batch-edit slot, and
  * §90 wins, so the frozen name is `apply_asset_operations`. The input
  * shapes below are the frozen contract; handler behavior lives in
@@ -39,6 +40,7 @@ export const MCP_TOOL_NAMES = [
 	"model_asset",
 	"mcmeta_asset",
 	"compare_assets",
+	"style_asset",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -1064,5 +1066,69 @@ export const TOOL_INPUT_SCHEMAS = {
 			.describe(
 				"View-only integer upscale factor 1-16 with nearest sampling; omitted means 1.",
 			),
+	},
+	style_asset: {
+		mode: z
+			.enum(["list", "show", "export-palette", "create"])
+			.describe("Style subcommand: list, show, export-palette, or create."),
+		paths: z
+			.array(z.string().min(1))
+			.optional()
+			.describe(
+				"list only: custom .style.json paths to report alongside the builtin presets; each one loads or is reported as unreadable.",
+			),
+		style: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"show and export-palette: builtin style id or a .style.json path.",
+			),
+		family: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("export-palette only: family id, or all for every family."),
+		outputMcpxPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"export-palette only: explicit .mcpx output path. When omitted the palette text returns in the result and nothing is written.",
+			),
+		outputPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("create only: explicit .style.json output path."),
+		id: z.string().min(1).optional().describe("create only: style id."),
+		name: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("create only: display name; defaults to the id."),
+		extends: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"create only: builtin id or .style.json path to inherit; defaults to vanilla.",
+			),
+		overrides: z
+			.record(z.unknown())
+			.optional()
+			.describe(
+				'create only: style sections merged into the new document, for example {"limits":{"maxColors":12}}.',
+			),
+		force: z
+			.boolean()
+			.optional()
+			.describe(
+				"Replace an existing output file as a whole (export-palette and create).",
+			),
+		mkdir: z
+			.boolean()
+			.optional()
+			.describe("Create missing parent directories (create)."),
 	},
 } satisfies Record<McpToolName, Record<string, z.ZodTypeAny>>;

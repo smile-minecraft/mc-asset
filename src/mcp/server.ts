@@ -24,6 +24,7 @@ import {
 	handleRecolorAsset,
 	handleRenderPixelAsset,
 	handleScaleGuiAsset,
+	handleStyleAsset,
 	handleTileAsset,
 	handleTransformAsset,
 	handleValidateAsset,
@@ -249,6 +250,14 @@ export function createMcpServer(): McpServer {
 			inputSchema: TOOL_INPUT_SCHEMAS.compare_assets,
 		},
 		handleCompareAssets,
+	);
+	server.registerTool(
+		"style_asset",
+		{
+			description: toolDescription("style_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.style_asset,
+		},
+		handleStyleAsset,
 	);
 	return server;
 }

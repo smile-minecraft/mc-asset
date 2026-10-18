@@ -28,6 +28,7 @@ import {
 	restoreUnselectedPixels,
 	snapshotLayerBytes,
 } from "../cli/canvas-input.ts";
+import { writeStyleFile, writeStylePalette } from "../cli/cmd-style.ts";
 import { prepareCompare, writeCompare } from "../cli/compare-request.ts";
 import { atomicWriteFile } from "../cli/filesystem.ts";
 import { parseGridFile } from "../cli/grid.ts";
@@ -143,6 +144,10 @@ import { validateDimension } from "../core/validate.ts";
 import { decodePng, encodePng, flattenCanvas } from "../io/png.ts";
 import { collectCanvasColors, colorKeyOf, parseMcpx } from "../mcpx/index.ts";
 import { GUI_STRETCH_INNER_FACT, isFactActive } from "../profiles/versions.ts";
+import { buildPaletteMcpx } from "../style/export-palette.ts";
+import { resolveStyle } from "../style/load.ts";
+import { listStylePresets } from "../style/presets.ts";
+import type { StyleSummary } from "../style/types.ts";
 import type { ValidateFinding, ValidateReport } from "../validate/checks.ts";
 import { validateCanvas } from "../validate/checks.ts";
 import { scanPack } from "../validate/pack.ts";
@@ -235,6 +240,9 @@ export type ScaleGuiAssetInput = z.infer<
 >;
 export type InspectAssetInput = z.infer<
 	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.inspect_asset>
+>;
+export type StyleAssetInput = z.infer<
+	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.style_asset>
 >;
 
 function stripCodePrefix(message: string): string {
@@ -2685,6 +2693,92 @@ export async function handleCompareAssets(args: CompareAssetsInput) {
 			};
 		}
 		return result;
+	} catch (error) {
+		return errorResult(error);
+	}
+}
+
+/**
+ * Style presets, the palette library, and custom style files: `list` names
+ * the builtin presets plus the requested `.style.json` sources, `show`
+ * resolves one style through its `extends` chain, `export-palette` writes
+ * (or returns) the `.mcpx` palette of one family or of all of them, and
+ * `create` writes a new `.style.json` document. Only `export-palette` and
+ * `create` write, and only to their explicit output path; the style sources
+ * they read are never rewritten.
+ */
+export async function handleStyleAsset(
+	args: StyleAssetInput,
+): Promise<McpTextResult> {
+	try {
+		if (args.mode === "list") {
+			const presets = listStylePresets();
+			const custom: StyleSummary[] = [];
+			for (const path of args.paths ?? []) {
+				const style = await resolveStyle(path);
+				custom.push({
+					id: style.id,
+					name: style.name,
+					description: style.description,
+					path,
+				});
+			}
+			return textResult({ mode: "list", presets, custom });
+		}
+		if (args.mode === "show") {
+			if (args.style === undefined || args.style === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"style_asset show needs a style.",
+				);
+			}
+			const style = await resolveStyle(args.style);
+			return textResult({ mode: "show", style });
+		}
+		if (args.mode === "export-palette") {
+			const style = args.style ?? "";
+			const family = args.family ?? "";
+			if (args.outputMcpxPath === undefined || args.outputMcpxPath === "") {
+				const resolved = await resolveStyle(style);
+				return textResult({
+					mode: "export-palette",
+					style: resolved.id,
+					family,
+					mcpxText: buildPaletteMcpx(resolved, family),
+				});
+			}
+			const written = await writeStylePalette({
+				style,
+				family,
+				outputPath: args.outputMcpxPath,
+				force: args.force === true,
+				mkdir: args.mkdir === true,
+			});
+			return textResult({ mode: "export-palette", ...written });
+		}
+		if (args.mode === "create") {
+			if (args.outputPath === undefined || args.outputPath === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"style_asset create needs an outputPath.",
+				);
+			}
+			const written = await writeStyleFile({
+				id: args.id ?? "",
+				name: args.name,
+				extends: args.extends,
+				overrides: args.overrides,
+				outputPath: args.outputPath,
+				force: args.force === true,
+				mkdir: args.mkdir === true,
+			});
+			return textResult({ mode: "create", ...written });
+		}
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			"style_asset mode must be list, show, export-palette, or create.",
+			{ mode: args.mode },
+		);
 	} catch (error) {
 		return errorResult(error);
 	}

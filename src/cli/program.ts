@@ -36,6 +36,7 @@ import { type PreviewOptions, runPreview } from "./cmd-preview.ts";
 import { type QuantizeOptions, runQuantize } from "./cmd-quantize.ts";
 import { type RecolorOptions, runRecolor } from "./cmd-recolor.ts";
 import { type RenderOptions, runRender } from "./cmd-render.ts";
+import { runStyle, type StyleOptions } from "./cmd-style.ts";
 import { runTile, type TileOptions } from "./cmd-tile.ts";
 import { runTransform, type TransformOptions } from "./cmd-transform.ts";
 import { runValidatePack } from "./cmd-validate-pack.ts";
@@ -770,6 +771,81 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 				process.exitCode = code;
 			},
 		);
+
+	const style = program
+		.command("style")
+		.description("Style presets, the palette library, and custom style files.");
+	style
+		.command("list")
+		.description("List the builtin style presets.")
+		.action(async (_options: StyleOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runStyle(
+				"list",
+				undefined,
+				{},
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	style
+		.command("show <style>")
+		.description("Show one resolved style (builtin id or .style.json path).")
+		.action(
+			async (source: string, _options: StyleOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runStyle(
+					"show",
+					source,
+					{},
+					globals.json === true,
+					realStreams(),
+				);
+				process.exitCode = code;
+			},
+		);
+	style
+		.command("export-palette <style>")
+		.description("Export one family, or every family, as an .mcpx palette.")
+		.option("--family <id|all>", "Family id, or all for every family.")
+		.option("--output <path>", "Explicit .mcpx palette output file path.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.action(async (source: string, options: StyleOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runStyle(
+				"export-palette",
+				source,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+	style
+		.command("create")
+		.description("Write a new .style.json document.")
+		.option("--id <id>", "Style id written into the new document.")
+		.option("--name <name>", "Display name; defaults to the id.")
+		.option(
+			"--extends <base>",
+			"Builtin id or .style.json path to inherit; defaults to vanilla.",
+		)
+		.option("--output <path>", "Explicit .style.json output file path.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.action(async (options: StyleOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runStyle(
+				"create",
+				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
 
 	program
 		.command("recolor <source>")

@@ -117,12 +117,20 @@ transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
 | `material show <name>` | 無 | 僅報告 | 檢視某個材質的色階與定義。 |
 | `recolor <source>` | `.mcpx`、PNG | PNG 和／或 `.mcpx` | 將顏色重新對應到內建材質調色盤。 |
 | `variant <source>` | `.mcpx`、PNG | `--output-dir` 下的多個檔案 | 產生材質變體（例如 iron、copper、gold）。 |
+| `style list` | 無 | 僅報告 | 列出內建風格預設。 |
+| `style show <style>` | 無 | 僅報告 | 把某個風格（內建 id 或 `.style.json` 路徑）解析成完整 JSON。 |
+| `style export-palette <style>` | 無 | `.mcpx` 調色盤檔 | 把單一家族或全部家族的調色盤寫成 `.mcpx`。 |
+| `style create` | 無 | `.style.json` 檔 | 寫出新的風格檔。 |
 
 ```text
 quantize <input> (--colors <N> | --palette <name|path>) [--keep-color <r,g,b,a> ...] [--selection <scope>] <file flags>
 cleanup  <input> [--fix <classes>] [--allow-render-pass-change] [--selection <scope>] <file flags>
 recolor  <source> --material <name> [--region <id>] [--selection <scope>] <file flags>
 variant  <source> --materials <a,b,...> --output-dir <dir> [--mkdir] [--force] [--profile <p>]
+style list
+style show <style>
+style export-palette <style> --family <id|all> --output <file.mcpx> [--force] [--mkdir]
+style create --output <file.style.json> --id <id> [--name <name>] [--extends <id|path>] [--force] [--mkdir]
 ```
 
 - `quantize` 必須恰好給 `--colors` 或 `--palette` 其中之一：兩者並用是 `ARGUMENT_CONFLICT`，都沒給是 `INVALID_ARGUMENT`。`--palette` 接受內建材質名或 `.mcpx` 路徑（最多 4096 色，依宣告順序，含未使用項目）。每個像素依整數 RGBA 平方距離對應到最近的項目；距離相同取較前項，alpha 為 0 的隱藏 RGB 也參與。
@@ -131,6 +139,11 @@ variant  <source> --materials <a,b,...> --output-dir <dir> [--mkdir] [--force] [
 - `cleanup --fix <classes>`：以逗號分隔的類別清單（`isolated`、`noise`、`cluster`、`fringe`、`outlier`、`hole`、`aa`）。修改會影響 alpha 的類別時，必須加 `--allow-render-pass-change`。
 - `palette` 與 `material` 子指令只輸出報告，收到檔案寫入旗標會被拒絕（`INVALID_ARGUMENT`）。
 - `recolor` 與 `variant` 接受可編輯的 `.mcpx` 來源或扁平 PNG。PNG 沒有調色盤角色資訊，因此像素依整數明度分段對應到目標材質調色盤（96 以下為暗部、96 到 159 為中間、160 以上為亮部），不會虛構圖層角色。全透明像素（alpha 為 0）保持位元組不變，包含隱藏 RGB，區域遮罩也不會被改寫。PNG 搭配 `--region` 時，缺少區域沿用既有的 `REGION_NOT_FOUND` 錯誤；`--selection` 仍可限定寫回範圍，未選取像素會原樣還原。JPEG 與 WebP 仍會被拒絕（`INVALID_ARGUMENT`）。`variant` 的每個材質都從同一個原始來源獨立產生，材質順序不影響結果；檔案命名為 `<stem>_<material>.png` 加 `<stem>_<material>.mcpx`。輸入檔不會被修改；所有檔案目標會在寫入前先做聯合預檢。
+- `style` 有四個內建預設：`vanilla`、`soft`、`fairy-flat`、`dark-frame`。每個預設都含十二家族（`iron`、`gold`、`diamond`、`netherite`、`copper`、`wood`、`stone`、`emerald`、`amethyst`、`redstone`、`lapis`、`quartz`），每家族六個角色（`outline`、`shadow`、`dark`、`base`、`light`、`highlight`），以及外框、光向、明暗階數、高光、抖動與動畫規則。風格來源可以是內建 id，也可以是 `.style.json` 路徑；自訂檔透過 `extends` 繼承一個來源（最多八層），可覆寫單一欄位、整個家族或分類門檻。
+- `style list` 與 `style show` 只輸出報告，不寫任何檔案。`style show` 印出解析後的文件：`formatVersion`、`id`、`name`、`description`、`palettes`、`outline`、`light`、`limits`、`highlight`、`dither`、`animation`、`categoryOverrides`，以及從所求來源一路走到基底所走的 `extendsChain`。
+- `style export-palette --family <id|all> --output <file.mcpx>` 寫出調色盤文件：每列一個家族、每欄一個角色，`[palette]` 依家族再角色排序、`.` 排在最前對應 `#00000000`，並帶 `kind = palette`。輸出可直接餵給 `quantize --palette` 與 `generate --palette`。指定解析後不存在的家族是 `STYLE_FAMILY_NOT_FOUND`；沒給 `--output` 則是 `OUTPUT_REQUIRED`。
+- `style create` 先讓文件通過驗證，再寫出 `{formatVersion, id, name, extends}`（`extends` 預設為 `vanilla`），寫入同樣走共用輸出保護：目標必須以 `.style.json` 結尾、既有檔案需要 `--force`、父目錄不存在需要 `--mkdir`，而且目標不得是它所繼承的來源。工具不會改寫自己沒有建立的風格檔，其他指令也不會寫風格檔。
+- 風格檔以嚴格模式讀取：未知欄位、列舉外的值，或不是 `#RRGGBB` 的顏色都是 `STYLE_INVALID`，並帶欄位路徑（例如 `palettes.stone.base: expected #RRGGBB, got "#12345"`）。讀不到或解析失敗的檔案、版本高於支援範圍的 `formatVersion`（`STYLE_UNSUPPORTED_VERSION`）、`extends` 循環（`STYLE_INHERITANCE_CYCLE`）、`id` 撞到內建預設名稱，以及查不到的內建 id（`STYLE_NOT_FOUND`），都會帶上檔案路徑、欄位路徑與解析鏈。
 
 ---
 
@@ -427,6 +440,11 @@ model preview  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
 | `PACK_UNRESOLVED_EXTERNAL` | 0（警告） | `minecraft` 命名空間的引用（模型 parent、材質、模型，或裝備、粒子、字型的引用）在沒有原版資源樹時無法解析。以警告加上 `vanilla-not-provided` 覆蓋率條目回報，本身不會讓掃描失敗。 | 加上 `--vanilla <path>` 指定解包後之原版資源根目錄以供比對。 |
 | `PACK_REFERENCE_CYCLE` | 3 | 模型的 `parent` 鏈或材質變數繞回自己（如 `#a -> #b -> #a`）。 | 在 model JSON 的 `parent` 或 `textures` 中切斷循環。 |
 | `INVALID_MCMETA` | 2 | `.mcmeta` 格式有誤；對 `gui-scale` 而言，也包括九宮格邊框吃掉整個中段（`left + right >= width` 或 `top + bottom >= height`）。 | 保持 `left + right < width` 且 `top + bottom < height`。 |
+| `STYLE_INVALID` | 2 | `.style.json` 有未知欄位、列舉外的值，或不是 `#RRGGBB` 的顏色；也包括讀不到或解析失敗的風格檔，以及載入不到的 `extends` 來源。 | 依訊息中的欄位路徑修正（`palettes.stone.base: expected #RRGGBB, got "#12345"`）；整個檔案的失敗會帶上路徑。 |
+| `STYLE_NOT_FOUND` | 2 | `style show` 或 `style export-palette` 給的 id 不是四個內建預設之一。 | 改用 `vanilla`、`soft`、`fairy-flat`、`dark-frame`，或 `.style.json` 路徑。 |
+| `STYLE_INHERITANCE_CYCLE` | 2 | `extends` 鏈回到已經走過的風格（最多八層）。 | 移除循環；訊息會列出重複的那段鏈。 |
+| `STYLE_FAMILY_NOT_FOUND` | 2 | `--family` 指定的家族不在解析後的風格裡（例如文件用 `null` 刪掉之後）。 | 從 `style show <style>` 的結果挑一個家族，或不要刪除它。 |
+| `STYLE_UNSUPPORTED_VERSION` | 5 | `.style.json` 的 `formatVersion` 高於工具支援的版本。 | 把 `formatVersion` 設為 1，並依這個版本調整文件內容。 |
 | `PACK_GUI_SCALING_BORDER` | 3 | `validate-pack` 發現某個 GUI 貼圖的九宮格邊框沒有留下中段（判斷方式同 `INVALID_MCMETA`）。 | 縮小該貼圖 `.mcmeta` 裡的邊框。 |
 | `PACK_MCMETA_INVALID` | 3 | 根目錄 `pack.mcmeta` 寫了遊戲拒絕載入的內容：缺少 `pack` 區段或 `pack.description`、`min_format`／`max_format` 只寫一半、負值或上下顛倒的範圍、與宣告範圍不一致的 `supported_formats`、落在宣告 major 之外的舊制 `pack_format`、不合法的 overlay 目錄名，或違反舊格式規則的 overlay `formats` 欄位。 | 把指出的欄位修好（範圍兩端都要能讀、宣告的 major 要一致），或拿掉規則不准寫的舊欄位。 |
 | `PACK_MCMETA_SUSPICIOUS` | 0（警告） | 包照常載入，但寫法疑似失誤：pack 根目錄沒有的 overlay 目錄、完全沒寫版本欄位的 overlay 條目，或落在宣告範圍外的掃描目標。以警告回報，本身不會讓掃描失敗。 | 補上缺少的 overlay 目錄、給該條目一個版本範圍，或把掃描目標改回宣告範圍內。 |

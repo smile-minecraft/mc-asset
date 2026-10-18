@@ -51,6 +51,7 @@ is no `set_pixel` tool on purpose.
 | `model_asset` | Java block/item model JSON, one `mode` (`inspect` / `validate` / `create` / `apply` / `export` / `preview`), optional pack, vanilla, and dependency roots | Optional explicit `.json` paths (model, item definition, blockstate), or an explicit `.png` path (`preview`) | Read-only report (`inspect`, `validate`), the model document and generated bindings (`create`, `apply`, `export`), or a diagnostic three-view PNG (`preview`) |
 | `mcmeta_asset` | PNG sprite sheet (`animation`) or design sprite (`gui`), mode-specific parameters, version fields | Optional explicit `.mcmeta` output path (`force`, `mkdir`) | Generated `.mcmeta` text and metadata summary (writes file only with `outputPath`) |
 | `compare_assets` | Two same-size PNGs, `image` (`none` / `diff`), `scale` (1–16) | Optional explicit PNG output path (`force`, `mkdir`; only with `image: "diff"`) | Comparison report (dimensions, raw and visible difference counts, bounds) plus optional standard PNG image block (writes file only with `outputPath`) |
+| `style_asset` | Style presets and `.style.json` sources, one `mode` (`list` / `show` / `export-palette` / `create`) | Optional explicit `.mcpx` path (`export-palette`) or `.style.json` path (`create`) | Preset list, resolved style, palette `.mcpx` text or file, or the written style document |
 
 ## Input semantics
 
@@ -65,9 +66,29 @@ is no `set_pixel` tool on purpose.
   normalized to `major.minor`. Omitted means engine defaults.
 - Subcommand tools merge CLI modes into a `mode` field: `palette_asset`
   (`extract` / `inspect`), `material_asset` (`list` / `show`),
+  `style_asset` (`list` / `show` / `export-palette` / `create`),
   `preview_asset` (`ascii` / `palette-map` / `scale` / `nine-slice`),
   `animate_asset` (`pack` / `unpack` / `reorder` / `resize` /
   `validate` / `preview`).
+- `style_asset` carries the four builtin presets (`vanilla`, `soft`,
+  `fairy-flat`, `dark-frame`), each with twelve families and six roles
+  (`outline`, `shadow`, `dark`, `base`, `light`, `highlight`).
+  `list` reports the presets and, with `paths`, the custom `.style.json`
+  sources it can load; a `paths` entry that cannot load fails the call with
+  `STYLE_INVALID`. `show` takes `style` (builtin id or `.style.json` path)
+  and returns the resolved document plus its `extendsChain`. `export-palette`
+  takes `style` and `family` (a family id or `all`): without
+  `outputMcpxPath` the palette `.mcpx` text returns in the result, with it
+  the file is written (`force` replaces it). `create` takes `outputPath`
+  and `id`, plus optional `name` (defaults to the id), `extends` (defaults
+  to `vanilla`), `overrides` merged into the document, `force`, and `mkdir`.
+  A style file is strict: an unknown field, an enumeration value outside
+  its list, or a color that is not `#RRGGBB` is `STYLE_INVALID` naming the
+  field path, and other codes cover an unknown id (`STYLE_NOT_FOUND`), an
+  `extends` cycle (`STYLE_INHERITANCE_CYCLE`), a newer `formatVersion`
+  (`STYLE_UNSUPPORTED_VERSION`), and a family the style does not resolve
+  (`STYLE_FAMILY_NOT_FOUND`). The tool never rewrites a style file it did
+  not create.
 - `apply_asset_operations` takes an array of operation objects, each
   with a `type` (the Core batch vocabulary: the nine pixel operations
   `setPixel`, `clearPixel`, `drawLine`, `drawRect`, `fillRect`,
@@ -159,6 +180,9 @@ is no `set_pixel` tool on purpose.
 - Read-only tools (`analyze_asset`, `validate_asset`, `palette_asset`,
   `material_asset`, `validate_pack_asset`) return reports;
   `validate_asset` reports `fail` with findings rather than raising.
+  In `style_asset`, `list` and `show` are read-only; `export-palette` and
+  `create` write only to their explicit output path, and the style sources
+  they read stay unchanged.
 - Validation reports carry `coverage: {status, skipped}`; `partial`
   lists each skipped check with its kind and reason, and never changes
   the exit code.

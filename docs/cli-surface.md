@@ -117,12 +117,20 @@ transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
 | `material show <name>` | None | Report only | Inspects color ramps and definitions for a material. |
 | `recolor <source>` | `.mcpx`, PNG | PNG and/or `.mcpx` | Remaps colors to a built-in material palette. |
 | `variant <source>` | `.mcpx`, PNG | Multi-file under `--output-dir` | Generates material variants (e.g. iron, copper, gold). |
+| `style list` | None | Report only | Lists the builtin style presets. |
+| `style show <style>` | None | Report only | Resolves one style (builtin id or `.style.json` path) into its full JSON. |
+| `style export-palette <style>` | None | `.mcpx` palette file | Writes the palette of one family, or of every family, as `.mcpx`. |
+| `style create` | None | `.style.json` file | Writes a new style document. |
 
 ```text
 quantize <input> (--colors <N> | --palette <name|path>) [--keep-color <r,g,b,a> ...] [--selection <scope>] <file flags>
 cleanup  <input> [--fix <classes>] [--allow-render-pass-change] [--selection <scope>] <file flags>
 recolor  <source> --material <name> [--region <id>] [--selection <scope>] <file flags>
 variant  <source> --materials <a,b,...> --output-dir <dir> [--mkdir] [--force] [--profile <p>]
+style list
+style show <style>
+style export-palette <style> --family <id|all> --output <file.mcpx> [--force] [--mkdir]
+style create --output <file.style.json> --id <id> [--name <name>] [--extends <id|path>] [--force] [--mkdir]
 ```
 
 - `quantize` needs exactly one of `--colors` or `--palette`: both is `ARGUMENT_CONFLICT`, neither is `INVALID_ARGUMENT`. `--palette` takes a builtin material name or an `.mcpx` path (at most 4096 colors, declared `[palette]` order, unused entries included). Each pixel maps to the nearest entry by integer squared RGBA distance; an exact tie takes the earlier entry, and hidden RGB under alpha 0 takes part.
@@ -131,6 +139,11 @@ variant  <source> --materials <a,b,...> --output-dir <dir> [--mkdir] [--force] [
 - `cleanup --fix <classes>`: Comma-separated list (`isolated`, `noise`, `cluster`, `fringe`, `outlier`, `hole`, `aa`). Modifying alpha-affecting classes requires `--allow-render-pass-change`.
 - `palette` and `material` subcommands are read-only reports and reject file write flags (`INVALID_ARGUMENT`).
 - `recolor` and `variant` accept an editable `.mcpx` source or a flat PNG. A PNG carries no palette roles, so its pixels map by integer luminance bands (below 96 to shadow, 96–159 to base, 160 and above to highlight) onto the target material palette; no layer roles are invented. Fully transparent pixels (alpha 0) stay byte-identical, including hidden RGB, and the region mask is never rewritten. `--region` on a PNG follows the existing missing-region error (`REGION_NOT_FOUND`); `--selection` still scopes the write-back, restoring unselected pixels verbatim. JPEG and WebP are still refused (`INVALID_ARGUMENT`). Each `variant` material starts from the same pristine source, so material order never matters; files land as `<stem>_<material>.png` plus `<stem>_<material>.mcpx`. Inputs are never modified; file targets are preflighted as one union before the first byte lands.
+- `style` carries four builtin presets — `vanilla`, `soft`, `fairy-flat`, `dark-frame` — each with twelve families (`iron`, `gold`, `diamond`, `netherite`, `copper`, `wood`, `stone`, `emerald`, `amethyst`, `redstone`, `lapis`, `quartz`) and six roles per family (`outline`, `shadow`, `dark`, `base`, `light`, `highlight`), plus outline, light, level, highlight, dither, and animation rules. A style source is a builtin id or a `.style.json` path; a custom document inherits one source through `extends` (at most eight levels) and overrides single fields, whole families, or per-category limits.
+- `style list` and `style show` report only and write nothing. `style show` prints the resolved document: `formatVersion`, `id`, `name`, `description`, `palettes`, `outline`, `light`, `limits`, `highlight`, `dither`, `animation`, `categoryOverrides`, and the `extendsChain` it walked from the requested source down to the base.
+- `style export-palette --family <id|all> --output <file.mcpx>` writes a palette document: one row per family and one column per role, `[palette]` in family-then-role order with `.` first as `#00000000`, and `kind = palette`. The result is accepted directly by `quantize --palette` and `generate --palette`. A family the style does not resolve is `STYLE_FAMILY_NOT_FOUND`; without `--output` the command is `OUTPUT_REQUIRED`.
+- `style create` writes `{formatVersion, id, name, extends}` (`extends` defaults to `vanilla`) after the document validates, then writes through the shared output guard: the target must end in `.style.json`, an existing file needs `--force`, a missing parent needs `--mkdir`, and a target may not be the style it extends. The tool never rewrites a style file it did not create; no other command writes one.
+- A style file is read in strict mode: an unknown field, a value outside its enumeration, or a color that is not `#RRGGBB` is `STYLE_INVALID` naming the field path (for example `palettes.stone.base: expected #RRGGBB, got "#12345"`). A file that cannot be read or parsed, a `formatVersion` above the supported one (`STYLE_UNSUPPORTED_VERSION`), an `extends` cycle (`STYLE_INHERITANCE_CYCLE`), an id that reuses a builtin name, and an unknown builtin id (`STYLE_NOT_FOUND`) each carry the document path, the field path, and the chain.
 
 ---
 
@@ -429,6 +442,11 @@ Batch execution is atomic: the first invalid operation rolls back all changes. (
 | `PACK_UNRESOLVED_EXTERNAL` | 0 (warning) | A `minecraft`-namespace reference (model parent, texture, model, or an equipment, particle, or font reference) cannot be resolved without the vanilla tree. Reported as a warning plus a `vanilla-not-provided` coverage entry; it never fails the scan by itself. | Supply `--vanilla <path>` pointing to an extracted vanilla asset root to verify external references. |
 | `PACK_REFERENCE_CYCLE` | 3 | A model `parent` chain or a texture variable refers back to itself. | Break the loop in the model JSON (`parent` or `textures`). |
 | `INVALID_MCMETA` | 2 | A malformed `.mcmeta`; for `gui-scale`, also nine-slice borders that leave no middle band (`left + right >= width` or `top + bottom >= height`). | Keep `left + right < width` and `top + bottom < height`. |
+| `STYLE_INVALID` | 2 | A `.style.json` field is unknown, outside its enumeration, or carries a color that is not `#RRGGBB`; also an unreadable or unparsable style file, and an `extends` target that cannot be loaded. | Read the field path in the message (`palettes.stone.base: expected #RRGGBB, got "#12345"`) and fix exactly that field; a file-level failure names the path. |
+| `STYLE_NOT_FOUND` | 2 | `style show` or `style export-palette` was given a style id that is not one of the four builtin presets. | Use `vanilla`, `soft`, `fairy-flat`, `dark-frame`, or a `.style.json` path. |
+| `STYLE_INHERITANCE_CYCLE` | 2 | An `extends` chain returns to a style it already walked (at most eight levels). | Remove the loop; the message lists the repeated chain. |
+| `STYLE_FAMILY_NOT_FOUND` | 2 | `--family` names a family the resolved style does not carry (for example after a document deleted one with `null`). | Pick a family from `style show <style>`, or stop deleting it. |
+| `STYLE_UNSUPPORTED_VERSION` | 5 | A `.style.json` declares a `formatVersion` above the supported one. | Set `formatVersion` to 1 and adjust the document to this release. |
 | `PACK_GUI_SCALING_BORDER` | 3 | `validate-pack` found a GUI sprite whose nine-slice borders leave no middle band (same test as `INVALID_MCMETA`). | Shrink the borders in that sprite's `.mcmeta`. |
 | `PACK_MCMETA_INVALID` | 3 | The root `pack.mcmeta` declares something the game refuses to load: a missing `pack` section or `pack.description`, half a `min_format` / `max_format` range, negative or inverted bounds, a `supported_formats` field that disagrees with the declared range, a retained legacy `pack_format` outside the declared majors, an illegal overlay directory name, or an overlay `formats` field that contradicts the old-format rule. | Fix the named field so both range ends read and the declared majors agree, or drop the legacy field the rule forbids. |
 | `PACK_MCMETA_SUSPICIOUS` | 0 (warning) | The pack still loads, but something looks wrong: an overlay directory the pack root does not hold, an overlay entry with no version field, or a scan target outside the declared range. Reported as a warning; it never fails the scan by itself. | Add the missing overlay directory, give the entry a version range, or re-target the scan into the declared range. |

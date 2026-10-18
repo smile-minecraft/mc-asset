@@ -32,6 +32,11 @@ export type ErrorCode =
 	| "VALIDATION_FAILED"
 	| "ATLAS_REFERENCE_ERROR"
 	| "TEXTURE_NOT_IN_REQUIRED_ATLAS"
+	| "STYLE_NOT_FOUND"
+	| "STYLE_INVALID"
+	| "STYLE_UNSUPPORTED_VERSION"
+	| "STYLE_INHERITANCE_CYCLE"
+	| "STYLE_FAMILY_NOT_FOUND"
 	| "FILESYSTEM_ERROR"
 	| "OUTPUT_EXISTS"
 	| "MCPX_UNSUPPORTED_VERSION"
@@ -154,6 +159,14 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	EMPTY_SELECTION: 2,
 	// A polygon whose nonadjacent edges touch or cross (holes unsupported).
 	SELF_INTERSECTING_POLYGON: 2,
+	// Style files and the palette library. STYLE_INVALID carries the field
+	// path of the rejected value; an unsupported format version is the only
+	// style code that exits 5.
+	STYLE_NOT_FOUND: 2,
+	STYLE_INVALID: 2,
+	STYLE_UNSUPPORTED_VERSION: 5,
+	STYLE_INHERITANCE_CYCLE: 2,
+	STYLE_FAMILY_NOT_FOUND: 2,
 };
 
 export function isErrorCode(value: unknown): value is ErrorCode {

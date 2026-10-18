@@ -11,7 +11,7 @@
 
 ---
 
-`mc-asset mcp` 会启动 stdio MCP 服务器：stdout 只输出 MCP JSON-RPC，诊断信息走 stderr，stdin 关闭时进程退出。已冻结的接口（二十五个工具名称、各自的输入，以及读写契约）记录在 `docs/mcp-surface.zh-CN.md`，输入字段则冻结在 `src/mcp/schema.ts`。本指南涵盖注册方式、每个工具一份捕获（图片字节在注明处截短显示，不作原样引用）、错误模型与限制。
+`mc-asset mcp` 会启动 stdio MCP 服务器：stdout 只输出 MCP JSON-RPC，诊断信息走 stderr，stdin 关闭时进程退出。已冻结的接口（二十六个工具名称、各自的输入，以及读写契约）记录在 `docs/mcp-surface.zh-CN.md`，输入字段则冻结在 `src/mcp/schema.ts`。本指南涵盖注册方式、每个工具一份捕获（图片字节在注明处截短显示，不作原样引用）、错误模型与限制。
 
 服务器直接挂在 Core 上，所以每个工具都跑与 CLI 命令相同的引擎。像素级的创作，通过 ASCII Grid 文档、批处理操作数组，或内联返回的可编辑 `.mcpx` 源码来完成；刻意不提供 `set_pixel` 工具。
 
@@ -110,7 +110,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
 | [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | [`mcmeta_asset`](#mcmeta_asset) |
-| [`compare_assets`](#compare_assets) | | |
+| [`compare_assets`](#compare_assets) | [`style_asset`](#style_asset) | |
 
 ### analyze_asset
 
@@ -629,3 +629,21 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 ```json
 {"beforePath":"before.png","afterPath":"after.png","image":"diff","scale":4}
 ```
+
+### style_asset
+
+风格预设与调色板库。`list` 报告四个内置预设（`vanilla`、`soft`、`fairy-flat`、`dark-frame`），每个预设含十二个家族与六个角色；加上 `paths` 会一并报告能加载的自定义 `.style.json`，其中一个加载不进来就让整个调用以 `STYLE_INVALID` 失败。`show` 把内置 id 或 `.style.json` 路径沿 `extends` 链（最多八层）解析，返回整份文档与该链。`export-palette` 把单个家族或全部家族的调色板写成 `.mcpx`，未提供 `outputMcpxPath` 时返回文本。`create` 写出新的 `.style.json` 文档。
+
+调用：
+
+```json
+{"mode":"export-palette","style":"vanilla","family":"iron"}
+```
+
+调色板是一份 `.mcpx` 文档：每行一个家族、每列一个角色，`[palette]` 按家族再按角色排序、`.` 排在最前对应 `#00000000`，并带 `kind = palette`，可直接当成调色板文件喂给 `quantize` 或 `generate`。
+
+```json
+{"mode":"create","outputPath":"styles/iron-tide.style.json","id":"iron-tide","name":"铁潮","extends":"vanilla","overrides":{"limits":{"maxColors":12}}}
+```
+
+风格文件以严格模式读取：未知字段、枚举外的值，或不是 `#RRGGBB` 的颜色都是带字段路径的 `STYLE_INVALID`（`palettes.stone.base: expected #RRGGBB, got "#12345"`）。其余错误码为 `STYLE_NOT_FOUND`（查不到的 id）、`STYLE_INHERITANCE_CYCLE`、`STYLE_UNSUPPORTED_VERSION` 与 `STYLE_FAMILY_NOT_FOUND`（解析后不存在的家族）。只有 `export-palette` 与 `create` 会写入，且只写显式指定的输出路径；`force` 覆盖该文件，`mkdir` 创建缺少的父目录。

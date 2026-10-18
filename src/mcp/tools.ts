@@ -7,7 +7,7 @@ export interface McpToolDefinition {
 }
 
 /**
- * Frozen tool surface: the twenty-five names in `MCP_TOOL_NAMES`, each with
+ * Frozen tool surface: the twenty-six names in `MCP_TOOL_NAMES`, each with
  * its final description and input schema. Descriptions state the read/write
  * contract so agents pick batch or grid paths instead of per-pixel calls.
  */
@@ -161,5 +161,11 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 		description:
 			"Generate an animation or GUI scaling .mcmeta document from a PNG. Writes only to the explicit .mcmeta outputPath (never merges; force replaces the whole file); without outputPath it returns the text. The PNG is read only. Checks the document is valid, not how it looks in game.",
 		inputSchema: TOOL_INPUT_SCHEMAS.mcmeta_asset,
+	},
+	{
+		name: "style_asset",
+		description:
+			"List the builtin style presets, show one resolved style (builtin id or a .style.json path with its extends chain), export a family palette as .mcpx, or write a new .style.json document. Style files are read-only inputs except for create and export-palette, which write only their explicit output path.",
+		inputSchema: TOOL_INPUT_SCHEMAS.style_asset,
 	},
 ];
