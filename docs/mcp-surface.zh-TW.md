@@ -20,8 +20,8 @@ Minecraft 目標版本涵蓋 `1.19.3` 到 `26.3`。工具中，有十二個（`i
 | `pixelize_asset` | 參考點陣圖（PNG、JPEG、WebP；不接受 `.mcpx`） | 選用的明確 PNG／`.mcpx` 路徑 | 確定性管線輸出：PNG 位元組和／或可編輯來源 |
 | `render_pixel_asset` | ASCII Grid：內嵌 `gridText` 或 `gridPath` 檔案，兩者恰好擇一，另可加批次 | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或可編輯來源 |
 | `apply_asset_operations` | 可編輯的 `.mcpx` 來源加操作陣列 | 選用的明確 PNG／`.mcpx` 路徑 | 已套用的數量與各操作的狀態；預設為原子（第一個失敗就全部回復） |
-| `recolor_asset` | 可編輯的 `.mcpx` 來源或扁平 PNG、內建材質 id、選用的區域 id | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或重新上色後的來源，附變更計數 |
-| `create_variants` | 可編輯的 `.mcpx` 來源或扁平 PNG、一個以上的內建材質 id | 必須明確指定的輸出目錄 | 每種材質各一份 `<stem>_<material>.png` 加 `.mcpx`，皆由原始來源產生 |
+| `recolor_asset` | 可編輯的 `.mcpx` 來源或扁平 PNG、內建材質 id 或家族 id、選用的區域 id、選取範圍、風格 | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或重新上色後的來源，附變更計數 |
+| `create_variants` | 可編輯的 `.mcpx` 來源或扁平 PNG、內建材質 id 陣列和／或家族 id 陣列、選取範圍、區域、檔名樣板 | 必須明確指定的輸出目錄 | 各項目 `<stem>_<name>.png` 加 `.mcpx`，皆由原始來源產生 |
 | `validate_asset` | 素材檔（PNG）、選用的明確 `.mcmeta` 路徑（原樣使用） | 無 | 附發現項目的唯讀判定 |
 | `import_asset` | 點陣圖（PNG、JPEG、WebP）加選用的批次 | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或可編輯來源 |
 | `build_asset` | 可編輯的 `.mcpx` 來源加選用的批次 | 選用的明確 PNG／`.mcpx` 路徑 | PNG 位元組和／或建置後的來源 |
@@ -56,7 +56,9 @@ Minecraft 目標版本涵蓋 `1.19.3` 到 `26.3`。工具中，有十二個（`i
 - `outline` 是第二十六種操作 `type`。它替單一 `layerId` 上非全透明的像素畫外框，可畫在本體邊緣（`inside`，預設）或貼著本體的空像素（`outside`），共五種模式：`tinted`（以整數 HSL 調暗相鄰本體色）、`selective`（光源在左上，只畫背光面）、`uniform`（必填的 `#RRGGBB` 色彩）、`black` 與 `strip`（把既有外框換成相鄰內部色）。其他模式給 `color` 是 `INVALID_ARGUMENT`；`family` 只接受十二個內建家族，`snapFamilies` 為 true 時把推導出的外框色對齊內建原版色階中較接近的 `outline` 或 `shadow`，其餘家族 id 是 `INVALID_ARGUMENT`。`luminanceDropPermille`（預設 120）、`saturationRatioPermille`（預設 1000）、`maxHueOffsetDegrees`（預設 5）都是整數，最後一項只記錄給風格檢查，不改變輸出。它同樣接受選用的 `selection`；逐型參數表在 `docs/cli-surface.zh-TW.md`。
 - `apply_asset_operations` 另接受選用的 `feedback` 物件（`image`：`none`／`full`／`changed`；`scale`：整數 1–16；`crop`：選取範圍表示式；`diff`：`none`／`summary`）。不給 `feedback` 時，輸出欄位與位元組與過去完全相同。給了 `feedback` 時，結果攜帶 `feedback` 物件（`image`、`imageIncluded`、選用的 `noVisibleChange`、選用的 `diff`，含 `raw`／`composited`／`structural`／`outsideSelectionUnchanged`），且絕不內嵌 `pngBase64`：附帶的圖以標準 image content block（`type: "image"`、`mimeType: "image/png"`）傳送，文字區塊不重複攜帶位元組。`changed` 算繪合成後的變更邊界（忽略 crop），可見範圍沒有變化時以 `noVisibleChange` 代替圖片回報；參考線像素（格線、棋盤格）絕不寫入作品位元組。`crop` 配 `none` 為 `INVALID_ARGUMENT`。
 - `inspect_asset` 接收 `inputPath` 加 `mode`：`structure` 回傳圖層（邊界、面積、可見性、原始 RGBA 色彩用量）、區域（識別、邊界，只報面積）與重疊；`view` 以 image block 回傳合成 PNG 加六鍵 metadata，crop／scale／1024px 邊界規則與頂層 `inspect` 指令相同。view 的 scale 預設為 1；長邊自動縮放只適用於 `apply_asset_operations` 的 feedback 圖。
-- 扁平 PNG 來源給 `recolor_asset`／`create_variants` 時沒有調色盤角色資訊，像素依整數明度分段對應到目標材質調色盤（96 以下為暗部、96 到 159 為中間、160 以上為亮部），不會虛構圖層角色。全透明像素保持位元組不變，包含隱藏 RGB。缺少區域沿用既有的 `REGION_NOT_FOUND` 錯誤。每個變體都從同一個原始來源獨立產生，材質順序不影響結果；檔名為 `<stem>_<material>.png` 加 `<stem>_<material>.mcpx`。JPEG 與 WebP 仍會被拒絕。
+- `recolor_asset` 必須提供 `material` 或 `family` 其中之一（兩者都缺為 `INVALID_ARGUMENT`，兩者都給為 `ARGUMENT_CONFLICT`）。`style` 預設為 `vanilla`。`selection` 限定作用範圍，未選取像素原樣還原。
+- `create_variants` 必須至少提供 `materials` 或 `families` 其中之一（兩者都缺為 `INVALID_ARGUMENT`；兩者可並存產出聯集，產出檔名若重複則回報 `ARGUMENT_CONFLICT`）。`nameTemplate` 支援 `{stem}` 與 `{name}`（預設為 `{stem}_{name}`）。
+- 材質路徑下，扁平 PNG 像素依整數明度分段對應到目標材質調色盤（96 以下為暗部、96 到 159 為中間、160 以上為亮部）。調色盤家族路徑下（`family`／`families`），帶 role 來源依同名 role 直接對應（`outline`、`shadow`、`dark`、`base`、`light`、`highlight`），`accent` 與 `custom` 依六段整數明度分段處理；平面 PNG 依六段整數明度分段對應（<43 outline、43–85 shadow、86–127 dark、128–170 base、171–213 light、≥214 highlight）；外框像素（相鄰透明或畫布邊緣）一律強制改寫為目標家族的 `outline` 色；全透明像素保持位元組不變，包含隱藏 RGB；半透明像素強制覆寫為完全不透明色盤色。缺少區域沿用既有的 `REGION_NOT_FOUND` 錯誤。每個變體都從同一個原始來源獨立產生；JPEG 與 WebP 仍會被拒絕。
 - 完整的操作參數表見 [CLI Surface](cli-surface.zh-TW.md)的「批次操作規格」節；兩個介面共用同一種 JSON 形狀。`polygonFill` 最多 4096 個點，自交的環為 `SELF_INTERSECTING_POLYGON`，孔洞不支援。
 - 選取範圍表示式可寫原子（`all`、`rect:x,y,w,h`、`region:id`、`alpha[:layer]`、`color[:layer]:r,g,b,a`、`connected[:layer]:x,y`）或 JSON AST 物件（`op` 為 `union`／`intersect`／`subtract`／`invert`，加 `operands [...]`），深度上限 32、節點上限 1024。
 - `scale_gui_asset` 接收 `size`（`N` 或 `WxH`）、選用的 `mcmetaPath`（省略即為 `stretch`）與選用的版本欄位；輸出只有 PNG。

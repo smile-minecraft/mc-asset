@@ -211,7 +211,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 ### recolor_asset
 
-用一個內建材質 id，替 `.mcpx` 來源的每個圖層重新上色，或以同樣方式重映射扁平 PNG；選用的 `region` 可把寫入限定在單一區域。`material` 為必填。PNG 沒有調色盤角色資訊，像素依整數明度分段對應到目標調色盤（96 以下為暗部、96 到 159 為中間、160 以上為亮部），不會虛構圖層角色，全透明像素保持位元組不變。JPEG 與 WebP 仍會被拒絕（`INVALID_ARGUMENT`），缺少區域沿用既有的 `REGION_NOT_FOUND` 錯誤。
+用一個內建材質 id 或調色盤家族 id，替 `.mcpx` 來源的每個圖層重新上色，或以同樣方式重映射扁平 PNG；選用的 `region` 可把寫入限定在單一區域。`material` 與 `family` 必須擇一（都缺為 `INVALID_ARGUMENT`，都給為 `ARGUMENT_CONFLICT`）。`style` 預設為 `vanilla`，選用的 `selection` 限定寫入範圍。材質路徑下，PNG 依整數明度分段對應目標調色盤（96 以下為暗部、96 到 159 為中間、160 以上為亮部）。家族路徑下（`family`），帶 role 來源依同名 role 直接對應，`accent` 與 `custom` 依六段整數明度分段處理；平面 PNG 依六段整數明度分段對應（<43 outline、43–85 shadow、86–127 dark、128–170 base、171–213 light、≥214 highlight）；外框像素一律強制改寫為目標家族的 `outline` 色；全透明像素保持位元組不變，包含隱藏 RGB；半透明像素強制覆寫為完全不透明色盤色。JPEG 與 WebP 仍會被拒絕（`INVALID_ARGUMENT`），缺少區域沿用既有的 `REGION_NOT_FOUND` 錯誤。
 
 呼叫：
 
@@ -227,7 +227,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 ### create_variants
 
-把一份 `.mcpx` 來源或扁平 PNG 展開到明確指定的 `outputDir` 下，每種材質產生一份 PNG 加一份 `.mcpx`，每份都從原始來源開始，因此材質順序不影響結果。同一次呼叫中重複列出同一材質，會回報 `ARGUMENT_CONFLICT`。
+把一份 `.mcpx` 來源或扁平 PNG 展開到明確指定的 `outputDir` 下，每種材質或家族產生一份 PNG 加一份 `.mcpx`，每份都從原始來源開始，因此順序不影響結果。`materials` 與 `families` 必須至少給一個（都缺為 `INVALID_ARGUMENT`）；兩者可並存產出聯集，產出檔名若衝突回報 `ARGUMENT_CONFLICT`。`nameTemplate` 支援 `{stem}` 與 `{name}`（預設為 `{stem}_{name}`）。`selection` 與 `region` 作用方式同 `recolor_asset`。
 
 呼叫：
 

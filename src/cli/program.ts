@@ -887,7 +887,12 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 	program
 		.command("recolor <source>")
 		.description("Recolor an editable .mcpx source with a builtin material.")
-		.option("--material <name>", "Required builtin material id.")
+		.option("--material <name>", "Builtin material id.")
+		.option("--family <name>", "Palette family id to recolor with.")
+		.option(
+			"--style <id|path>",
+			"Style preset id or .style.json file path (defaults to vanilla).",
+		)
 		.option("--region <id>", "Limit the write to one region id.")
 		.option("--output <path>", "Explicit PNG output file path.")
 		.option("--stdout", "Write PNG bytes to stdout.")
@@ -1006,6 +1011,20 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.command("variant <source>")
 		.description("Recolor an editable .mcpx source into per-material variants.")
 		.option("--materials <list>", "Comma-separated builtin material ids.")
+		.option("--families <list>", "Comma-separated palette family ids.")
+		.option(
+			"--style <id|path>",
+			"Style preset id or .style.json file path (defaults to vanilla).",
+		)
+		.option(
+			"--selection <scope>",
+			"Scope pixel writes (rect:<x>,<y>,<w>,<h>, region:<id>, alpha:, color:, connected:, or a JSON expression starting with {).",
+		)
+		.option("--region <id>", "Limit the write to one region id.")
+		.option(
+			"--name-template <template>",
+			"Output filename template using {stem} and {name} (default: {stem}_{name}).",
+		)
 		.option("--output-dir <path>", "Required explicit output directory.")
 		.option("--output <path>", "Rejected on variant (ARGUMENT_CONFLICT).")
 		.option("--force", "Allow overwriting existing variant files.")

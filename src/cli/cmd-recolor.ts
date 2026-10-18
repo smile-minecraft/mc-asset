@@ -1,7 +1,14 @@
 import { McAssetError } from "../core/errors.ts";
 import { isBuiltinMaterialId } from "../core/material.ts";
-import { recolorLayer, recolorRolelessCanvas } from "../core/recolor.ts";
+import {
+	type FamilyRecolorOptions,
+	type FamilyRole,
+	recolorCanvasByFamily,
+	recolorLayer,
+	recolorRolelessCanvas,
+} from "../core/recolor.ts";
 import { encodePng } from "../io/png.ts";
+import { resolveStyle } from "../style/load.ts";
 import {
 	assertMinecraftOutputPath,
 	emitCommandFailure,
@@ -24,6 +31,8 @@ import { parseProfile } from "./profiles.ts";
 
 export interface RecolorOptions {
 	material?: string | undefined;
+	family?: string | undefined;
+	style?: string | undefined;
 	region?: string | undefined;
 	output?: string | undefined;
 	stdout?: boolean | undefined;
@@ -36,13 +45,48 @@ export interface RecolorOptions {
 	selection?: string | undefined;
 }
 
+/** One resolved family ramp in the shape the core family path consumes. */
+export type ResolvedFamilyRampOption = NonNullable<
+	FamilyRecolorOptions["ramp"]
+>;
+
 /**
- * Material recolor entry: the source is the editable .mcpx format, every
- * layer is recolored to the target builtin material, and an optional
- * --region limits the write to that region's mask (region-external pixels
- * stay byte-identical). --selection scopes the write-back the same way;
- * combining both intersects them. The region mask itself is never
- * rewritten.
+ * Resolve a style source (builtin id or `.style.json` path, defaulting to
+ * vanilla) and read one ramp per requested family. A family missing from
+ * the resolved palettes is STYLE_FAMILY_NOT_FOUND. The core family path
+ * receives the ramp, never the style source.
+ */
+export async function resolveStyleFamilyRamps(
+	style: string | undefined,
+	families: readonly string[],
+): Promise<Map<string, ResolvedFamilyRampOption>> {
+	const resolved = await resolveStyle(
+		style === undefined || style === "" ? "vanilla" : style,
+	);
+	const ramps = new Map<string, ResolvedFamilyRampOption>();
+	for (const family of families) {
+		const ramp: Record<FamilyRole, string> | undefined =
+			resolved.palettes[family];
+		if (ramp === undefined) {
+			throw new McAssetError(
+				"STYLE_FAMILY_NOT_FOUND",
+				`Family ${family} is not defined in the resolved style.`,
+				{ family, style: resolved.id },
+			);
+		}
+		ramps.set(family, ramp);
+	}
+	return ramps;
+}
+
+/**
+ * Recolor entry: the source is an editable .mcpx format or a flat PNG.
+ * Exactly one target is required: a builtin material id (the three-band
+ * material path, byte-identical to the historical output) or a palette
+ * family (the six-band family path). An optional --region limits the
+ * write to that region's mask (region-external pixels stay byte-identical).
+ * --selection scopes the write-back the same way; combining both
+ * intersects them. The region mask itself is never rewritten.
  */
 export async function runRecolor(
 	source: string | undefined,
@@ -57,15 +101,30 @@ export async function runRecolor(
 	try {
 		const profile = parseProfile(options.profile);
 		const inputPath = resolveInputPath(source, options.input, "recolor");
-		if (options.material === undefined || options.material === "") {
+		const material =
+			options.material === undefined || options.material === ""
+				? undefined
+				: options.material;
+		const family =
+			options.family === undefined || options.family === ""
+				? undefined
+				: options.family;
+		if (material === undefined && family === undefined) {
 			throw new McAssetError(
 				"INVALID_ARGUMENT",
-				"recolor needs --material with a builtin material id.",
+				"recolor needs either --material or --family.",
 			);
 		}
-		if (!isBuiltinMaterialId(options.material)) {
+		if (material !== undefined && family !== undefined) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				"recolor takes either --material or --family, not both.",
+				{ material, family },
+			);
+		}
+		if (material !== undefined && !isBuiltinMaterialId(material)) {
 			throw new McAssetError("INVALID_ARGUMENT", "Unknown material id.", {
-				id: options.material,
+				id: material,
 			});
 		}
 		const regionId =
@@ -100,18 +159,27 @@ export async function runRecolor(
 		const selection = resolveCommandSelection(canvas, options.selection, false);
 		const before = snapshotLayerBytes(canvas);
 		let pixelsChanged = 0;
-		if (isMcpx) {
-			for (const layer of canvas.layers) {
-				const report = recolorLayer(canvas, layer.id, options.material, {
+		if (material !== undefined) {
+			if (isMcpx) {
+				for (const layer of canvas.layers) {
+					const report = recolorLayer(canvas, layer.id, material, {
+						...(regionId !== undefined ? { regionId } : {}),
+					});
+					pixelsChanged += report.pixelsChanged;
+				}
+			} else {
+				const report = recolorRolelessCanvas(canvas, material, {
 					...(regionId !== undefined ? { regionId } : {}),
 				});
-				pixelsChanged += report.pixelsChanged;
+				pixelsChanged = report.pixelsChanged;
 			}
-		} else {
-			const report = recolorRolelessCanvas(canvas, options.material, {
+		} else if (family !== undefined) {
+			const ramps = await resolveStyleFamilyRamps(options.style, [family]);
+			const ramp = ramps.get(family);
+			pixelsChanged = recolorCanvasByFamily(canvas, family, {
 				...(regionId !== undefined ? { regionId } : {}),
-			});
-			pixelsChanged = report.pixelsChanged;
+				...(ramp !== undefined ? { ramp } : {}),
+			}).pixelsChanged;
 		}
 		// Selection (and region-external pixels already skipped by the
 		// engine) return to their input bytes; the count below describes
@@ -155,7 +223,8 @@ export async function runRecolor(
 			operations: [],
 			warnings,
 			details: {
-				material: options.material,
+				...(material !== undefined ? { material } : {}),
+				...(family !== undefined ? { family } : {}),
 				...(regionId !== undefined ? { region: regionId } : {}),
 				pixelsChanged,
 				modifiedPixels: changed,

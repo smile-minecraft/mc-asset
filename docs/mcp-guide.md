@@ -287,14 +287,21 @@ arrives as a second `type: "image"`, `mimeType: "image/png"` block:
 
 ### recolor_asset
 
-Recolors every layer of an `.mcpx` source with one builtin material id, or
-remaps a flat PNG the same way; an optional `region` limits the write to a
-single region. `material` is required. A PNG carries no palette roles, so
-its pixels map by integer luminance bands (below 96 to shadow, 96–159 to
-base, 160 and above to highlight) onto the target palette; no layer roles
-are invented, and fully transparent pixels stay byte-identical. JPEG and
-WebP are still refused (`INVALID_ARGUMENT`), and a missing region keeps
-the existing `REGION_NOT_FOUND` error.
+Recolors every layer of an `.mcpx` source with one builtin material id or
+palette family id, or remaps a flat PNG the same way; an optional `region` limits the
+write to a single region. Exactly one of `material` or `family` is required
+(omitting both is `INVALID_ARGUMENT`, providing both is `ARGUMENT_CONFLICT`).
+`style` defaults to `vanilla`, and an optional `selection` scopes the write.
+On the material path, a flat PNG maps by integer luminance bands (<96 shadow,
+96–159 base, ≥160 highlight) onto the target palette. On the palette family path
+(`family`), role-aware sources map roles directly to the family roles (`outline`,
+`shadow`, `dark`, `base`, `light`, `highlight`) while `accent` and `custom` follow
+the six integer luminance bands; flat PNG sources map by the six bands (<43 outline,
+43–85 shadow, 86–127 dark, 128–170 base, 171–213 light, ≥214 highlight); outline pixels
+(adjacent to transparency or canvas boundary) are forced to the family's `outline`
+color; fully transparent pixels stay byte-identical including hidden RGB; translucent
+pixels are forced to fully opaque ramp colors. JPEG and WebP are still refused
+(`INVALID_ARGUMENT`), and a missing region keeps `REGION_NOT_FOUND`.
 
 Call:
 
@@ -312,9 +319,13 @@ is embedded):
 ### create_variants
 
 Fans one `.mcpx` source or flat PNG out to one PNG plus one `.mcpx` per
-material under an explicit `outputDir`, each starting from the pristine
-source, so material order never matters. Listing the same
-material twice in one call is `ARGUMENT_CONFLICT`.
+material or palette family under an explicit `outputDir`, each starting from
+the pristine source, so material order never matters. At least one of
+`materials` or `families` is required (omitting both is `INVALID_ARGUMENT`);
+both may coexist producing the union of both variants. Colliding filenames
+raise `ARGUMENT_CONFLICT`. `nameTemplate` supports `{stem}` and `{name}`,
+defaulting to `{stem}_{name}`. `selection` and `region` scope the fan-out
+the same way as in `recolor_asset`.
 
 Call:
 

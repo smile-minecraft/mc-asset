@@ -30,8 +30,8 @@ is no `set_pixel` tool on purpose.
 | `pixelize_asset` | Reference raster (PNG, JPEG, WebP; never `.mcpx`) | Optional explicit PNG / `.mcpx` paths | Deterministic pipeline output: PNG bytes and/or editable source |
 | `render_pixel_asset` | ASCII Grid: exactly one of inline `gridText` or a `gridPath` file, plus an optional batch | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
 | `apply_asset_operations` | Editable `.mcpx` source plus an operations array | Optional explicit PNG / `.mcpx` paths | Applied count with per-operation statuses; atomic by default (first failure rolls back) |
-| `recolor_asset` | Editable `.mcpx` source or flat PNG, builtin material id, optional region id | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or recolored source with change counts |
-| `create_variants` | Editable `.mcpx` source or flat PNG, one or more builtin material ids | Required explicit output directory | Per-material `<stem>_<material>.png` plus `.mcpx`, each from the pristine source |
+| `recolor_asset` | Editable `.mcpx` source or flat PNG, builtin material id or family id, optional region id, selection, style | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or recolored source with change counts |
+| `create_variants` | Editable `.mcpx` source or flat PNG, builtin material ids and/or family ids, selection, region, nameTemplate | Required explicit output directory | Per-entry `<stem>_<name>.png` plus `.mcpx`, each from the pristine source |
 | `validate_asset` | Asset file (PNG), optional explicit `.mcmeta` path used verbatim | Nothing | Read-only verdict with findings |
 | `import_asset` | Raster image (PNG, JPEG, WebP) plus an optional batch | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or editable source |
 | `build_asset` | Editable `.mcpx` source plus an optional batch | Optional explicit PNG / `.mcpx` paths | PNG bytes and/or built source |
@@ -169,15 +169,9 @@ is no `set_pixel` tool on purpose.
   same crop/scale/1024px-edge rules as the top-level `inspect` command.
   View scale defaults to 1; the long-edge auto-scale applies to
   `apply_asset_operations` feedback images only.
-- A flat PNG source for `recolor_asset` / `create_variants` carries no
-  palette roles, so its pixels map by integer luminance bands (below 96
-  to shadow, 96–159 to base, 160 and above to highlight) onto the
-  target material palette; no layer roles are invented. Fully
-  transparent pixels stay byte-identical, including hidden RGB. A
-  missing region keeps the existing `REGION_NOT_FOUND` error. Each
-  variant starts from the same pristine source, so material order never
-  matters; files land as `<stem>_<material>.png` plus
-  `<stem>_<material>.mcpx`. JPEG and WebP are still refused.
+- `recolor_asset` requires either `material` or `family` (mutually exclusive: neither is `INVALID_ARGUMENT`, both is `ARGUMENT_CONFLICT`). `style` defaults to `vanilla`. `selection` limits the write scope, restoring unselected pixels verbatim.
+- `create_variants` requires at least one of `materials` or `families` (neither is `INVALID_ARGUMENT`; both coexist producing the union of both, and colliding output filenames raise `ARGUMENT_CONFLICT`). `nameTemplate` supports `{stem}` and `{name}` (defaulting to `{stem}_{name}`).
+- On the material path, flat PNG pixels map by integer luminance bands (<96 shadow, 96–159 base, ≥160 highlight) onto the target material palette. On the palette family path (`family` / `families`), role-aware sources map roles directly to the family roles (`outline`, `shadow`, `dark`, `base`, `light`, `highlight`) while `accent` and `custom` follow the six integer luminance bands; flat PNG sources map by the six bands (<43 outline, 43–85 shadow, 86–127 dark, 128–170 base, 171–213 light, ≥214 highlight); outline pixels (adjacent to transparency or canvas boundary) are forced to the target family's `outline` color; fully transparent pixels stay byte-identical including hidden RGB; translucent pixels are forced to fully opaque ramp colors. A missing region keeps `REGION_NOT_FOUND`. Each variant starts from the same pristine source; JPEG and WebP are still refused.
 - The full per-type parameter table lives in the “Batch Operations Specification”
   section of [CLI Surface](cli-surface.md); both surfaces share that JSON shape.
 - `scale_gui_asset` takes `size` (`N` or `WxH`), an optional

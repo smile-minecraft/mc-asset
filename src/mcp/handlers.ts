@@ -28,7 +28,9 @@ import {
 	restoreUnselectedPixels,
 	snapshotLayerBytes,
 } from "../cli/canvas-input.ts";
+import { resolveStyleFamilyRamps } from "../cli/cmd-recolor.ts";
 import { writeStyleFile, writeStylePalette } from "../cli/cmd-style.ts";
+import { expandVariantName } from "../cli/cmd-variant.ts";
 import { prepareCompare, writeCompare } from "../cli/compare-request.ts";
 import { atomicWriteFile } from "../cli/filesystem.ts";
 import { parseGridFile } from "../cli/grid.ts";
@@ -114,7 +116,11 @@ import {
 	assertMcpxPaletteCapacity,
 	validateColorsOption,
 } from "../core/quantizer.ts";
-import { recolorLayer, recolorRolelessCanvas } from "../core/recolor.ts";
+import {
+	recolorCanvasByFamily,
+	recolorLayer,
+	recolorRolelessCanvas,
+} from "../core/recolor.ts";
 import {
 	applyTileCorrections,
 	buildTilePreview,
@@ -686,23 +692,37 @@ export async function handleInspectAsset(
 	}
 }
 
-/** Material recolor over every layer, optionally limited to one region. */
+/**
+ * Material or family recolor over every layer, optionally limited to one
+ * region and scoped by a selection.
+ */
 export async function handleRecolorAsset(
 	args: RecolorAssetInput,
 ): Promise<McpTextResult> {
 	try {
 		const profile = parseProfile(args.profile);
-		if (args.material === undefined || args.material === "") {
+		const hasMaterial = args.material !== undefined && args.material !== "";
+		const hasFamily = args.family !== undefined && args.family !== "";
+		if (!hasMaterial && !hasFamily) {
 			throw new McAssetError(
 				"INVALID_ARGUMENT",
-				"recolor needs material with a builtin material id.",
+				"recolor_asset needs either material or family.",
 			);
 		}
-		if (!isBuiltinMaterialId(args.material)) {
+		if (hasMaterial && hasFamily) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				"recolor_asset takes either material or family, not both.",
+				{ material: args.material, family: args.family },
+			);
+		}
+		if (hasMaterial && !isBuiltinMaterialId(args.material as string)) {
 			throw new McAssetError("INVALID_ARGUMENT", "Unknown material id.", {
 				id: args.material,
 			});
 		}
+		const material = args.material as string;
+		const family = args.family as string;
 		const regionId =
 			args.region === undefined || args.region === "" ? undefined : args.region;
 		requireEditableOrPngSource("recolor_asset", args.sourcePath);
@@ -712,19 +732,33 @@ export async function handleRecolorAsset(
 		const loaded = await loadEditableCanvas(args.sourcePath);
 		const canvas = loaded.canvas;
 		const warnings: WarningNote[] = [...loaded.warnings];
-		let pixelsChanged = 0;
-		if (args.sourcePath.toLowerCase().endsWith(".mcpx")) {
-			for (const layer of canvas.layers) {
-				pixelsChanged += recolorLayer(canvas, layer.id, args.material, {
+		const selection = resolveCommandSelection(canvas, args.selection, false);
+		const before = snapshotLayerBytes(canvas);
+		if (hasMaterial) {
+			if (args.sourcePath.toLowerCase().endsWith(".mcpx")) {
+				for (const layer of canvas.layers) {
+					recolorLayer(canvas, layer.id, material, {
+						...(regionId !== undefined ? { regionId } : {}),
+					});
+				}
+			} else {
+				recolorRolelessCanvas(canvas, material, {
 					...(regionId !== undefined ? { regionId } : {}),
-				}).pixelsChanged;
+				});
 			}
 		} else {
-			const report = recolorRolelessCanvas(canvas, args.material, {
+			// The style is resolved here; the core family path receives the ramp.
+			const ramps = await resolveStyleFamilyRamps(args.style, [family]);
+			const ramp = ramps.get(family);
+			recolorCanvasByFamily(canvas, family, {
 				...(regionId !== undefined ? { regionId } : {}),
+				...(ramp !== undefined ? { ramp } : {}),
 			});
-			pixelsChanged = report.pixelsChanged;
 		}
+		// Selection (and region-external pixels already skipped by the
+		// engine) return to their input bytes; the count describes what
+		// stayed changed.
+		const pixelsChanged = restoreUnselectedPixels(canvas, before, selection);
 		assertMcpxPaletteCapacity(collectCanvasColors(canvas).length);
 		const pngBytes = encodePng(canvas);
 		const mcpxText = ensureMcpxText(canvas, (warning) => {
@@ -738,7 +772,7 @@ export async function handleRecolorAsset(
 		}
 		return textResult({
 			profile,
-			material: args.material,
+			...(hasMaterial ? { material } : { family }),
 			...(regionId !== undefined ? { region: regionId } : {}),
 			pixelsChanged,
 			warnings,
@@ -755,23 +789,26 @@ export async function handleRecolorAsset(
 }
 
 /**
- * Variant fan-out: each material starts from the pristine source text, so
- * reruns stay byte-identical. Files land as <stem>_<material>.png plus
- * `.mcpx` under the explicit output directory.
+ * Variant fan-out: each material and family starts from the pristine
+ * source, so reruns stay byte-identical. Files land as `<name>.png` plus
+ * `.mcpx` under the explicit output directory, where `<name>` is the
+ * nameTemplate expansion (`{stem}_{name}` by default).
  */
 export async function handleCreateVariants(
 	args: CreateVariantsInput,
 ): Promise<McpTextResult> {
 	try {
 		const profile = parseProfile(args.profile);
-		if (args.materials.length === 0) {
+		const rawMaterials = args.materials ?? [];
+		const rawFamilies = args.families ?? [];
+		if (rawMaterials.length === 0 && rawFamilies.length === 0) {
 			throw new McAssetError(
 				"INVALID_ARGUMENT",
-				"create_variants needs at least one builtin material id.",
+				"create_variants needs at least one material or family via materials or families.",
 			);
 		}
 		const seen = new Set<string>();
-		for (const id of args.materials) {
+		for (const id of rawMaterials) {
 			if (!isBuiltinMaterialId(id)) {
 				throw new McAssetError("INVALID_ARGUMENT", "Unknown material id.", {
 					id,
@@ -796,6 +833,32 @@ export async function handleCreateVariants(
 				{ input: args.sourcePath },
 			);
 		}
+		const regionId =
+			args.region === undefined || args.region === "" ? undefined : args.region;
+		const entries: Array<{ name: string; family: boolean }> = [
+			...rawMaterials.map((name) => ({ name, family: false })),
+			...rawFamilies.map((name) => ({ name, family: true })),
+		];
+		const baseNames = new Set<string>();
+		for (const entry of entries) {
+			const base = expandVariantName(args.nameTemplate, stem, entry.name);
+			if (base === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"create_variants needs a non-empty output name.",
+					{ nameTemplate: args.nameTemplate },
+				);
+			}
+			if (baseNames.has(base)) {
+				throw new McAssetError(
+					"ARGUMENT_CONFLICT",
+					`Duplicate variant name: ${base}. List each material and family once.`,
+				);
+			}
+			baseNames.add(base);
+		}
+		// Styles are resolved here; the core family path receives the ramp.
+		const ramps = await resolveStyleFamilyRamps(args.style, rawFamilies);
 		const sourceText = isMcpx
 			? await readInputText(args.sourcePath, "canvas input")
 			: undefined;
@@ -809,36 +872,50 @@ export async function handleCreateVariants(
 			mcpx: string;
 			pixelsChanged: number;
 		}> = [];
-		for (const material of args.materials) {
-			let canvas: PixelCanvas;
-			let pixelsChanged = 0;
-			if (isMcpx) {
-				canvas = parseMcpx(sourceText as string);
+		for (const entry of entries) {
+			const canvas = isMcpx
+				? parseMcpx(sourceText as string)
+				: cloneCanvas(pristineCanvas as PixelCanvas);
+			const selection = resolveCommandSelection(canvas, args.selection, false);
+			const before = snapshotLayerBytes(canvas);
+			if (entry.family) {
+				const ramp = ramps.get(entry.name);
+				recolorCanvasByFamily(canvas, entry.name, {
+					...(regionId !== undefined ? { regionId } : {}),
+					...(ramp !== undefined ? { ramp } : {}),
+				});
+			} else if (isMcpx) {
 				for (const layer of canvas.layers) {
-					pixelsChanged += recolorLayer(
-						canvas,
-						layer.id,
-						material,
-					).pixelsChanged;
+					recolorLayer(canvas, layer.id, entry.name, {
+						...(regionId !== undefined ? { regionId } : {}),
+					});
 				}
 			} else {
-				canvas = cloneCanvas(pristineCanvas as PixelCanvas);
-				const report = recolorRolelessCanvas(canvas, material);
-				pixelsChanged = report.pixelsChanged;
+				recolorRolelessCanvas(canvas, entry.name, {
+					...(regionId !== undefined ? { regionId } : {}),
+				});
 			}
-			const pngPath = joinPath(args.outputDir, `${stem}_${material}.png`);
-			const mcpxPath = joinPath(args.outputDir, `${stem}_${material}.mcpx`);
+			const pixelsChanged = restoreUnselectedPixels(canvas, before, selection);
+			const base = expandVariantName(args.nameTemplate, stem, entry.name);
+			const pngPath = joinPath(args.outputDir, `${base}.png`);
+			const mcpxPath = joinPath(args.outputDir, `${base}.mcpx`);
 			const pngBytes = encodePng(canvas);
 			const mcpxText = ensureMcpxText(canvas, (warning) => {
 				warnings.push({ code: warning.code, message: warning.message });
 			});
 			await writeMcpArtifact(pngPath, pngBytes);
 			await writeMcpArtifact(mcpxPath, mcpxText);
-			files.push({ material, png: pngPath, mcpx: mcpxPath, pixelsChanged });
+			files.push({
+				material: entry.name,
+				png: pngPath,
+				mcpx: mcpxPath,
+				pixelsChanged,
+			});
 		}
 		return textResult({
 			profile,
-			materials: [...args.materials],
+			materials: [...rawMaterials],
+			families: [...rawFamilies],
 			outputDir: args.outputDir,
 			files,
 			warnings,

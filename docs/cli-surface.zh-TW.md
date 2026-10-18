@@ -135,8 +135,8 @@ transform <input> [--flip <h|v>] [--rotate <90|180|270>] [--crop <x,y,w,h>]
 ```text
 quantize <input> (--colors <N> | --palette <name|path>) [--keep-color <r,g,b,a> ...] [--selection <scope>] <file flags>
 cleanup  <input> [--fix <classes>] [--allow-render-pass-change] [--selection <scope>] <file flags>
-recolor  <source> --material <name> [--region <id>] [--selection <scope>] <file flags>
-variant  <source> --materials <a,b,...> --output-dir <dir> [--mkdir] [--force] [--profile <p>]
+recolor  <source> (--material <name> | --family <name>) [--style <id|path>] [--region <id>] [--selection <scope>] <file flags>
+variant  <source> (--materials <a,b,...> | --families <a,b,...>) [--style <id|path>] [--output-dir <dir>] [--selection <scope>] [--region <id>] [--name-template <tmpl>] [--mkdir] [--force] [--profile <p>]
 style list
 style show <style>
 style export-palette <style> --family <id|all> --output <file.mcpx> [--force] [--mkdir]
@@ -148,7 +148,7 @@ style create --output <file.style.json> --id <id> [--name <name>] [--extends <id
 - 盤色檔是唯讀輸入，任何輸出旗標（含 `--force`、`--in-place`）都不能覆寫它。量化用的盤色可能與寫出的 `.mcpx` 宣告盤不同，後者沿用畫布原有的盤。`--json` 結果在使用時會多出 `palette` 與 `keepColors`（RGBA 物件）；`colorCount` 是各層量化盤色數的最大值。
 - `cleanup --fix <classes>`：以逗號分隔的類別清單（`isolated`、`noise`、`cluster`、`fringe`、`outlier`、`hole`、`aa`）。修改會影響 alpha 的類別時，必須加 `--allow-render-pass-change`。
 - `palette` 與 `material` 子指令只輸出報告，收到檔案寫入旗標會被拒絕（`INVALID_ARGUMENT`）。
-- `recolor` 與 `variant` 接受可編輯的 `.mcpx` 來源或扁平 PNG。PNG 沒有調色盤角色資訊，因此像素依整數明度分段對應到目標材質調色盤（96 以下為暗部、96 到 159 為中間、160 以上為亮部），不會虛構圖層角色。全透明像素（alpha 為 0）保持位元組不變，包含隱藏 RGB，區域遮罩也不會被改寫。PNG 搭配 `--region` 時，缺少區域沿用既有的 `REGION_NOT_FOUND` 錯誤；`--selection` 仍可限定寫回範圍，未選取像素會原樣還原。JPEG 與 WebP 仍會被拒絕（`INVALID_ARGUMENT`）。`variant` 的每個材質都從同一個原始來源獨立產生，材質順序不影響結果；檔案命名為 `<stem>_<material>.png` 加 `<stem>_<material>.mcpx`。輸入檔不會被修改；所有檔案目標會在寫入前先做聯合預檢。
+- `recolor` 與 `variant` 接受可編輯的 `.mcpx` 來源或扁平 PNG。`recolor` 必須指定 `--material <name>` 或 `--family <name>` 二擇一（都缺為 `INVALID_ARGUMENT`，都給為 `ARGUMENT_CONFLICT`）。`variant` 必須至少給 `--materials <list>` 或 `--families <list>` 其中之一（都缺為 `INVALID_ARGUMENT`；兩者可並存產出聯集，產出檔名若重複則回報 `ARGUMENT_CONFLICT`）。`--name-template <tmpl>` 支援 `{stem}` 與 `{name}`（預設為 `{stem}_{name}`）。既有材質路徑下，PNG 像素依整數明度分段對應目標材質調色盤（96 以下為暗部、96 到 159 為中間、160 以上為亮部）。配色盤家族路徑下（`--family`／`--families`，可帶 `--style` 或預設 `vanilla`），帶 role 來源的 role 直接對應家族同名 role（`outline`、`shadow`、`dark`、`base`、`light`、`highlight`），`accent` 與 `custom` 依六段整數明度分段處理；平面 PNG 依六段整數明度分段對應（<43 outline、43–85 shadow、86–127 dark、128–170 base、171–213 light、≥214 highlight）；外框像素（四鄰貼透明或邊界）一律強制改寫為目標家族的 `outline` 色；全透明像素（alpha 為 0）保持位元組不變，包含隱藏 RGB；半透明像素強制覆寫為完全不透明色盤色。`--region` 限定作用區域（區域外像素原樣還原，找不到區域回報 `REGION_NOT_FOUND`）；`--selection` 限定寫回範圍，未選取像素原樣還原。JPEG 與 WebP 仍會被拒絕（`INVALID_ARGUMENT`）。`variant` 的每個變體都從同一個原始來源獨立產生；輸入檔不會被修改；所有檔案目標會在寫入前先做聯合預檢。
 - `style` 有四個內建預設：`vanilla`、`soft`、`fairy-flat`、`dark-frame`。每個預設都含十二家族（`iron`、`gold`、`diamond`、`netherite`、`copper`、`wood`、`stone`、`emerald`、`amethyst`、`redstone`、`lapis`、`quartz`），每家族六個角色（`outline`、`shadow`、`dark`、`base`、`light`、`highlight`），以及外框、光向、明暗階數、高光、抖動與動畫規則。風格來源可以是內建 id，也可以是 `.style.json` 路徑；自訂檔透過 `extends` 繼承一個來源（最多八層），可覆寫單一欄位、整個家族或分類門檻。
 - `style list` 與 `style show` 只輸出報告，不寫任何檔案。`style show` 印出解析後的文件：`formatVersion`、`id`、`name`、`description`、`palettes`、`outline`、`light`、`limits`、`highlight`、`dither`、`animation`、`categoryOverrides`，以及從所求來源一路走到基底所走的 `extendsChain`。
 - `style export-palette --family <id|all> --output <file.mcpx>` 寫出調色盤文件：每列一個家族、每欄一個角色，`[palette]` 依家族再角色排序、`.` 排在最前對應 `#00000000`，並帶 `kind = palette`。輸出可直接餵給 `quantize --palette` 與 `generate --palette`。指定解析後不存在的家族是 `STYLE_FAMILY_NOT_FOUND`；沒給 `--output` 則是 `OUTPUT_REQUIRED`。

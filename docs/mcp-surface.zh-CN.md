@@ -20,8 +20,8 @@ Minecraft 目标版本涵盖 `1.19.3` 到 `26.3`。工具中，有十二个（`i
 | `pixelize_asset` | 参考位图（PNG、JPEG、WebP；不接受 `.mcpx`） | 可选的显式 PNG／`.mcpx` 路径 | 确定性管线输出：PNG 字节和／或可编辑源码 |
 | `render_pixel_asset` | ASCII Grid：内联 `gridText` 或 `gridPath` 文件，两者恰好择一，另可加批处理 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
 | `apply_asset_operations` | 可编辑的 `.mcpx` 源码加操作数组 | 可选的显式 PNG／`.mcpx` 路径 | 已应用的数量与各操作的状态；默认为原子（第一个失败就全部回滚） |
-| `recolor_asset` | 可编辑的 `.mcpx` 源码或扁平 PNG、内置材质 id、可选的区域 id | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或重新着色后的源码，附更改计数 |
-| `create_variants` | 可编辑的 `.mcpx` 源码或扁平 PNG、一个以上的内置材质 id | 必须显式指定的输出目录 | 每种材质各一份 `<stem>_<material>.png` 加 `.mcpx`，均由原始源码生成 |
+| `recolor_asset` | 可编辑的 `.mcpx` 源码或扁平 PNG、内置材质 id 或家族 id、可选的区域 id、选择范围、风格 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或重新着色后的源码，附更改计数 |
+| `create_variants` | 可编辑的 `.mcpx` 源码或扁平 PNG、内置材质 id 数组和／或家族 id 数组、选择范围、区域、文件名模板 | 必须显式指定的输出目录 | 各项 `<stem>_<name>.png` 加 `.mcpx`，均由原始源码生成 |
 | `validate_asset` | 资产文件（PNG）、可选的显式 `.mcmeta` 路径（原样使用） | 无 | 附发现项的只读判定 |
 | `import_asset` | 位图（PNG、JPEG、WebP）加可选的批处理 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或可编辑源码 |
 | `build_asset` | 可编辑的 `.mcpx` 源码加可选的批处理 | 可选的显式 PNG／`.mcpx` 路径 | PNG 字节和／或构建后的源码 |
@@ -56,7 +56,9 @@ Minecraft 目标版本涵盖 `1.19.3` 到 `26.3`。工具中，有十二个（`i
 - `outline` 是第二十六种操作 `type`。它为单个 `layerId` 上非全透明的像素描边，可画在本体边缘（`inside`，默认）或贴着本体的空像素（`outside`），共五种模式：`tinted`（以整数 HSL 调暗相邻本体色）、`selective`（光源在左上，只画背光面）、`uniform`（必填的 `#RRGGBB` 颜色）、`black` 与 `strip`（把已有外框换成相邻内部色）。其他模式给 `color` 是 `INVALID_ARGUMENT`；`family` 只接受十二个内建家族，`snapFamilies` 为 true 时把推导出的外框色对齐内建原版色阶中更接近的 `outline` 或 `shadow`，其余家族 id 是 `INVALID_ARGUMENT`。`luminanceDropPermille`（默认 120）、`saturationRatioPermille`（默认 1000）、`maxHueOffsetDegrees`（默认 5）都是整数，最后一项只记录给风格检查，不改变输出。它同样接受可选的 `selection`；分类型参数表在 `docs/cli-surface.zh-CN.md`。
 - `apply_asset_operations` 另接受可选的 `feedback` 对象（`image`：`none`／`full`／`changed`；`scale`：整数 1–16；`crop`：选择表达式；`diff`：`none`／`summary`）。不给 `feedback` 时，输出字段与字节与过去完全相同。给了 `feedback` 时，结果携带 `feedback` 对象（`image`、`imageIncluded`、可选的 `noVisibleChange`、可选的 `diff`，含 `raw`／`composited`／`structural`／`outsideSelectionUnchanged`），且绝不内嵌 `pngBase64`：附带的图以标准 image content block（`type: "image"`、`mimeType: "image/png"`）传送，文本区块不重复携带字节。`changed` 渲染合成后的变更边界（忽略 crop），可见范围没有变化时以 `noVisibleChange` 代替图片报告；参考线像素（网格线、棋盘格）绝不写入作品字节。`crop` 配 `none` 为 `INVALID_ARGUMENT`。
 - `inspect_asset` 接收 `inputPath` 加 `mode`：`structure` 返回图层（边界、面积、可见性、原始 RGBA 颜色用量）、区域（标识、边界，只报面积）与重叠；`view` 以 image block 返回合成 PNG 加六键 metadata，crop／scale／1024px 边界规则与顶层 `inspect` 命令相同。view 的 scale 默认为 1；长边自动缩放只适用于 `apply_asset_operations` 的 feedback 图。
-- 扁平 PNG 来源给 `recolor_asset`／`create_variants` 时没有调色板角色信息，像素按整数明度分段映射到目标材质调色板（96 以下为暗部、96 到 159 为中间、160 以上为亮部），不会虚构图层角色。全透明像素保持字节不变，包含隐藏 RGB。缺失区域沿用既有的 `REGION_NOT_FOUND` 错误。每个变体都从同一个原始来源独立生成，材质顺序不影响结果；文件名为 `<stem>_<material>.png` 加 `<stem>_<material>.mcpx`。JPEG 与 WebP 仍会被拒绝。
+- `recolor_asset` 必须提供 `material` 或 `family` 之一（两者都缺为 `INVALID_ARGUMENT`，两者都给为 `ARGUMENT_CONFLICT`）。`style` 默认为 `vanilla`。`selection` 限定作用范围，未选中像素原样还原。
+- `create_variants` 必须至少提供 `materials` 或 `families` 之一（两者都缺为 `INVALID_ARGUMENT`；两者可并存产出并集，产出文件名若重复则报错 `ARGUMENT_CONFLICT`）。`nameTemplate` 支持 `{stem}` 与 `{name}`（默认为 `{stem}_{name}`）。
+- 材质路径下，扁平 PNG 像素按整数明度分段映射到目标材质调色板（96 以下为暗部、96 到 159 为中间、160 以上为亮部）。调色板家族路径下（`family`／`families`），带 role 来源按同名 role 直接对应（`outline`、`shadow`、`dark`、`base`、`light`、`highlight`），`accent` 与 `custom` 按六段整数明度分段处理；平面 PNG 按六段整数明度分段对应（<43 outline、43–85 shadow、86–127 dark、128–170 base、171–213 light、≥214 highlight）；外框像素（相邻透明或画布边缘）一律强制改写为目标家族的 `outline` 色；全透明像素保持字节不变，包含隐藏 RGB；半透明像素强制覆写为完全不透明调色板色。缺失区域沿用既有的 `REGION_NOT_FOUND` 错误。每个变体都从同一个原始来源独立生成；JPEG 与 WebP 仍会被拒绝。
 - 完整的操作参数表见 [CLI Surface](cli-surface.zh-CN.md)的「批处理操作规范」节；两个接口共用同一种 JSON 形状。`polygonFill` 最多 4096 个点，自交的环为 `SELF_INTERSECTING_POLYGON`，孔洞不支持。
 - 选择表达式可写原子（`all`、`rect:x,y,w,h`、`region:id`、`alpha[:layer]`、`color[:layer]:r,g,b,a`、`connected[:layer]:x,y`）或 JSON AST 对象（`op` 为 `union`／`intersect`／`subtract`／`invert`，加 `operands [...]`），深度上限 32、节点上限 1024。
 - `scale_gui_asset` 接收 `size`（`N` 或 `WxH`）、可选的 `mcmetaPath`（省略即为 `stretch`）与可选的版本字段；输出只有 PNG。

@@ -712,7 +712,30 @@ export const TOOL_INPUT_SCHEMAS = {
 			.string()
 			.min(1)
 			.describe("Editable .mcpx source path to recolor."),
-		material: z.string().min(1).describe("Builtin material id to apply."),
+		material: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Builtin material id to apply (mutually exclusive with family).",
+			),
+		family: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Palette family id to apply (mutually exclusive with material).",
+			),
+		style: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("Style preset id or .style.json path; defaults to vanilla."),
+		selection: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("Scope pixel writes with a selection expression."),
 		region: z
 			.string()
 			.min(1)
@@ -732,8 +755,38 @@ export const TOOL_INPUT_SCHEMAS = {
 		materials: z
 			.array(z.string().min(1))
 			.min(1)
+			.optional()
 			.describe(
 				"Builtin material ids, one variant per entry, each starting from the pristine source.",
+			),
+		families: z
+			.array(z.string().min(1))
+			.min(1)
+			.optional()
+			.describe(
+				"Palette family ids, one variant per entry, each starting from the pristine source.",
+			),
+		style: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("Style preset id or .style.json path; defaults to vanilla."),
+		selection: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("Scope pixel writes with a selection expression."),
+		region: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("Limit the write to one region id."),
+		nameTemplate: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Output filename template using {stem} and {name}; defaults to {stem}_{name}.",
 			),
 		outputDir: z
 			.string()
