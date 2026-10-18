@@ -27,6 +27,7 @@ import {
 import { runMcp } from "./cmd-mcp.ts";
 import { type ModelCliOptions, type ModelMode, runModel } from "./cmd-model.ts";
 import { runOptimize } from "./cmd-optimize.ts";
+import { type PackOptions, runPack } from "./cmd-pack.ts";
 import { type PaletteOptions, runPalette } from "./cmd-palette.ts";
 import {
 	type PixelizeCommandOptions,
@@ -840,6 +841,42 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			const code = await runStyle(
 				"create",
 				undefined,
+				options,
+				globals.json === true,
+				realStreams(),
+			);
+			process.exitCode = code;
+		});
+
+	const pack = program
+		.command("pack")
+		.description("Resource pack projects: skeleton, settings, and checks.");
+	pack
+		.command("init <dir>")
+		.description(
+			"Write one project skeleton: the project document, the pack root metadata, the placeholder icon, and the resource pack directories.",
+		)
+		.option("--namespace <ns>", "Required resource namespace of the pack.")
+		.option(
+			"--minecraft-version <version>",
+			"Required release version 1.19.3 through 26.3.",
+		)
+		.option("--name <name>", "Project name; defaults to the directory name.")
+		.option("--description <text>", "Pack description; defaults to the name.")
+		.option("--style <id|path>", "Builtin style id or .style.json path.")
+		.option(
+			"--resource-pack-version <N>",
+			"Resource-pack format N or N.M, overriding the release version.",
+		)
+		.option(
+			"--allow-minecraft-namespace",
+			"Allow the reserved minecraft namespace.",
+		)
+		.action(async (target: string, options: PackOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runPack(
+				"init",
+				target,
 				options,
 				globals.json === true,
 				realStreams(),

@@ -143,6 +143,7 @@ import type { PixelCanvas, Rect, RGBA } from "../core/types.ts";
 import { validateDimension } from "../core/validate.ts";
 import { decodePng, encodePng, flattenCanvas } from "../io/png.ts";
 import { collectCanvasColors, colorKeyOf, parseMcpx } from "../mcpx/index.ts";
+import { initializePackProject } from "../pack/index.ts";
 import { GUI_STRETCH_INNER_FACT, isFactActive } from "../profiles/versions.ts";
 import { buildPaletteMcpx } from "../style/export-palette.ts";
 import { resolveStyle } from "../style/load.ts";
@@ -243,6 +244,9 @@ export type InspectAssetInput = z.infer<
 >;
 export type StyleAssetInput = z.infer<
 	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.style_asset>
+>;
+export type PackAssetInput = z.infer<
+	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.pack_asset>
 >;
 
 function stripCodePrefix(message: string): string {
@@ -2777,6 +2781,59 @@ export async function handleStyleAsset(
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
 			"style_asset mode must be list, show, export-palette, or create.",
+			{ mode: args.mode },
+		);
+	} catch (error) {
+		return errorResult(error);
+	}
+}
+
+/**
+ * Resource pack projects. `init` creates one project skeleton: the project
+ * document, the pack root metadata for the pinned release version, the
+ * 64x64 placeholder icon, and the resource pack directory chain. The whole
+ * batch is planned and preflighted before the first byte, and an occupied
+ * target refuses the batch with every conflicting path instead of writing
+ * through an existing file or a symbolic link.
+ */
+export async function handlePackAsset(
+	args: PackAssetInput,
+): Promise<McpTextResult> {
+	try {
+		if (args.mode === "init") {
+			if (args.projectDir === undefined || args.projectDir === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"pack_asset init needs a projectDir.",
+				);
+			}
+			if (args.namespace === undefined || args.namespace === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"pack_asset init needs a namespace.",
+				);
+			}
+			if (args.minecraftVersion === undefined || args.minecraftVersion === "") {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					"pack_asset init needs a minecraftVersion.",
+				);
+			}
+			const written = await initializePackProject({
+				projectDir: args.projectDir,
+				namespace: args.namespace,
+				minecraftVersion: args.minecraftVersion,
+				name: args.name,
+				description: args.description,
+				style: args.style,
+				resourcePackVersion: args.resourcePackVersion,
+				allowMinecraftNamespace: args.allowMinecraftNamespace,
+			});
+			return textResult({ mode: "init", ...written });
+		}
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			"pack_asset mode must be init.",
 			{ mode: args.mode },
 		);
 	} catch (error) {

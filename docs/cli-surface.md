@@ -73,12 +73,22 @@ All commands that produce or modify files adhere to strict path and safety rules
 | `import <image>` | Raster file (PNG, JPEG, WebP) | PNG and/or `.mcpx` | Decodes raster formats into Pixel Canvas. |
 | `render <grid>` | ASCII Grid file (`.grid`) | PNG and/or `.mcpx` | Compiles human/Agent-authored ASCII grids. |
 | `build [source]` | `.mcpx` source file or stdin (`--stdin`) | PNG and/or `.mcpx` | Builds editable source files into textures or re-serializes source. |
+| `pack init <dir>` | None | Project skeleton | Creates the project document, pack root metadata, placeholder icon, and the resource pack directories. |
 
 ```text
 import <image> [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
 render <grid>  [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
 build  [source] [--stdin] [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
+pack init <dir> --namespace <ns> --minecraft-version <version> [--name <name>] [--description <text>]
+       [--style <id|path>] [--resource-pack-version <N>] [--allow-minecraft-namespace]
 ```
+
+- `pack init <dir>` writes one skeleton in a single preflighted batch: the project document `mc-asset.pack.json` in the project root, `pack/pack.mcmeta` for the pinned target, a 64x64 `pack/pack.png` placeholder icon, and the directories `recipes/`, `pack/assets/<ns>/textures/item`, `pack/assets/<ns>/textures/block`, `pack/assets/<ns>/models/item`, plus `pack/assets/<ns>/items/` from resource pack format 46.0 on. `--namespace` and `--minecraft-version` are required; every other setting has a default (project name from the directory name, description from the name, `vanilla` style, `pack` output directory, `recipes` recipe directory).
+- The project document records `formatVersion`, `name`, `description`, `namespace`, `allowMinecraftNamespace`, `minecraftVersion`, `resourcePackVersion`, `style`, `outputDir`, `recipeDir`, and `vanillaSource`, and is read in strict mode: an unknown field, a value outside its shape, or a path leaving the project root is `PACK_PROJECT_INVALID` naming the field, an unreadable path is `PACK_PROJECT_NOT_FOUND`, and a newer `formatVersion` is `PACK_PROJECT_UNSUPPORTED_VERSION`. `--resource-pack-version` overrides the format the release version maps to; the release version stays in the document either way, and no command rewrites the document afterwards.
+- The root metadata follows the pinned target: from resource pack format 65.0 the document declares `min_format` and `max_format` for that target and leaves the legacy `pack_format` out; below it the document carries the single legacy major. The generated document is checked in memory against the same root metadata rules `validate-pack` applies before it is written, so a document with a finding never reaches the disk. A release version outside `1.19.3` through `26.3` is `INVALID_ARGUMENT` naming the version, and nothing is written.
+- Every planned path is read before the first byte. A path that already exists refuses the whole batch with `PACK_INIT_CONFLICT` and a `conflicts` list of every relative path already in place, so a rerun is refused instead of half-overwriting; a symbolic link, in the project directory or anywhere below it, is refused with `FILESYSTEM_ERROR` and is never written through. `init` takes no `--force` and no `--mkdir`: a project is created once.
+- `namespace: minecraft` overrides the game's own assets, so it needs `--allow-minecraft-namespace`; without it the call is `PACK_PROJECT_INVALID` naming `namespace`.
+- The placeholder icon is an original 64x64 motif painted from integer geometry (a checker field, a bordered plate, and a diamond mark), so the same request always writes the same bytes.
 
 - `--source <path>` saves the editable `.mcpx` text source.
 - `--in-place` rewrites the input file in-place (implies force for that target).
@@ -447,6 +457,10 @@ Batch execution is atomic: the first invalid operation rolls back all changes. (
 | `STYLE_INHERITANCE_CYCLE` | 2 | An `extends` chain returns to a style it already walked (at most eight levels). | Remove the loop; the message lists the repeated chain. |
 | `STYLE_FAMILY_NOT_FOUND` | 2 | `--family` names a family the resolved style does not carry (for example after a document deleted one with `null`). | Pick a family from `style show <style>`, or stop deleting it. |
 | `STYLE_UNSUPPORTED_VERSION` | 5 | A `.style.json` declares a `formatVersion` above the supported one. | Set `formatVersion` to 1 and adjust the document to this release. |
+| `PACK_INIT_CONFLICT` | 4 | `pack init` found a path it would create already in place (a file, or a directory of the skeleton). | Read the `conflicts` list, remove or rename those paths, then run `pack init` again; nothing was written. |
+| `PACK_PROJECT_INVALID` | 2 | A project document field is unknown, outside its shape, or names a path leaving the project root; `pack init` was also refused a `minecraft` namespace without `--allow-minecraft-namespace`. | Read the field path in the message and fix exactly that field; for `namespace`, either pick a different namespace or pass the opt-in flag. |
+| `PACK_PROJECT_NOT_FOUND` | 2 | A project document was given at an explicit path that cannot be read. | Check the path; the commands never search parent directories for the document. |
+| `PACK_PROJECT_UNSUPPORTED_VERSION` | 5 | A project document declares a `formatVersion` above the supported one. | Set `formatVersion` to 1 and adjust the document to this release. |
 | `PACK_GUI_SCALING_BORDER` | 3 | `validate-pack` found a GUI sprite whose nine-slice borders leave no middle band (same test as `INVALID_MCMETA`). | Shrink the borders in that sprite's `.mcmeta`. |
 | `PACK_MCMETA_INVALID` | 3 | The root `pack.mcmeta` declares something the game refuses to load: a missing `pack` section or `pack.description`, half a `min_format` / `max_format` range, negative or inverted bounds, a `supported_formats` field that disagrees with the declared range, a retained legacy `pack_format` outside the declared majors, an illegal overlay directory name, or an overlay `formats` field that contradicts the old-format rule. | Fix the named field so both range ends read and the declared majors agree, or drop the legacy field the rule forbids. |
 | `PACK_MCMETA_SUSPICIOUS` | 0 (warning) | The pack still loads, but something looks wrong: an overlay directory the pack root does not hold, an overlay entry with no version field, or a scan target outside the declared range. Reported as a warning; it never fails the scan by itself. | Add the missing overlay directory, give the entry a version range, or re-target the scan into the declared range. |

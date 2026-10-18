@@ -17,6 +17,7 @@ import {
 	handleMcmetaAsset,
 	handleModelAsset,
 	handleOptimizeAsset,
+	handlePackAsset,
 	handlePaletteAsset,
 	handlePixelizeAsset,
 	handlePreviewAsset,
@@ -258,6 +259,14 @@ export function createMcpServer(): McpServer {
 			inputSchema: TOOL_INPUT_SCHEMAS.style_asset,
 		},
 		handleStyleAsset,
+	);
+	server.registerTool(
+		"pack_asset",
+		{
+			description: toolDescription("pack_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.pack_asset,
+		},
+		handlePackAsset,
 	);
 	return server;
 }

@@ -7,7 +7,7 @@ export interface McpToolDefinition {
 }
 
 /**
- * Frozen tool surface: the twenty-six names in `MCP_TOOL_NAMES`, each with
+ * Frozen tool surface: the twenty-seven names in `MCP_TOOL_NAMES`, each with
  * its final description and input schema. Descriptions state the read/write
  * contract so agents pick batch or grid paths instead of per-pixel calls.
  */
@@ -167,5 +167,11 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 		description:
 			"List the builtin style presets, show one resolved style (builtin id or a .style.json path with its extends chain), export a family palette as .mcpx, or write a new .style.json document. Style files are read-only inputs except for create and export-palette, which write only their explicit output path.",
 		inputSchema: TOOL_INPUT_SCHEMAS.style_asset,
+	},
+	{
+		name: "pack_asset",
+		description:
+			"Create a resource pack project: init writes the project document, the pack root metadata for the pinned release version, a 64x64 placeholder icon, and the assets directory skeleton in one preflighted batch. An occupied target refuses the whole batch and reports every conflicting path; nothing is overwritten. The project document is written once and then read only.",
+		inputSchema: TOOL_INPUT_SCHEMAS.pack_asset,
 	},
 ];

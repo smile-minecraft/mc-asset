@@ -11,7 +11,7 @@
 
 ---
 
-`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十六個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。
+`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十七個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。
 
 伺服器直接掛在 Core 上，所以每個工具都跑與 CLI 指令相同的引擎。像素層級的創作，透過 ASCII Grid 文件、批次操作陣列，或內嵌回傳的可編輯 `.mcpx` 來源來完成；刻意不提供 `set_pixel` 工具。
 
@@ -110,7 +110,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
 | [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | [`mcmeta_asset`](#mcmeta_asset) |
-| [`compare_assets`](#compare_assets) | [`style_asset`](#style_asset) | |
+| [`compare_assets`](#compare_assets) | [`style_asset`](#style_asset) | [`pack_asset`](#pack_asset) |
 
 ### analyze_asset
 
@@ -647,3 +647,29 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 ```
 
 風格檔以嚴格模式讀取：未知欄位、列舉外的值，或不是 `#RRGGBB` 的顏色都是帶欄位路徑的 `STYLE_INVALID`（`palettes.stone.base: expected #RRGGBB, got "#12345"`）。其餘碼為 `STYLE_NOT_FOUND`（查不到的 id）、`STYLE_INHERITANCE_CYCLE`、`STYLE_UNSUPPORTED_VERSION` 與 `STYLE_FAMILY_NOT_FOUND`（解析後不存在的家族）。只有 `export-palette` 與 `create` 會寫入，且只寫明確指定的輸出路徑；`force` 覆寫該檔、`mkdir` 建立缺少的父目錄。
+
+### pack_asset
+
+建立一個資源包專案。`init` 需要 `projectDir`、`namespace` 與 `minecraftVersion`，另有選用的 `name`、`description`、`style` 與 `resourcePackVersion`；使用 `namespace: minecraft` 時還需要 `allowMinecraftNamespace`。
+
+呼叫：
+
+```json
+{"mode":"init","projectDir":"packs/aurelian-forge","namespace":"aurelian","minecraftVersion":"1.21.9","style":"soft"}
+```
+
+一次預檢後整批寫出 `mc-asset.pack.json`、`pack/pack.mcmeta`、64x64 的 `pack/pack.png` 佔位圖示，以及資源包目錄（`recipes/` 加上 `pack/assets/aurelian/...`，資源包格式 46.0 起還有 `items/`）。結果會回報固定的格式號與建立的每個路徑：
+
+```json
+{"mode":"init","projectDir":"/abs/packs/aurelian-forge","minecraftVersion":"1.21.9","packFormat":"69.0","resourcePackVersion":"69.0","files":["mc-asset.pack.json","pack/pack.mcmeta","pack/pack.png"],"directories":["pack","pack/assets","pack/assets/aurelian","pack/assets/aurelian/items","pack/assets/aurelian/models","pack/assets/aurelian/models/item","pack/assets/aurelian/textures","pack/assets/aurelian/textures/block","pack/assets/aurelian/textures/item","recipes"]}
+```
+
+`resourcePackVersion` 覆寫發布版本對應的資源包格式，但發布版本本身仍留在專案檔裡。根 metadata 依目標版本選擇寫法：資源包格式 65.0 起宣告該目標的 `min_format` 與 `max_format` 且不寫舊式 `pack_format`，更早的版本只寫單一舊式格式號。產生的文件寫入前會先在記憶體內套用與 `validate-pack` 相同的根 metadata 規則檢查。
+
+不會覆寫任何東西。已經存在的路徑會讓整批拒絕：
+
+```json
+{"code":"PACK_INIT_CONFLICT","message":"pack init found 2 paths it would create.","details":{"path":"/abs/packs/aurelian-forge","minecraftVersion":"1.21.9","conflicts":["pack","pack/pack.mcmeta"]}}
+```
+
+專案目錄本身或其下任何位置是符號連結時是 `FILESYSTEM_ERROR`，而且永遠不會寫穿；未知發布版本或非法命名空間是 `INVALID_ARGUMENT`。此工具沒有 `force` 也沒有 `mkdir`；它寫出的專案檔由後續指令以嚴格模式讀取（`PACK_PROJECT_INVALID` 帶欄位路徑、`PACK_PROJECT_NOT_FOUND`、`PACK_PROJECT_UNSUPPORTED_VERSION`）。

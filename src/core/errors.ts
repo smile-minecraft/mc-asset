@@ -37,6 +37,10 @@ export type ErrorCode =
 	| "STYLE_UNSUPPORTED_VERSION"
 	| "STYLE_INHERITANCE_CYCLE"
 	| "STYLE_FAMILY_NOT_FOUND"
+	| "PACK_PROJECT_NOT_FOUND"
+	| "PACK_PROJECT_INVALID"
+	| "PACK_PROJECT_UNSUPPORTED_VERSION"
+	| "PACK_INIT_CONFLICT"
 	| "FILESYSTEM_ERROR"
 	| "OUTPUT_EXISTS"
 	| "MCPX_UNSUPPORTED_VERSION"
@@ -167,6 +171,15 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	STYLE_UNSUPPORTED_VERSION: 5,
 	STYLE_INHERITANCE_CYCLE: 2,
 	STYLE_FAMILY_NOT_FOUND: 2,
+	// Project documents. An invalid field and an unknown path are refusals;
+	// a newer format version is the one project code that exits 5, because
+	// guessing a newer document would silently change its meaning.
+	PACK_PROJECT_NOT_FOUND: 2,
+	PACK_PROJECT_INVALID: 2,
+	PACK_PROJECT_UNSUPPORTED_VERSION: 5,
+	// An occupied init target refuses the whole batch and lists every
+	// conflicting path, so the caller clears the run instead of one file.
+	PACK_INIT_CONFLICT: 4,
 };
 
 export function isErrorCode(value: unknown): value is ErrorCode {

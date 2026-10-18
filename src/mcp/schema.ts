@@ -1,13 +1,13 @@
 import { z } from "zod";
 
 /**
- * Frozen MCP tool surface: twenty-six tools for agent authoring — the
+ * Frozen MCP tool surface: twenty-seven tools for agent authoring — the
  * intake and inspection pair, raster transforms, palette and quantization,
  * the deterministic pixelize pipeline, procedural generation, tiling and
  * preview, animation sheets, single-asset and whole-pack validation, model
- * and `.mcmeta` authoring, style presets and palette export, and PNG
- * comparison. `MCP_TOOL_NAMES` below is the registry this count is checked
- * against.
+ * and `.mcmeta` authoring, style presets and palette export, resource-pack
+ * project authoring, and PNG comparison. `MCP_TOOL_NAMES` below is the
+ * registry this count is checked against.
  * The product document once listed `edit_asset` for the batch-edit slot, and
  * §90 wins, so the frozen name is `apply_asset_operations`. The input
  * shapes below are the frozen contract; handler behavior lives in
@@ -41,6 +41,7 @@ export const MCP_TOOL_NAMES = [
 	"mcmeta_asset",
 	"compare_assets",
 	"style_asset",
+	"pack_asset",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -1130,5 +1131,59 @@ export const TOOL_INPUT_SCHEMAS = {
 			.boolean()
 			.optional()
 			.describe("Create missing parent directories (create)."),
+	},
+	pack_asset: {
+		mode: z.enum(["init"]).describe("Pack subcommand: init."),
+		projectDir: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("init only: project directory to create the skeleton in."),
+		namespace: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"init only: resource namespace of the pack; lowercase letters, digits, underscore, dot, and dash.",
+			),
+		minecraftVersion: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				'init only: release version 1.19.3 through 26.3 (for example "1.21.9" or "26.3").',
+			),
+		name: z
+			.string()
+			.min(1)
+			.optional()
+			.describe("init only: project name; defaults to the directory name."),
+		description: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"init only: pack description of 1 to 128 characters; defaults to the name.",
+			),
+		style: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"init only: builtin style id or a .style.json path recorded in the project document; defaults to vanilla.",
+			),
+		resourcePackVersion: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"init only: resource-pack format N or N.M overriding the release version.",
+			),
+		allowMinecraftNamespace: z
+			.boolean()
+			.optional()
+			.describe(
+				"init only: allow the reserved minecraft namespace; refused without it.",
+			),
 	},
 } satisfies Record<McpToolName, Record<string, z.ZodTypeAny>>;

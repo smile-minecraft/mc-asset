@@ -73,12 +73,22 @@
 | `import <image>` | 位图文件（PNG、JPEG、WebP） | PNG 和／或 `.mcpx` | 将位图格式解码为像素画布。 |
 | `render <grid>` | ASCII Grid 文件（`.grid`） | PNG 和／或 `.mcpx` | 编译由人或 Agent 编写的 ASCII Grid。 |
 | `build [source]` | `.mcpx` 源文件或 stdin（`--stdin`） | PNG 和／或 `.mcpx` | 将可编辑的源文件构建为贴图，或重新序列化源码。 |
+| `pack init <dir>` | 无 | 项目骨架 | 生成项目文件、资源包根 metadata、占位图标与资源包目录。 |
 
 ```text
 import <image> [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
 render <grid>  [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
 build  [source] [--stdin] [--output <png>] [--source <mcpx>] [--stdout] [--operations <path|->] <file flags>
+pack init <dir> --namespace <ns> --minecraft-version <version> [--name <name>] [--description <text>]
+       [--style <id|path>] [--resource-pack-version <N>] [--allow-minecraft-namespace]
 ```
+
+- `pack init <dir>` 一次预检后整批写出骨架：项目根目录的项目文件 `mc-asset.pack.json`、按目标版本生成的 `pack/pack.mcmeta`、64x64 的 `pack/pack.png` 占位图标，以及目录 `recipes/`、`pack/assets/<ns>/textures/item`、`pack/assets/<ns>/textures/block`、`pack/assets/<ns>/models/item`，资源包格式 46.0 起再加上 `pack/assets/<ns>/items/`。`--namespace` 与 `--minecraft-version` 必填，其余设置都有默认值（项目名取自目录名、说明取自项目名、风格为 `vanilla`、输出目录为 `pack`、配方目录为 `recipes`）。
+- 项目文件记录 `formatVersion`、`name`、`description`、`namespace`、`allowMinecraftNamespace`、`minecraftVersion`、`resourcePackVersion`、`style`、`outputDir`、`recipeDir` 与 `vanillaSource`，并以严格模式读取：未知字段、不符类型的数据，或指向项目根之外的路径都是 `PACK_PROJECT_INVALID` 并带字段路径；读不到文件是 `PACK_PROJECT_NOT_FOUND`；`formatVersion` 更新是 `PACK_PROJECT_UNSUPPORTED_VERSION`。`--resource-pack-version` 会覆盖版本对应的资源包格式，但发布版本号仍会留在项目文件里；创建之后没有任何指令会改写这个文件。
+- 根 metadata 按目标版本选择写法：资源包格式 65.0 起只声明该目标的 `min_format` 与 `max_format`，不写旧式的 `pack_format`；更早的版本只写单一旧式格式号。生成的文件会先在内存内跑一遍与 `validate-pack` 相同的根 metadata 规则，有问题就不写盘。版本不在 `1.19.3` 到 `26.3` 之间是 `INVALID_ARGUMENT` 并带上版本号，而且不会写任何文件。
+- 每个预定路径都会在写入第一个字节前先读一遍。已经存在的路径会让整批拒绝，返回 `PACK_INIT_CONFLICT` 并附上 `conflicts` 清单（列出所有已存在的相对路径），所以重跑不会只覆盖一半；项目目录本身或其下任何位置是符号链接时是 `FILESYSTEM_ERROR`，而且永远不穿过链接写入。`init` 没有 `--force` 也没有 `--mkdir`：项目只创建一次。
+- `namespace: minecraft` 会覆盖游戏本身的素材，因此需要 `--allow-minecraft-namespace`；没给时是 `PACK_PROJECT_INVALID`，字段指向 `namespace`。
+- 占位图标是原创的 64x64 图案，用整数几何画出（棋盘底、带边框的方板、菱形标记），因此同一次请求永远写出相同的字节。
 
 - `--source <path>` 会保存可编辑的 `.mcpx` 文本源码。
 - `--in-place` 直接改写输入文件（对该目标等同 force）。
@@ -445,6 +455,10 @@ model preview  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
 | `STYLE_INHERITANCE_CYCLE` | 2 | `extends` 链回到已经走过的风格（最多八层）。 | 移除循环；消息会列出重复的那段链。 |
 | `STYLE_FAMILY_NOT_FOUND` | 2 | `--family` 指定的家族不在解析后的风格里（例如文档用 `null` 删除之后）。 | 从 `style show <style>` 的结果选一个家族，或不要删除它。 |
 | `STYLE_UNSUPPORTED_VERSION` | 5 | `.style.json` 的 `formatVersion` 高于工具支持的版本。 | 把 `formatVersion` 设为 1，并按这个版本调整文档内容。 |
+| `PACK_INIT_CONFLICT` | 4 | `pack init` 发现预定要创建的路径已经存在（文件或骨架目录）。 | 看 `conflicts` 清单，把这些路径删除或改名后再跑一次；这次没有写任何文件。 |
+| `PACK_PROJECT_INVALID` | 2 | 项目文件字段未知、不符类型，或指向项目根之外的路径；`pack init` 没有加 `--allow-minecraft-namespace` 却使用 `minecraft` 命名空间也是这个码。 | 按消息里的字段路径修正该字段；`namespace` 的情况则是换一个命名空间，或加上这个明确同意的开关。 |
+| `PACK_PROJECT_NOT_FOUND` | 2 | 明确指定路径的项目文件读不到。 | 检查路径；指令不会往父目录搜索项目文件。 |
+| `PACK_PROJECT_UNSUPPORTED_VERSION` | 5 | 项目文件的 `formatVersion` 高于工具支持的版本。 | 把 `formatVersion` 设为 1，并按这个版本调整项目文件内容。 |
 | `PACK_GUI_SCALING_BORDER` | 3 | `validate-pack` 发现某个 GUI 贴图的九宫格边框没有留下中段（判断方式同 `INVALID_MCMETA`）。 | 缩小该贴图 `.mcmeta` 里的边框。 |
 | `PACK_MCMETA_INVALID` | 3 | 根目录 `pack.mcmeta` 写了游戏拒绝加载的内容：缺少 `pack` 区段或 `pack.description`、`min_format`／`max_format` 只写一半、负值或上下颠倒的范围、与声明范围不一致的 `supported_formats`、落在声明 major 之外的旧制 `pack_format`、不合法的 overlay 目录名，或违反旧格式规则的 overlay `formats` 字段。 | 把指出的字段修好（范围两端都要能读、声明的 major 要一致），或拿掉规则不准写的旧字段。 |
 | `PACK_MCMETA_SUSPICIOUS` | 0（警告） | 包照常加载，但写法疑似失误：pack 根目录没有的 overlay 目录、完全没写版本字段的 overlay 条目，或落在声明范围外的扫描目标。以警告报告，本身不会让扫描失败。 | 补上缺少的 overlay 目录、给该条目一个版本范围，或把扫描目标改回声明范围内。 |

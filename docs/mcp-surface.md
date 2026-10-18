@@ -52,6 +52,7 @@ is no `set_pixel` tool on purpose.
 | `mcmeta_asset` | PNG sprite sheet (`animation`) or design sprite (`gui`), mode-specific parameters, version fields | Optional explicit `.mcmeta` output path (`force`, `mkdir`) | Generated `.mcmeta` text and metadata summary (writes file only with `outputPath`) |
 | `compare_assets` | Two same-size PNGs, `image` (`none` / `diff`), `scale` (1–16) | Optional explicit PNG output path (`force`, `mkdir`; only with `image: "diff"`) | Comparison report (dimensions, raw and visible difference counts, bounds) plus optional standard PNG image block (writes file only with `outputPath`) |
 | `style_asset` | Style presets and `.style.json` sources, one `mode` (`list` / `show` / `export-palette` / `create`) | Optional explicit `.mcpx` path (`export-palette`) or `.style.json` path (`create`) | Preset list, resolved style, palette `.mcpx` text or file, or the written style document |
+| `pack_asset` | Nothing; one `mode` (`init`) plus a project directory, namespace, and release version | The new project directory and nothing else | Report of the created project skeleton, or a refusal with the conflicting paths |
 
 ## Input semantics
 
@@ -67,6 +68,7 @@ is no `set_pixel` tool on purpose.
 - Subcommand tools merge CLI modes into a `mode` field: `palette_asset`
   (`extract` / `inspect`), `material_asset` (`list` / `show`),
   `style_asset` (`list` / `show` / `export-palette` / `create`),
+  `pack_asset` (`init`),
   `preview_asset` (`ascii` / `palette-map` / `scale` / `nine-slice`),
   `animate_asset` (`pack` / `unpack` / `reorder` / `resize` /
   `validate` / `preview`).
@@ -89,6 +91,31 @@ is no `set_pixel` tool on purpose.
   (`STYLE_UNSUPPORTED_VERSION`), and a family the style does not resolve
   (`STYLE_FAMILY_NOT_FOUND`). The tool never rewrites a style file it did
   not create.
+- `pack_asset` creates one resource pack project. `init` takes
+  `projectDir`, `namespace`, and `minecraftVersion` (all required) plus
+  optional `name` (defaults to the directory name), `description`
+  (defaults to the name), `style` (defaults to `vanilla`), and
+  `resourcePackVersion` (overrides the format the release version maps
+  to, while the release version stays in the document), with
+  `allowMinecraftNamespace` required for `namespace: minecraft`. One
+  preflighted batch writes `mc-asset.pack.json`, `pack/pack.mcmeta`, a
+  64x64 `pack/pack.png` placeholder icon, and the resource pack
+  directories, and the result reports the pinned format plus every file
+  and directory it created. The root metadata follows the target: from
+  resource pack format 65.0 it declares `min_format` and `max_format`
+  for that target and leaves the legacy `pack_format` out, below it the
+  document carries the single legacy major, and the generated document
+  is checked in memory before it is written. An unknown release version
+  or a namespace outside `[a-z][a-z0-9_.-]{0,63}` is
+  `INVALID_ARGUMENT`. An occupied path refuses the whole batch with
+  `PACK_INIT_CONFLICT` and a `conflicts` list of every relative path
+  already in place, and a symbolic link is `FILESYSTEM_ERROR` and never
+  written through; the tool takes no `force` and no `mkdir`. The project
+  document is read in strict mode by the commands that consume it: an
+  unknown field or a path leaving the project root is
+  `PACK_PROJECT_INVALID` naming the field, an unreadable path is
+  `PACK_PROJECT_NOT_FOUND`, and a newer `formatVersion` is
+  `PACK_PROJECT_UNSUPPORTED_VERSION`.
 - `apply_asset_operations` takes an array of operation objects, each
   with a `type` (the Core batch vocabulary: the nine pixel operations
   `setPixel`, `clearPixel`, `drawLine`, `drawRect`, `fillRect`,
@@ -182,7 +209,8 @@ is no `set_pixel` tool on purpose.
   `validate_asset` reports `fail` with findings rather than raising.
   In `style_asset`, `list` and `show` are read-only; `export-palette` and
   `create` write only to their explicit output path, and the style sources
-  they read stay unchanged.
+  they read stay unchanged. `pack_asset` writes a new project directory
+  once and never rewrites it.
 - Validation reports carry `coverage: {status, skipped}`; `partial`
   lists each skipped check with its kind and reason, and never changes
   the exit code.

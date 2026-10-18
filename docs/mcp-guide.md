@@ -13,7 +13,7 @@
 
 `mc-asset mcp` starts a stdio MCP server: stdout carries only MCP JSON-RPC,
 diagnostics go to stderr, and the process ends when stdin closes. The frozen
-surface — twenty-six tool names, their inputs, and the read/write contract — lives
+surface — twenty-seven tool names, their inputs, and the read/write contract — lives
 in `docs/mcp-surface.md`; the input fields are frozen in `src/mcp/schema.ts`.
 This guide covers registration, one capture per tool (image bytes are
 abbreviated where noted, never verbatim), the error model, and the limits.
@@ -129,7 +129,7 @@ the local source server — the same server code runs either way.
 | [`generate_asset`](#generate_asset) | [`preview_asset`](#preview_asset) | [`scale_gui_asset`](#scale_gui_asset) |
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
 | [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | [`mcmeta_asset`](#mcmeta_asset) |
-| [`compare_assets`](#compare_assets) | [`style_asset`](#style_asset) | |
+| [`compare_assets`](#compare_assets) | [`style_asset`](#style_asset) | [`pack_asset`](#pack_asset) |
 
 ### analyze_asset
 
@@ -743,6 +743,51 @@ other codes are `STYLE_NOT_FOUND` (unknown id), `STYLE_INHERITANCE_CYCLE`,
 resolved style does not carry). Only `export-palette` and `create` write,
 and only to their explicit output path; `force` replaces that file and
 `mkdir` creates missing parents.
+
+### pack_asset
+
+Creates one resource pack project. `init` takes `projectDir`,
+`namespace`, and `minecraftVersion` (all required) plus optional `name`,
+`description`, `style`, and `resourcePackVersion`; `namespace: minecraft`
+additionally needs `allowMinecraftNamespace`.
+
+Call:
+
+```json
+{"mode":"init","projectDir":"packs/aurelian-forge","namespace":"aurelian","minecraftVersion":"1.21.9","style":"soft"}
+```
+
+One preflighted batch writes `mc-asset.pack.json`, `pack/pack.mcmeta`,
+a 64x64 `pack/pack.png` placeholder icon, and the resource pack
+directories (`recipes/` plus `pack/assets/aurelian/...`, with `items/`
+from resource pack format 46.0 on). The result reports the pinned
+format and every path it created:
+
+```json
+{"mode":"init","projectDir":"/abs/packs/aurelian-forge","minecraftVersion":"1.21.9","packFormat":"69.0","resourcePackVersion":"69.0","files":["mc-asset.pack.json","pack/pack.mcmeta","pack/pack.png"],"directories":["pack","pack/assets","pack/assets/aurelian","pack/assets/aurelian/items","pack/assets/aurelian/models","pack/assets/aurelian/models/item","pack/assets/aurelian/textures","pack/assets/aurelian/textures/block","pack/assets/aurelian/textures/item","recipes"]}
+```
+
+`--resource-pack-version` equivalent (`resourcePackVersion`) overrides the
+format the release version maps to while the release version stays in the
+document. The root metadata follows the pinned target: from resource pack
+format 65.0 it declares `min_format` and `max_format` for that target and
+leaves the legacy `pack_format` out; below it the document carries the
+single legacy major. The generated document is checked in memory against
+the `validate-pack` root metadata rules before it is written.
+
+Nothing is overwritten. A path that already exists refuses the whole
+batch:
+
+```json
+{"code":"PACK_INIT_CONFLICT","message":"pack init found 2 paths it would create.","details":{"path":"/abs/packs/aurelian-forge","minecraftVersion":"1.21.9","conflicts":["pack","pack/pack.mcmeta"]}}
+```
+
+A symbolic link, in the project directory or anywhere below it, is
+`FILESYSTEM_ERROR` and never written through, and an unknown release
+version or an illegal namespace is `INVALID_ARGUMENT`. The tool takes no
+`force` and no `mkdir`; the project document it writes is read in strict
+mode by the commands that consume it (`PACK_PROJECT_INVALID` naming the
+field, `PACK_PROJECT_NOT_FOUND`, `PACK_PROJECT_UNSUPPORTED_VERSION`).
 
 ## How failures come back
 
