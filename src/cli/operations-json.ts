@@ -1,6 +1,7 @@
 import type { BatchOperation } from "../core/batch.ts";
 import { McAssetError } from "../core/errors.ts";
 import { POLYGON_MAX_POINTS } from "../core/ops.ts";
+import type { OutlineMode, OutlinePosition } from "../core/outline.ts";
 import type { SelectionExpr } from "../core/selection.ts";
 import type { Rect, RGBA } from "../core/types.ts";
 
@@ -42,6 +43,7 @@ const KNOWN_TYPES: ReadonlySet<string> = new Set([
 	"setRegionPixel",
 	"stampRect",
 	"regionFromSelection",
+	"outline",
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -185,6 +187,178 @@ function takeEllipseMode(
 		);
 	}
 	return op.mode;
+}
+
+function takeOptionalOutlineMode(
+	op: Record<string, unknown>,
+	path: string,
+): OutlineMode | undefined {
+	if (op.mode === undefined) {
+		return undefined;
+	}
+	if (
+		op.mode !== "tinted" &&
+		op.mode !== "selective" &&
+		op.mode !== "uniform" &&
+		op.mode !== "black" &&
+		op.mode !== "strip"
+	) {
+		throw invalid(
+			`${path}.mode`,
+			'Outline mode must be "tinted", "selective", "uniform", "black", or "strip".',
+			op.mode,
+		);
+	}
+	return op.mode;
+}
+
+function takeOptionalOutlinePosition(
+	op: Record<string, unknown>,
+	path: string,
+): OutlinePosition | undefined {
+	if (op.position === undefined) {
+		return undefined;
+	}
+	if (op.position !== "inside" && op.position !== "outside") {
+		throw invalid(
+			`${path}.position`,
+			'Outline position must be "inside" or "outside".',
+			op.position,
+		);
+	}
+	return op.position;
+}
+
+function takeOutlineColor(
+	op: Record<string, unknown>,
+	path: string,
+	mode: OutlineMode | undefined,
+): RGBA | undefined {
+	const effectiveMode = mode ?? "tinted";
+	if (effectiveMode === "uniform") {
+		if (op.color === undefined) {
+			throw invalid(
+				`${path}.color`,
+				'Outline mode "uniform" requires color (#RRGGBB).',
+			);
+		}
+		if (typeof op.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(op.color)) {
+			throw invalid(
+				`${path}.color`,
+				"Outline color must be an opaque hex color (#RRGGBB).",
+				op.color,
+			);
+		}
+		return takeColor(op.color, `${path}.color`);
+	}
+	if (op.color !== undefined) {
+		throw invalid(
+			`${path}.color`,
+			'Outline color is only allowed with mode "uniform".',
+			op.color,
+		);
+	}
+	return undefined;
+}
+
+function takeOptionalLuminanceDrop(
+	op: Record<string, unknown>,
+	path: string,
+): number | undefined {
+	if (op.luminanceDropPermille === undefined) {
+		return undefined;
+	}
+	const val = takeInt(
+		op.luminanceDropPermille,
+		`${path}.luminanceDropPermille`,
+		"Outline luminanceDropPermille",
+	);
+	if (val < 0 || val > 400) {
+		throw invalid(
+			`${path}.luminanceDropPermille`,
+			"Outline luminanceDropPermille must be an integer between 0 and 400.",
+			val,
+		);
+	}
+	return val;
+}
+
+function takeOptionalSaturationRatio(
+	op: Record<string, unknown>,
+	path: string,
+): number | undefined {
+	if (op.saturationRatioPermille === undefined) {
+		return undefined;
+	}
+	const val = takeInt(
+		op.saturationRatioPermille,
+		`${path}.saturationRatioPermille`,
+		"Outline saturationRatioPermille",
+	);
+	if (val < 0 || val > 2000) {
+		throw invalid(
+			`${path}.saturationRatioPermille`,
+			"Outline saturationRatioPermille must be an integer between 0 and 2000.",
+			val,
+		);
+	}
+	return val;
+}
+
+function takeOptionalMaxHueOffset(
+	op: Record<string, unknown>,
+	path: string,
+): number | undefined {
+	if (op.maxHueOffsetDegrees === undefined) {
+		return undefined;
+	}
+	const val = takeInt(
+		op.maxHueOffsetDegrees,
+		`${path}.maxHueOffsetDegrees`,
+		"Outline maxHueOffsetDegrees",
+	);
+	if (val < 0 || val > 180) {
+		throw invalid(
+			`${path}.maxHueOffsetDegrees`,
+			"Outline maxHueOffsetDegrees must be an integer between 0 and 180.",
+			val,
+		);
+	}
+	return val;
+}
+
+function takeOptionalSnapFamilies(
+	op: Record<string, unknown>,
+	path: string,
+): boolean | undefined {
+	if (op.snapFamilies === undefined) {
+		return undefined;
+	}
+	if (typeof op.snapFamilies !== "boolean") {
+		throw invalid(
+			`${path}.snapFamilies`,
+			"Outline snapFamilies must be a boolean.",
+			op.snapFamilies,
+		);
+	}
+	return op.snapFamilies;
+}
+
+function takeOptionalFamily(
+	op: Record<string, unknown>,
+	path: string,
+): string | undefined {
+	if (op.family === undefined) {
+		return undefined;
+	}
+	if (typeof op.family !== "string") {
+		throw invalid(
+			`${path}.family`,
+			"Outline family must be a string.",
+			op.family,
+		);
+	}
+	return op.family;
 }
 
 function takePolygonPoints(
@@ -536,7 +710,7 @@ function parseOneOperation(
 	if (typeof rawType !== "string" || !KNOWN_TYPES.has(rawType)) {
 		throw invalid(
 			`${path}.type`,
-			`Unknown operation type: ${String(rawType)}. Pixel ops are setPixel, clearPixel, drawLine, drawRect, fillRect, floodFill, ellipse, polygonFill, strokeMask; layer ops are createLayer, removeLayer, renameLayer, reorderLayer, duplicateLayer, mergeLayer, clearLayer, fillLayer, moveLayer; region ops are createRegion, removeRegion, renameRegion, reorderRegion, setRegionPixel; local-edit ops are stampRect, regionFromSelection. Geometry never enters the batch; use the transform command.`,
+			`Unknown operation type: ${String(rawType)}. Pixel ops are setPixel, clearPixel, drawLine, drawRect, fillRect, floodFill, ellipse, polygonFill, strokeMask; layer ops are createLayer, removeLayer, renameLayer, reorderLayer, duplicateLayer, mergeLayer, clearLayer, fillLayer, moveLayer; region ops are createRegion, removeRegion, renameRegion, reorderRegion, setRegionPixel; local-edit ops are stampRect, regionFromSelection; the derived frame op is outline. Geometry never enters the batch; use the transform command.`,
 			rawType,
 		);
 	}
@@ -703,6 +877,38 @@ function parseOneOperation(
 					layerId,
 					source,
 					color: takeColor(item.color, `${path}.color`),
+					...(selection !== undefined ? { selection } : {}),
+				},
+				id,
+			);
+		}
+		case "outline": {
+			const layerId = needLayerId();
+			const mode = takeOptionalOutlineMode(item, path);
+			const position = takeOptionalOutlinePosition(item, path);
+			const color = takeOutlineColor(item, path, mode);
+			const family = takeOptionalFamily(item, path);
+			const luminanceDropPermille = takeOptionalLuminanceDrop(item, path);
+			const saturationRatioPermille = takeOptionalSaturationRatio(item, path);
+			const maxHueOffsetDegrees = takeOptionalMaxHueOffset(item, path);
+			const snapFamilies = takeOptionalSnapFamilies(item, path);
+			const selection = takeOptionalSelection(item, path);
+			return attachId(
+				{
+					type: "outline" as const,
+					layerId,
+					...(mode !== undefined ? { mode } : {}),
+					...(position !== undefined ? { position } : {}),
+					...(color !== undefined ? { color } : {}),
+					...(family !== undefined ? { family } : {}),
+					...(luminanceDropPermille !== undefined
+						? { luminanceDropPermille }
+						: {}),
+					...(saturationRatioPermille !== undefined
+						? { saturationRatioPermille }
+						: {}),
+					...(maxHueOffsetDegrees !== undefined ? { maxHueOffsetDegrees } : {}),
+					...(snapFamilies !== undefined ? { snapFamilies } : {}),
 					...(selection !== undefined ? { selection } : {}),
 				},
 				id,

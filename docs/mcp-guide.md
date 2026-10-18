@@ -252,8 +252,19 @@ The pixel vocabulary is nine operations; the three shape additions are
 `strokeMask` (outlines the `source` selection read scope on `layerId` without
 painting the scope itself). `polygonFill` takes at most 4096 points
 (`RESOURCE_LIMIT_EXCEEDED` beyond that); a self-intersecting ring is
-`SELF_INTERSECTING_POLYGON`, and holes are unsupported. The full per-type
-table lives in the “Batch Operations Specification” section of
+`SELF_INTERSECTING_POLYGON`, and holes are unsupported.
+
+`outline`, the twenty-sixth operation type, frames the non-transparent pixels
+of one `layerId`: on the body edge (`inside`, default) or on the empty cells
+touching the body (`outside`), in one of five modes — `tinted` darkens the
+adjacent body colour in integer HSL, `selective` paints only the backlit side
+with the light at the top left, `uniform` fills the frame with a required
+`#RRGGBB` colour, `black` fills it with opaque black, and `strip` turns an
+existing frame into the neighbouring interior colour without changing the body
+size. `color` belongs to `uniform` alone, and `family` names one of the twelve
+builtin families to snap the derived colour onto the builtin vanilla ramp
+while `snapFamilies` is true. It accepts the same optional `selection`. The
+full per-type table lives in the “Batch Operations Specification” section of
 `docs/cli-surface.md`.
 
 Feedback example — one changed pixel with a summary (abbreviated, not

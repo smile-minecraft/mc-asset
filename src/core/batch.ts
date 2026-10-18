@@ -32,6 +32,7 @@ import {
 	floodFill,
 	strokeMask,
 } from "./ops.ts";
+import { applyOutline, type OutlineOptions } from "./outline.ts";
 import { evaluateSelectionExpr, type SelectionExpr } from "./selection.ts";
 import type {
 	PixelCanvas,
@@ -152,6 +153,19 @@ export interface StrokeMaskOperation extends OperationBase {
 	source: SelectionExpr;
 	color: RGBA;
 	selection?: SelectionExpr;
+}
+
+/**
+ * Derived frame pass over one layer. The five modes share the body and
+ * frame-cell geometry; `selection` clips the destination write exactly like
+ * the pixel operations.
+ */
+export interface OutlineOperation
+	extends OperationBase,
+		PixelWriteScope,
+		OutlineOptions {
+	type: "outline";
+	layerId: string;
 }
 
 export interface StampTransform {
@@ -281,6 +295,7 @@ export type BatchOperation =
 	| EllipseOperation
 	| PolygonFillOperation
 	| StrokeMaskOperation
+	| OutlineOperation
 	| CreateLayerOperation
 	| RemoveLayerOperation
 	| RenameLayerOperation
@@ -801,6 +816,14 @@ function dispatch(canvas: PixelCanvas, op: BatchOperation): void {
 			const clip = resolveWriteMask(canvas, op.selection, "selection");
 			withWriteScope(canvas, op.layerId, clip, () => {
 				strokeMask(canvas, op.layerId, read.mask, op.color);
+			});
+			return;
+		}
+		case "outline": {
+			assertLayerId(op.layerId);
+			const mask = resolveWriteMask(canvas, op.selection, "selection");
+			withWriteScope(canvas, op.layerId, mask, () => {
+				applyOutline(canvas, op.layerId, op);
 			});
 			return;
 		}

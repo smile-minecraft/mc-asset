@@ -127,6 +127,21 @@ is no `set_pixel` tool on purpose.
   of rolling back. Pixel operations accept an optional
   `selection` expression; an empty match refuses the write with
   `EMPTY_SELECTION` and rolls the batch back.
+- `outline` is the twenty-sixth operation `type`. It frames the
+  non-transparent pixels of one `layerId`, on the body edge (`inside`,
+  default) or on the empty cells touching the body (`outside`), in five
+  modes: `tinted` (darkened adjacent body colour, integer HSL),
+  `selective` (backlit side only, light at the top left), `uniform` (a
+  required `#RRGGBB` colour), `black`, and `strip` (an existing frame
+  becomes the neighbouring interior colour). `color` on any other mode is
+  `INVALID_ARGUMENT`; `family` accepts one of the twelve builtin families
+  and snaps the derived colour to the closer `outline` or `shadow` step of
+  the builtin vanilla ramp while `snapFamilies` is true, otherwise an
+  unknown family id is `INVALID_ARGUMENT`. `luminanceDropPermille`
+  (default 120), `saturationRatioPermille` (default 1000), and
+  `maxHueOffsetDegrees` (default 5) are integers; the last one is recorded
+  for style checks and never changes the output. It accepts the same
+  optional `selection`. The per-type table is in `docs/cli-surface.md`.
 - Selection expressions name atoms (`all`, `rect:x,y,w,h`, `region:id`,
   `alpha[:layer]`, `color[:layer]:r,g,b,a`, `connected[:layer]:x,y`) or
   a JSON AST object (`{"op": "union" | "intersect" | "subtract" |

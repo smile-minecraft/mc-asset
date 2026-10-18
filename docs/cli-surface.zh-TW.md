@@ -382,13 +382,14 @@ model preview  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
   { "type": "clearPixel", "x": 0, "y": 0 },
   { "type": "ellipse", "rect": { "x": 1, "y": 1, "width": 6, "height": 4 }, "color": "#FF0000FF", "mode": "fill" },
   { "type": "polygonFill", "points": [[0, 0], [4, 0], [2, 3]], "color": "#00FF00FF" },
-  { "type": "strokeMask", "layerId": "base", "source": "alpha:base", "color": "#FFFFFFFF" }
+  { "type": "strokeMask", "layerId": "base", "source": "alpha:base", "color": "#FFFFFFFF" },
+  { "type": "outline", "layerId": "base", "mode": "tinted", "family": "gold" }
 ]
 ```
 
 同樣的 JSON 形狀也適用於 MCP 的 `apply_asset_operations`：可使用裸陣列或 `{"operations": [...]}` 包裹；空陣列是合法的無操作。每個操作都可附選用的字串 `id`（同一批次內不可重複）。單圖層畫布可省略 `layerId`（預設為唯一圖層）；多圖層畫布必須明確指定（`regionFromSelection`、`mergeLayer` 與區域操作不接受 `layerId`）。色彩為 `transparent`、`#RRGGBB` 或 `#RRGGBBAA`；座標皆為整數，不做四捨五入。
 
-九個像素操作都可附選用的 `selection`（選取範圍表示式的原子字串或物件，文法與 `--selection` 相同）。只有被選中的像素會寫入；未被選中的原始位元組原樣保留，含 alpha 為 0 下隱藏的 RGB。`fillRect` 在有 `selection` 時可省略 `rect`（填滿範圍取選取範圍的邊界框，再以選取範圍裁剪）。這三種形狀遵守凍結的整數幾何與選取裁剪：`ellipse` 沿 `rect` 內接的橢圓填滿或描邊（`mode` 必填，`fill` 或 `outline`）；`polygonFill` 填滿 `points` 圍出的多邊形；`strokeMask` 在 `layerId` 上描出 `source` 選取讀取範圍的輪廓，不繪製範圍本身。選取範圍一個像素都沒命中時，以 `EMPTY_SELECTION` 拒絕寫入並回復整批；`quantize`／`cleanup`／`recolor` 的 `--selection` 路徑維持既有的還原行為。
+九個像素操作都可附選用的 `selection`（選取範圍表示式的原子字串或物件，文法與 `--selection` 相同）。只有被選中的像素會寫入；未被選中的原始位元組原樣保留，含 alpha 為 0 下隱藏的 RGB。`fillRect` 在有 `selection` 時可省略 `rect`（填滿範圍取選取範圍的邊界框，再以選取範圍裁剪）。這三種形狀遵守凍結的整數幾何與選取裁剪：`ellipse` 沿 `rect` 內接的橢圓填滿或描邊（`mode` 必填，`fill` 或 `outline`）；`polygonFill` 填滿 `points` 圍出的多邊形；`strokeMask` 在 `layerId` 上描出 `source` 選取讀取範圍的輪廓，不繪製範圍本身。`outline` 也接受同樣的選用 `selection`，且只畫被選中的外框格。選取範圍一個像素都沒命中時，以 `EMPTY_SELECTION` 拒絕寫入並回復整批；`quantize`／`cleanup`／`recolor` 的 `--selection` 路徑維持既有的還原行為。
 
 選取範圍表示式可寫原子（`all`、`rect:x,y,w,h`、`region:id`、`alpha[:layer]`、`color[:layer]:r,g,b,a`、`connected[:layer]:x,y`）或 JSON AST 物件（`{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}`），深度上限 32、節點上限 1024。
 
@@ -419,6 +420,9 @@ model preview  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
 | `setRegionPixel` | `regionId`、`x`、`y`、`value` | `id` | `{"type": "setRegionPixel", "regionId": "mask", "x": 1, "y": 2, "value": 1}` |
 | `stampRect` | `layerId`、`source`、`to`／`offset` 擇一 | `transform`（`flip`：`h`／`v`；`rotate`：`0`／`90`／`180`／`270`）、`merge`（預設 `replace`／`source-over`）、`carryRegions`（預設 false）、`selection`、`id` | `{"type": "stampRect", "layerId": "base", "source": "rect:8,8,8,8", "offset": {"dx": 0, "dy": 8}}` |
 | `regionFromSelection` | `selection`、`mode`（`create`／`update`） | `regionId`、`name`、`id` | `{"type": "regionFromSelection", "selection": "alpha:base", "mode": "create", "regionId": "body"}` |
+| `outline` | `layerId`；`mode` 為 `uniform` 時須有 `color`（`#RRGGBB`） | `mode`（預設 `tinted`／`selective`／`uniform`／`black`／`strip`）、`position`（預設 `inside`／`outside`）、`family`、`luminanceDropPermille`（預設 120，0..400）、`saturationRatioPermille`（預設 1000，0..2000）、`maxHueOffsetDegrees`（預設 5，0..180）、`snapFamilies`（預設 true）、`selection`、`id` | `{"type": "outline", "layerId": "base", "mode": "tinted", "family": "gold"}` |
+
+`outline` 替 `layerId` 上非全透明的像素畫外框：`inside`（預設）改寫本體邊緣的像素，`outside` 則畫在貼著本體的空像素上，範圍與外側描邊相同。`tinted`（預設）在整數 HSL 空間把相鄰本體色調暗，明度依 `luminanceDropPermille` 下降、飽和度依 `saturationRatioPermille` 縮放；`selective` 只在背光面使用同一個推導色，光源在左上時也就是 `x >= cx` 或 `y >= cy`，其中 `cx`、`cy` 是本體座標的整數平均；`uniform` 用 `color` 填滿外框，此模式必填 `color`，其他模式給了會被視為錯誤；`black` 填滿不透明純黑；`strip` 把每個本體邊緣像素換成最暗的相鄰內部像素，藉此移除既有的外框，不透明像素的數量完全不變，空像素的隱藏位元組也原樣保留。每個外框格讀取的是這次不會被改寫的本體像素——`inside` 讀內部像素，`outside` 讀相鄰的本體像素——讀不到就維持原色。`family` 接受十二個內建家族之一（`iron`、`gold`、`diamond`、`netherite`、`copper`、`wood`、`stone`、`emerald`、`amethyst`、`redstone`、`lapis`、`quartz`）；`snapFamilies` 為 true 時，推導出的外框色會對齊該家族在內建原版色階中較接近的 `outline` 或 `shadow`，其他家族 id 一律 `INVALID_ARGUMENT`。`maxHueOffsetDegrees` 只記錄給風格檢查，不改變輸出。全部運算都是整數，因此相同的輸入位元組一定得到相同的輸出位元組。
 
 `drawLine` 的 `from`／`to` 為 `[x, y]` 整數對；`stampRect` 的 `to` 為 `{x, y}`，`offset` 為 `{dx, dy}`。`rect` 一律是 `{x, y, width, height}`，寬高至少為 1；`toIndex` 為 0 或正整數；`value` 為 `0`（外部）或 `1`（內部）。`polygonFill` 最多 4096 個點，超過為 `RESOURCE_LIMIT_EXCEEDED`；自交的環為 `SELF_INTERSECTING_POLYGON`，孔洞不支援（巢狀的環會被視為各自獨立的輪廓）。`stampRect` 複製 `source` 讀取範圍而不清空它（`source` 決定讀什麼，`selection` 只裁剪寫入；`to` 固定變換後輸出的左上角，`offset` 相對來源邊界平移，兩者並存為 `ARGUMENT_CONFLICT`）。未知的 `type` 為 `INVALID_ARGUMENT`；重複的 `id` 為 `DUPLICATE_OPERATION_ID`。
 

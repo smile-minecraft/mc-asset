@@ -94,7 +94,7 @@ const batchOperationField = z
 	.object({ type: z.string().min(1), id: z.string().min(1).optional() })
 	.passthrough()
 	.describe(
-		"Batch operation object with a `type` (setPixel, drawLine, fillRect, floodFill, createLayer, setRegionPixel, and the rest of the Core batch vocabulary) plus its per-type arguments.",
+		"Batch operation object with a `type` (setPixel, drawLine, fillRect, floodFill, createLayer, setRegionPixel, outline, and the rest of the Core batch vocabulary) plus its per-type arguments.",
 	);
 
 /** Optional visual feedback for apply_asset_operations; absent means the legacy output shape. */

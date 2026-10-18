@@ -190,7 +190,9 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 像素操作都可以带可选的 `selection`：只有选中的像素会被写入，其余全部逐字节还原。选择可以写原子——`all`、`rect:x,y,w,h`、`region:id`、`alpha[:layer]`、`color[:layer]:r,g,b,a`、`connected[:layer]:x,y`——或 JSON AST 对象（`{"op": "union" | "intersect" | "subtract" | "invert", "operands": [...]}`），深度上限 32、节点上限 1024。选择落空时以 `EMPTY_SELECTION` 拒绝写入并回滚整批。
 
-像素词汇共九个操作，新增的三个形状是：`ellipse`（`rect` 的内切椭圆；`mode` 必填，`fill` 或 `outline`）、`polygonFill`（填充 `points` 指定的多边形）、`strokeMask`（沿 `layerId` 上 `source` 选择范围的读取轮廓描边，不涂抹范围本身）。`polygonFill` 最多 4096 个点，超出是 `RESOURCE_LIMIT_EXCEEDED`；自交的环是 `SELF_INTERSECTING_POLYGON`，不支持挖洞。完整的分类型参数表见 `docs/cli-surface.zh-CN.md` 的批处理操作规格节。
+像素词汇共九个操作，新增的三个形状是：`ellipse`（`rect` 的内切椭圆；`mode` 必填，`fill` 或 `outline`）、`polygonFill`（填充 `points` 指定的多边形）、`strokeMask`（沿 `layerId` 上 `source` 选择范围的读取轮廓描边，不涂抹范围本身）。`polygonFill` 最多 4096 个点，超出是 `RESOURCE_LIMIT_EXCEEDED`；自交的环是 `SELF_INTERSECTING_POLYGON`，不支持挖洞。
+
+`outline` 是第二十六种操作：它为单个 `layerId` 上非全透明的像素描边，可画在本体边缘（`inside`，默认）或贴着本体的空像素（`outside`），共五种模式——`tinted` 在整数 HSL 空间调暗相邻本体色、`selective` 只画背光面（光源在左上）、`uniform` 用必填的 `#RRGGBB` 颜色填满、`black` 填满不透明纯黑、`strip` 把已有外框换成相邻内部色而不改变本体大小。`color` 只属于 `uniform`；`family` 指定十二个内建家族之一，在 `snapFamilies` 为 true 时把推导色对齐内建原版色阶。它接受同样的可选 `selection`；完整的分类型参数表在 `docs/cli-surface.zh-CN.md` 的批处理操作规格节。
 
 附图示例——一个变化像素加摘要（截短显示，非原样引用；图片数据省略）：
 
