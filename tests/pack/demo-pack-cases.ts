@@ -22,13 +22,24 @@ import { scanPack } from "../../src/validate/pack.ts";
  * The whole-pack demo: one formatVersion 3 recipe builds a custom block, a
  * layered item, one armor set, one entity texture template, one icon font,
  * and a two-frame particle. The cases cover the build, the check verdict,
- * the lock vocabulary, the conflict refusal, the defect fix list, and the
- * frozen bytes both runtimes must produce.
+ * the lock vocabulary, the conflict refusal, the defect fix list, stale lock
+ * entry pruning, and the frozen bytes both runtimes must produce.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE = join(HERE, "fixtures", "demo-pack");
 const PROJECT_FILE = "mc-asset.pack.json";
+
+const RECIPE_REL = "recipes/demo.recipe.json";
+const HERO_TEXTURE_REL =
+	"pack/assets/aurelian/textures/entity/aurelian_hero.png";
+const SECOND_HERO_TEXTURE_REL =
+	"pack/assets/aurelian/textures/entity/second_hero.png";
+const GEAR_DEFINITION_REL = "pack/assets/aurelian/equipment/aurelian_gear.json";
+const GEAR_HUMANOID_REL =
+	"pack/assets/aurelian/textures/entity/equipment/humanoid/aurelian_gear.png";
+const GEAR_LEGGINGS_REL =
+	"pack/assets/aurelian/textures/entity/equipment/humanoid_leggings/aurelian_gear.png";
 
 /** Frozen SHA-256 of every project byte, inputs and lock included. */
 const EXPECTED_TREE_SHA256 =
@@ -88,8 +99,99 @@ function projectPath(projectDir: string): string {
 	return join(projectDir, PROJECT_FILE);
 }
 
-async function buildDemo(projectDir: string) {
-	return executePackBuild(await planPackBuild(projectPath(projectDir)));
+async function buildDemo(projectDir: string, recipe?: string) {
+	return executePackBuild(
+		await planPackBuild(
+			projectPath(projectDir),
+			recipe === undefined ? {} : { recipe },
+		),
+	);
+}
+
+interface RecipeJson {
+	readonly formatVersion?: number;
+	readonly id?: string;
+	targets: Array<{
+		id: string;
+		steps: Array<Record<string, unknown>>;
+		[key: string]: unknown;
+	}>;
+	[key: string]: unknown;
+}
+
+async function readRecipe(projectDir: string): Promise<RecipeJson> {
+	return JSON.parse(
+		await readFile(join(projectDir, RECIPE_REL), "utf8"),
+	) as RecipeJson;
+}
+
+async function writeRecipe(
+	projectDir: string,
+	recipe: RecipeJson,
+): Promise<void> {
+	await writeFile(
+		join(projectDir, RECIPE_REL),
+		`${JSON.stringify(recipe, null, "\t")}\n`,
+		"utf8",
+	);
+}
+
+/** Rewrite the demo recipe without one target, as a user would edit it. */
+async function removeRecipeTarget(
+	projectDir: string,
+	targetId: string,
+): Promise<void> {
+	const recipe = await readRecipe(projectDir);
+	const targets = recipe.targets.filter((target) => target.id !== targetId);
+	assert.equal(
+		targets.length,
+		recipe.targets.length - 1,
+		`recipe declares target ${targetId}`,
+	);
+	await writeRecipe(projectDir, { ...recipe, targets });
+}
+
+/**
+ * Switch the equipment step off its filled template: the two armor sheets get
+ * new bytes, the definition keeps its bytes but records a new input hash, so
+ * the next build rewrites all three outputs and commits a fresh lock.
+ */
+async function disableEquipmentFill(projectDir: string): Promise<void> {
+	const recipe = await readRecipe(projectDir);
+	const gear = recipe.targets.find((target) => target.id === "aurelian_gear");
+	assert.ok(gear, "the demo recipe declares the equipment target");
+	const step = gear.steps[0];
+	assert.ok(step, "the equipment target declares a step");
+	step.fill = false;
+	await writeRecipe(projectDir, recipe);
+}
+
+/**
+ * A second recipe file. A `--recipe` build plans one file only, so this
+ * recipe's lock entries are the ones such a build must leave alone.
+ */
+async function addSecondRecipe(projectDir: string): Promise<void> {
+	const recipe = {
+		formatVersion: 3,
+		id: "second-demo",
+		targets: [
+			{
+				id: "second_hero",
+				steps: [
+					{
+						type: "entityTemplate",
+						layout: "player_wide",
+						output: "assets/{namespace}/textures/entity/second_hero.png",
+					},
+				],
+			},
+		],
+	};
+	await writeFile(
+		join(projectDir, "recipes", "second.recipe.json"),
+		`${JSON.stringify(recipe, null, "\t")}\n`,
+		"utf8",
+	);
 }
 
 async function walkFiles(directory: string): Promise<string[]> {
@@ -358,6 +460,199 @@ export const DEMO_PACK_CASES: readonly DemoCase[] = [
 					);
 				});
 			}
+		},
+	},
+	{
+		name: "a target removed from the recipe stops being locked and pack check recovers",
+		async run() {
+			await withDemoProject(async (projectDir) => {
+				await buildDemo(projectDir);
+				const firstCheck = await checkResourcePack({
+					projectPath: projectPath(projectDir),
+				});
+				assert.equal(firstCheck.verdict, "pass", "the fresh build passes");
+
+				const lockPath = join(projectDir, "mc-asset.lock.json");
+				const originalLock = parseLockText(await readFile(lockPath, "utf8"));
+
+				await removeRecipeTarget(projectDir, "aurelian_hero");
+				await unlink(join(projectDir, HERO_TEXTURE_REL));
+
+				const pruned = await buildDemo(projectDir);
+				assert.deepEqual(
+					pruned.completed,
+					[],
+					"nothing is rewritten: only the lock entry is stale",
+				);
+				const prunedLock = parseLockText(await readFile(lockPath, "utf8"));
+				assert.equal(
+					prunedLock.outputs[HERO_TEXTURE_REL],
+					undefined,
+					"the removed target leaves the lock",
+				);
+				const expected = { ...originalLock.outputs };
+				delete expected[HERO_TEXTURE_REL];
+				assert.deepEqual(
+					prunedLock.outputs,
+					expected,
+					"every other lock entry survives",
+				);
+
+				const recovered = await checkResourcePack({
+					projectPath: projectPath(projectDir),
+				});
+				assert.equal(recovered.verdict, "pass", "pack check passes again");
+				assert.deepEqual(recovered.fixList, [], "nothing to fix");
+
+				// A second rerun stays quiet: the pruned lock is the baseline now.
+				const lockBytes = await readFile(lockPath);
+				assert.deepEqual((await buildDemo(projectDir)).completed, []);
+				assert.deepEqual(
+					await readFile(lockPath),
+					lockBytes,
+					"the lock is unchanged",
+				);
+
+				// Rewriting another target commits the lock again and must not
+				// resurrect the removed entry.
+				const beforeFill = parseLockText(await readFile(lockPath, "utf8"));
+				await disableEquipmentFill(projectDir);
+				const rewritten = await buildDemo(projectDir);
+				assert.deepEqual(
+					[...rewritten.completed].sort(),
+					[GEAR_DEFINITION_REL, GEAR_HUMANOID_REL, GEAR_LEGGINGS_REL].sort(),
+					"the equipment step rewrites its three outputs",
+				);
+				const afterFill = parseLockText(await readFile(lockPath, "utf8"));
+				assert.equal(
+					afterFill.outputs[HERO_TEXTURE_REL],
+					undefined,
+					"the removed entry stays gone",
+				);
+				assert.notEqual(
+					afterFill.outputs[GEAR_DEFINITION_REL]?.inputHash,
+					beforeFill.outputs[GEAR_DEFINITION_REL]?.inputHash,
+					"the rewrite records a new input hash",
+				);
+				assert.equal(
+					afterFill.outputs[GEAR_DEFINITION_REL]?.outputHash,
+					beforeFill.outputs[GEAR_DEFINITION_REL]?.outputHash,
+					"the definition bytes stayed the same",
+				);
+				const finalCheck = await checkResourcePack({
+					projectPath: projectPath(projectDir),
+				});
+				assert.equal(finalCheck.verdict, "pass");
+				assert.deepEqual(finalCheck.fixList, []);
+			});
+		},
+	},
+	{
+		name: "a single-recipe build keeps the lock entries of recipes it did not plan",
+		async run() {
+			await withDemoProject(async (projectDir) => {
+				await addSecondRecipe(projectDir);
+				const first = await buildDemo(projectDir);
+				assert.equal(first.completed.length, 21, "both recipes build");
+
+				const lockPath = join(projectDir, "mc-asset.lock.json");
+				const before = parseLockText(await readFile(lockPath, "utf8"));
+				const secondLocked = before.outputs[SECOND_HERO_TEXTURE_REL];
+				assert.ok(secondLocked, "the second recipe is locked");
+				const secondBytes = await readFile(
+					join(projectDir, SECOND_HERO_TEXTURE_REL),
+				);
+
+				await removeRecipeTarget(projectDir, "aurelian_hero");
+				await unlink(join(projectDir, HERO_TEXTURE_REL));
+				await disableEquipmentFill(projectDir);
+
+				const partial = await buildDemo(
+					projectDir,
+					join(projectDir, "recipes", "demo.recipe.json"),
+				);
+				assert.deepEqual(
+					[...partial.completed].sort(),
+					[GEAR_DEFINITION_REL, GEAR_HUMANOID_REL, GEAR_LEGGINGS_REL].sort(),
+					"the planned recipe rewrites only its own outputs",
+				);
+
+				const after = parseLockText(await readFile(lockPath, "utf8"));
+				assert.equal(
+					after.outputs[HERO_TEXTURE_REL],
+					undefined,
+					"the removed target of the planned recipe is pruned",
+				);
+				assert.deepEqual(
+					after.outputs[SECOND_HERO_TEXTURE_REL],
+					secondLocked,
+					"the unplanned recipe keeps its lock entry",
+				);
+				assert.deepEqual(
+					await readFile(join(projectDir, SECOND_HERO_TEXTURE_REL)),
+					secondBytes,
+					"the unplanned recipe's asset is not rewritten",
+				);
+				assert.equal(
+					Object.keys(after.outputs).length,
+					Object.keys(before.outputs).length - 1,
+					"exactly one entry left the lock",
+				);
+
+				const summary = await checkResourcePack({
+					projectPath: projectPath(projectDir),
+				});
+				assert.equal(summary.verdict, "pass");
+				assert.deepEqual(summary.fixList, []);
+			});
+		},
+	},
+	{
+		name: "a dry run or a build conflict leaves a stale lock entry untouched",
+		async run() {
+			await withDemoProject(async (projectDir) => {
+				await buildDemo(projectDir);
+				const lockPath = join(projectDir, "mc-asset.lock.json");
+				const lockBytes = await readFile(lockPath);
+
+				await removeRecipeTarget(projectDir, "aurelian_hero");
+				await unlink(join(projectDir, HERO_TEXTURE_REL));
+
+				const dryPlan = await planPackBuild(projectPath(projectDir), {
+					dryRun: true,
+				});
+				assert.deepEqual((await executePackBuild(dryPlan)).completed, []);
+				assert.deepEqual(
+					await readFile(lockPath),
+					lockBytes,
+					"a dry run writes no lock",
+				);
+				const stillBroken = await checkResourcePack({
+					projectPath: projectPath(projectDir),
+				});
+				assert.equal(
+					stillBroken.verdict,
+					"fail",
+					"the stale entry keeps reporting until a real build",
+				);
+
+				// A hand-edited generated file conflicts before anything is staged,
+				// so the conflict must not prune the entry either.
+				const definitionRel = "pack/assets/aurelian/font/icons.json";
+				const definitionPath = join(projectDir, definitionRel);
+				await writeFile(
+					definitionPath,
+					`${await readFile(definitionPath, "utf8")}\n`,
+					"utf8",
+				);
+				const refusal = await refusalOf(async () => buildDemo(projectDir));
+				assert.equal(refusal.code, "PACK_BUILD_CONFLICT");
+				assert.deepEqual(
+					await readFile(lockPath),
+					lockBytes,
+					"the conflict writes no lock",
+				);
+			});
 		},
 	},
 	{

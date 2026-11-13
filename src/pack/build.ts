@@ -201,6 +201,10 @@ export interface PackBuildPlan {
 	readonly project?: PackProjectDocument;
 	readonly targetPlans?: readonly TargetPlanInternal[];
 	readonly lock?: LockDocument | undefined;
+	/** Recipe ids this run planned; `--recipe` narrows it to one file. */
+	readonly plannedRecipeIds?: readonly string[];
+	/** Every output path this run planned, across all four output families. */
+	readonly plannedOutputPaths?: readonly string[];
 }
 
 function sha256Hex(data: string | Uint8Array): string {
@@ -462,6 +466,7 @@ export async function planPackBuild(
 		expanded: readonly RecipeTarget[];
 	}> = [];
 
+	const plannedRecipeIds: string[] = [];
 	const seenOutputsAcrossRecipes = new Set<string>();
 	const registerOutput = (relPath: string): void => {
 		if (seenOutputsAcrossRecipes.has(relPath)) {
@@ -478,6 +483,7 @@ export async function planPackBuild(
 	for (const file of recipeFiles) {
 		const text = readFileSync(file, "utf8");
 		const recipe = parseRecipeText(text);
+		plannedRecipeIds.push(recipe.id);
 		const expanded = expandRecipeTargets(
 			recipe,
 			project.namespace,
@@ -1014,6 +1020,25 @@ export async function planPackBuild(
 		);
 	}
 
+	// Every path this run plans, across all four output families. The lock
+	// prunes an entry only when its recipe is planned here and its path is
+	// absent, so a new output family belongs in this set.
+	const plannedOutputPaths: string[] = [];
+	for (const tp of targetPlans) {
+		if (tp.texturePlan !== undefined) {
+			plannedOutputPaths.push(tp.texturePlan.path);
+		}
+		if (tp.mcmetaPlan !== undefined) {
+			plannedOutputPaths.push(tp.mcmetaPlan.path);
+		}
+		for (const mp of tp.modelPlans ?? []) {
+			plannedOutputPaths.push(mp.path);
+		}
+		for (const gp of tp.generatedPlans ?? []) {
+			plannedOutputPaths.push(gp.path);
+		}
+	}
+
 	const plannedModelPaths = new Set<string>();
 	for (const tp of targetPlans) {
 		for (const mp of tp.modelPlans ?? []) {
@@ -1071,6 +1096,8 @@ export async function planPackBuild(
 		project,
 		targetPlans,
 		lock,
+		plannedRecipeIds,
+		plannedOutputPaths,
 	};
 }
 
@@ -1197,6 +1224,25 @@ function buildJsonOutputText(
 }
 
 /**
+ * Lock entries this run must forget: the entry's recipe is part of the run,
+ * but the recipe no longer plans that path, so the user removed the target or
+ * the step that wrote it. Entries owned by a recipe outside the run stay put,
+ * so `--recipe one.recipe.json` builds one recipe without touching the records
+ * of the others.
+ */
+function collectStaleLockPaths(plan: PackBuildPlan): string[] {
+	const plannedRecipeIds = new Set(plan.plannedRecipeIds ?? []);
+	const plannedOutputPaths = new Set(plan.plannedOutputPaths ?? []);
+	const stale: string[] = [];
+	for (const [path, entry] of Object.entries(plan.lock?.outputs ?? {})) {
+		if (plannedRecipeIds.has(entry.recipeId) && !plannedOutputPaths.has(path)) {
+			stale.push(path);
+		}
+	}
+	return stale.sort(compareCodeUnits);
+}
+
+/**
  * Execute a build plan.
  *
  * Verifies no conflicts, runs safe-output preflights, renders outputs,
@@ -1233,11 +1279,15 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 			(tp.generatedPlans ?? []).some((gp) => gp.needsRewrite),
 	);
 
-	if (targetsToExecute.length === 0) {
+	const staleLockPaths = collectStaleLockPaths(plan);
+
+	if (targetsToExecute.length === 0 && staleLockPaths.length === 0) {
 		return { completed: [] };
 	}
 
-	// 1. Safe-output preflight across all outputs to write
+	// 1. Safe-output preflight across all outputs to write. A run that only
+	// prunes stale lock entries stages no target here and writes no file; the
+	// lock below is the only thing it touches.
 	const outputTargets: OutputTarget[] = [];
 	for (const tp of targetsToExecute) {
 		const texturePlan = tp.texturePlan;
@@ -1554,6 +1604,10 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 	const updatedOutputs: Record<string, LockEntry> = plan.lock
 		? { ...plan.lock.outputs }
 		: {};
+
+	for (const stalePath of staleLockPaths) {
+		delete updatedOutputs[stalePath];
+	}
 
 	for (const tp of targetsToExecute) {
 		const texture = tp.texturePlan;
