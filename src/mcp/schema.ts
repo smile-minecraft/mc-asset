@@ -1,14 +1,14 @@
 import { z } from "zod";
 
 /**
- * Frozen MCP tool surface: thirty tools for agent authoring — the
+ * Frozen MCP tool surface: thirty-one tools for agent authoring — the
  * intake and inspection pair, raster transforms, palette and quantization,
  * the deterministic pixelize pipeline, procedural generation, tiling and
  * preview, animation sheets, single-asset and whole-pack validation, model,
- * entity, and `.mcmeta` authoring, style presets and palette export,
- * resource-pack project authoring, particle definition generation, icon
- * fonts, and PNG comparison. `MCP_TOOL_NAMES` below is the registry this
- * count is checked against.
+ * entity, `.mcmeta` and equipment authoring, style presets and palette
+ * export, resource-pack project authoring, particle definition generation,
+ * icon fonts, and PNG comparison. `MCP_TOOL_NAMES` below is the registry
+ * this count is checked against.
  * The product document once listed `edit_asset` for the batch-edit slot, and
  * §90 wins, so the frozen name is `apply_asset_operations`. The input
  * shapes below are the frozen contract; handler behavior lives in
@@ -46,6 +46,7 @@ export const MCP_TOOL_NAMES = [
 	"particle_asset",
 	"font_asset",
 	"entity_asset",
+	"equipment_asset",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -735,6 +736,80 @@ export const particleAssetInput = {
 	mkdir: z.boolean().optional().describe("Create missing parent directories."),
 };
 
+export const equipmentAssetInput = {
+	id: z
+		.string()
+		.min(1)
+		.describe(
+			"Equipment definition id; one or more [a-z0-9._-] path segments. The definition lands at assets/<namespace>/(models/)equipment/<id>.json.",
+		),
+	namespace: z
+		.string()
+		.min(1)
+		.describe("Asset namespace shared by the definition and its templates."),
+	layers: z
+		.array(
+			z.object({
+				type: z
+					.string()
+					.min(1)
+					.describe(
+						"Layer type the target version knows (humanoid, humanoid_leggings, wings, horse_body, ...).",
+					),
+				texture: z
+					.string()
+					.min(1)
+					.optional()
+					.describe(
+						"Texture leaf below textures/entity/equipment/<type>/; defaults to the definition id.",
+					),
+				dyeable: z
+					.union([
+						z.boolean(),
+						z.object({ colorWhenUndyed: z.number().int().optional() }),
+					])
+					.optional()
+					.describe(
+						"true writes dyeable: {}, an object writes color_when_undyed; omitted leaves the entry undyeable.",
+					),
+				usePlayerTexture: z
+					.boolean()
+					.optional()
+					.describe("Write use_player_texture; only the wings layer reads it."),
+			}),
+		)
+		.min(1)
+		.describe("One entry per layers.<type>[] item, in draw order."),
+	outputDir: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"Resource pack root receiving assets/. When omitted the definition text and each template (pngBase64, sourceText) are embedded and nothing is written.",
+		),
+	minecraftVersion: minecraftVersionField,
+	resourcePackVersion: resourcePackVersionField,
+	template: z
+		.boolean()
+		.optional()
+		.describe(
+			"Write one texture template per layer entry; default true. Set false for a definition-only run, which is the only way to use a layer type without a verified layout.",
+		),
+	fill: z
+		.boolean()
+		.optional()
+		.describe(
+			"Fill each template face with its face color; default true. false leaves the face areas transparent.",
+		),
+	force: z
+		.boolean()
+		.optional()
+		.describe(
+			"Replace existing output files; without it an occupied path refuses the batch.",
+		),
+	mkdir: z.boolean().optional().describe("Create missing parent directories."),
+};
+
 export const NEW_MCP_TOOL_NAMES = ["optimize_asset", "model_asset"] as const;
 export type OptimizeAssetInput = z.infer<
 	z.ZodObject<typeof optimizeAssetInput>
@@ -747,11 +822,15 @@ export type ParticleAssetInput = z.infer<
 export type FontAssetInput = z.infer<
 	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.font_asset>
 >;
+export type EquipmentAssetInput = z.infer<
+	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.equipment_asset>
+>;
 
 export const TOOL_INPUT_SCHEMAS = {
 	optimize_asset: optimizeAssetInput,
 	model_asset: modelAssetInput,
 	entity_asset: entityAssetInput,
+	equipment_asset: equipmentAssetInput,
 	mcmeta_asset: mcmetaAssetInput,
 	particle_asset: particleAssetInput,
 	compare_assets: compareAssetsInput,

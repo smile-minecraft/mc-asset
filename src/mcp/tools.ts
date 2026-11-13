@@ -7,7 +7,7 @@ export interface McpToolDefinition {
 }
 
 /**
- * Frozen tool surface: the thirty names in `MCP_TOOL_NAMES`, each with
+ * Frozen tool surface: the thirty-one names in `MCP_TOOL_NAMES`, each with
  * its final description and input schema. Descriptions state the read/write
  * contract so agents pick batch or grid paths instead of per-pixel calls.
  */
@@ -191,5 +191,11 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 		description:
 			"Inspect a Minecraft box-UV entity layout, write a template PNG and/or an editable .mcpx with one named region per face (optionally face-colored), or validate a texture's size and report non-transparent pixels outside every face. Builtin player wide/slim layouts plus caller-supplied layout documents; reads only except template outputs.",
 		inputSchema: TOOL_INPUT_SCHEMAS.entity_asset,
+	},
+	{
+		name: "equipment_asset",
+		description:
+			"Generate an equipment definition (assets/<namespace>/models/equipment/<id>.json at pack format 42.0, assets/<namespace>/equipment/<id>.json from 46.0) plus one 64x32 armor or elytra texture template per layer entry at assets/<namespace>/textures/entity/equipment/<layer type>/<texture>.png. Layer types are checked against the target version's client enum, entries may be dyeable or use the player texture, and only humanoid, humanoid_leggings and wings have a verified texture layout (template false writes the definition alone). Every target is checked before the first write, an occupied path refuses the whole batch unless force is true, and without outputDir the definition text and each template embed instead.",
+		inputSchema: TOOL_INPUT_SCHEMAS.equipment_asset,
 	},
 ];

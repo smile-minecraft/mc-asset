@@ -11,6 +11,7 @@ import {
 	handleCompareAssets,
 	handleCreateVariants,
 	handleEntityAsset,
+	handleEquipmentAsset,
 	handleFontAsset,
 	handleGenerateAsset,
 	handleImportAsset,
@@ -294,6 +295,14 @@ export function createMcpServer(): McpServer {
 			inputSchema: TOOL_INPUT_SCHEMAS.entity_asset,
 		},
 		handleEntityAsset,
+	);
+	server.registerTool(
+		"equipment_asset",
+		{
+			description: toolDescription("equipment_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.equipment_asset,
+		},
+		handleEquipmentAsset,
 	);
 	return server;
 }
