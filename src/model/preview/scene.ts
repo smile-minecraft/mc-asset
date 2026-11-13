@@ -1,5 +1,6 @@
 import {
 	applyMat3,
+	blendFragment,
 	createRasterTarget,
 	divRound,
 	type FixedVec3,
@@ -11,8 +12,10 @@ import {
 	projectOrthographic,
 	type RasterSource,
 	type RasterVertex,
+	type RgbaColor,
 	type RgbaTexture,
 	rasterizeQuad,
+	rasterizeQuadFragments,
 	rotationMatrix,
 	SUBPIXEL,
 	TRIG_ONE,
@@ -51,10 +54,17 @@ import type {
  *
  * Opaque faces are drawn first in document order (element order, then
  * DIRECTIONS order) and win depth ties like the three-view compatibility
- * renderer. Partially transparent faces are collected separately and drawn
- * from far to near with integer straight-alpha blending, after every opaque
- * face, because the rasteriser advances the depth buffer for blended
- * fragments.
+ * renderer. Partially transparent faces never touch the depth buffer: every
+ * translucent fragment is collected, depth-tested only against the opaque
+ * result, and composed into its pixel from far to near with integer
+ * straight-alpha blending once every opaque face has been drawn. The
+ * ordering at one pixel carries a second key that does not depend on the
+ * document order of the elements (the sampled colour), so swapping the
+ * `elements` array cannot change a single output byte when two translucent
+ * faces are exactly coplanar. When the projected content does not fit its
+ * panel at the smallest supported scale (one pixel per model unit), the panel
+ * is reported as clipped in `skipped` instead of drawing a silently cut image
+ * and calling it complete.
  *
  * All coordinates stay integer: corners are in 1/256 model units, the
  * projection and viewport rounding come from `src/model/geometry/`, and the
@@ -98,7 +108,6 @@ type ElementRotation = NonNullable<ModelElementView["rotation"]>;
 type RotationAxis = "x" | "y" | "z";
 
 interface ElementBox {
-	readonly index: number;
 	readonly element: ModelElementView;
 	/** Element box before rotation, in 1/256 model units. */
 	readonly localMin: FixedVec3;
@@ -109,15 +118,43 @@ interface ElementBox {
 }
 
 interface SceneFace {
-	readonly elementIndex: number;
 	readonly face: Direction;
-	readonly faceOrder: number;
 	readonly corners: readonly FixedVec3[];
 	/** Texture coordinates in model UV units (0..16), one per corner. */
 	readonly texCoords: readonly (readonly [number, number])[];
 	/** Undefined means the fixed checkerboard. */
 	readonly texture: DecodedTexture | undefined;
 	readonly translucent: boolean;
+}
+
+/** One translucent fragment: the pixel it covers, its depth and sampled colour. */
+interface TranslucentFragment {
+	readonly pixel: number;
+	readonly depth: number;
+	readonly color: RgbaColor;
+}
+
+/**
+ * Far to near at every pixel, so the nearest fragment is composed last.
+ *
+ * The depth is the primary key and larger means nearer, so ascending depth is
+ * far to near. Two fragments at exactly the same depth need an order that does
+ * not depend on where their face sits in `elements`: a coplanar pair has no
+ * physical order, so the sampled colour breaks the tie. That keeps the output
+ * byte-identical when a caller swaps the elements.
+ */
+function compareFragments(
+	a: TranslucentFragment,
+	b: TranslucentFragment,
+): number {
+	return (
+		a.pixel - b.pixel ||
+		a.depth - b.depth ||
+		a.color[0] - b.color[0] ||
+		a.color[1] - b.color[1] ||
+		a.color[2] - b.color[2] ||
+		a.color[3] - b.color[3]
+	);
 }
 
 function fixedPoint(value: number): number {
@@ -457,7 +494,6 @@ export async function renderPreviewScene(
 			transformPoint(corner, matrix, origin),
 		);
 		boxes.push({
-			index: entry.index,
 			element: entry.element,
 			localMin: entry.min,
 			localMax: entry.max,
@@ -489,7 +525,7 @@ export async function renderPreviewScene(
 			(box.localMax[1] as number) / UNIT,
 			(box.localMax[2] as number) / UNIT,
 		];
-		for (const [faceOrder, face] of DIRECTIONS.entries()) {
+		for (const face of DIRECTIONS) {
 			const faceView = element.faces.find((entry) => entry.face === face);
 			if (faceView === undefined) continue;
 			const uv =
@@ -544,9 +580,7 @@ export async function renderPreviewScene(
 			const translucent =
 				options.isForceTranslucent(faceView) || texture?.translucent === true;
 			faces.push({
-				elementIndex: box.index,
 				face,
-				faceOrder,
 				corners: corners.map((corner) => corner.point),
 				texCoords: corners.map((corner) => {
 					const [fu, fv] = rotateFaceCoords(corner.fu, corner.fv, rotation);
@@ -620,6 +654,17 @@ export async function renderPreviewScene(
 		);
 		const offsetX = Math.floor((size * SUBPIXEL - spanX) / 2);
 		const offsetY = Math.floor((size * SUBPIXEL - spanY) / 2);
+		// The scale never drops below the one-pixel-per-unit floor, so a large
+		// model can project wider than its panel. Say so instead of drawing the
+		// cut image and reporting complete coverage.
+		if (spanX > size * SUBPIXEL || spanY > size * SUBPIXEL) {
+			addSkip(
+				"content",
+				"clipped",
+				panel.name,
+				`projected content spans ${Math.ceil(spanX / SUBPIXEL)}x${Math.ceil(spanY / SUBPIXEL)} px, the panel is ${size}x${size} px`,
+			);
+		}
 		const viewport = {
 			scale,
 			offsetX,
@@ -631,12 +676,8 @@ export async function renderPreviewScene(
 			face: SceneFace,
 			boundsMinX: number,
 			boundsMinY: number,
-		): {
-			readonly vertices: readonly RasterVertex[];
-			readonly depth: number;
-		} => {
-			let depthSum = 0;
-			const vertices = face.corners.map((corner, index) => {
+		): readonly RasterVertex[] =>
+			face.corners.map((corner, index) => {
 				const point = project(corner);
 				const sub = toSubpixel(
 					{
@@ -646,7 +687,6 @@ export async function renderPreviewScene(
 					},
 					viewport,
 				);
-				depthSum += sub.z;
 				const texCoord = face.texCoords[index] as readonly [number, number];
 				const u =
 					face.texture === undefined
@@ -658,61 +698,61 @@ export async function renderPreviewScene(
 						: Math.round(texCoord[1] * face.texture.height * 16);
 				return { x: sub.x, y: sub.y, z: sub.z, u, v };
 			});
-			return { vertices, depth: divRound(depthSum, 4) };
-		};
 
-		const draw = (
-			face: SceneFace,
-			vertices: readonly RasterVertex[],
-			blend: "replace" | "alpha",
-		): void => {
-			const source: RasterSource =
-				face.texture === undefined
-					? { texture: checkerFor() }
-					: { texture: face.texture };
+		const sourceOf = (face: SceneFace): RasterSource =>
+			face.texture === undefined
+				? { texture: checkerFor() }
+				: { texture: face.texture };
+
+		for (const face of faces) {
+			if (face.translucent) continue;
+			const vertices = verticesOf(
+				face,
+				bounds.min[0] as number,
+				bounds.min[1] as number,
+			);
 			rasterizeQuad(
 				target,
 				vertices[0] as RasterVertex,
 				vertices[1] as RasterVertex,
 				vertices[2] as RasterVertex,
 				vertices[3] as RasterVertex,
-				source,
-				{ blend },
+				sourceOf(face),
 			);
-		};
-
-		for (const face of faces) {
-			if (face.translucent) continue;
-			const { vertices } = verticesOf(
-				face,
-				bounds.min[0] as number,
-				bounds.min[1] as number,
-			);
-			draw(face, vertices, "replace");
 		}
 
-		const translucentFaces: {
-			readonly face: SceneFace;
-			readonly vertices: readonly RasterVertex[];
-			readonly depth: number;
-		}[] = [];
+		// Translucent faces are collected, not drawn: two overlapping planes can
+		// change their visible order from pixel to pixel, so the far-to-near
+		// order has to be decided per fragment. The depth test only keeps a
+		// fragment that is not hidden behind an opaque one; a translucent
+		// fragment never writes the depth buffer, so it cannot hide another
+		// translucent face.
+		const fragments: TranslucentFragment[] = [];
+		const opaqueDepth = target.depth;
 		for (const face of faces) {
 			if (!face.translucent) continue;
-			const { vertices, depth } = verticesOf(
+			const vertices = verticesOf(
 				face,
 				bounds.min[0] as number,
 				bounds.min[1] as number,
 			);
-			translucentFaces.push({ face, vertices, depth });
+			rasterizeQuadFragments(
+				size,
+				size,
+				vertices[0] as RasterVertex,
+				vertices[1] as RasterVertex,
+				vertices[2] as RasterVertex,
+				vertices[3] as RasterVertex,
+				sourceOf(face),
+				(pixel, depth, color) => {
+					if (depth < (opaqueDepth[pixel] as number)) return;
+					fragments.push({ pixel, depth, color });
+				},
+			);
 		}
-		translucentFaces.sort(
-			(a, b) =>
-				a.depth - b.depth ||
-				a.face.elementIndex - b.face.elementIndex ||
-				a.face.faceOrder - b.face.faceOrder,
-		);
-		for (const entry of translucentFaces) {
-			draw(entry.face, entry.vertices, "alpha");
+		fragments.sort(compareFragments);
+		for (const fragment of fragments) {
+			blendFragment(target, fragment.pixel, fragment.color);
 		}
 
 		for (let y = 0; y < size; y += 1) {

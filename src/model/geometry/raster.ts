@@ -22,10 +22,12 @@ import { divRound, SUBPIXEL } from "./fixed.ts";
  * transparent fragment cannot hide what is behind it.
  *
  * `blend: "alpha"` does not change the depth rule: a blended fragment still
- * advances the depth buffer for the pixels it covers. Callers must therefore
- * draw opaque geometry first and translucent geometry afterwards, ordered
- * from far to near; a translucent fragment drawn before an opaque surface
- * behind it stores its own depth and hides that surface from the z-buffer.
+ * advances the depth buffer for the pixels it covers. Callers that composite
+ * overlapping translucent surfaces should collect fragments with
+ * {@link rasterizeQuadFragments} instead and blend them per pixel, because
+ * the visible order of two overlapping planes can differ from pixel to
+ * pixel; a fragment collected this way is depth-tested against the target's
+ * current (opaque) depth only, never against other translucent fragments.
  *
  * Texture sampling is nearest neighbour with clamp-to-edge wrapping; out of
  * range coordinates clamp. Coordinates on the screen are expected to stay
@@ -219,6 +221,119 @@ function sample(source: RasterSource, u: number, v: number): RgbaColor {
 	return source.color;
 }
 
+export type FragmentSink = (
+	pixelIndex: number,
+	depth: number,
+	color: RgbaColor,
+) => void;
+
+/**
+ * The scan loop shared by the drawing and the collecting entry points. It
+ * decides coverage, interpolates u, v and depth for each covered pixel and
+ * drops fully transparent fragments; the sink decides what happens to the
+ * surviving fragment.
+ */
+function scanTriangle(
+	width: number,
+	height: number,
+	a: RasterVertex,
+	b: RasterVertex,
+	c: RasterVertex,
+	source: RasterSource,
+	cutout: boolean,
+	sink: FragmentSink,
+): void {
+	let triB = b;
+	let triC = c;
+	let area = edgeFunction(a.x, a.y, triB.x, triB.y, triC.x, triC.y);
+	if (area < 0) {
+		const swapped = triB;
+		triB = triC;
+		triC = swapped;
+		area = -area;
+	}
+	if (area === 0) return;
+
+	const minX = Math.floor(Math.min(a.x, triB.x, triC.x) / SUBPIXEL);
+	const maxX = Math.floor((Math.max(a.x, triB.x, triC.x) - 1) / SUBPIXEL);
+	const minY = Math.floor(Math.min(a.y, triB.y, triC.y) / SUBPIXEL);
+	const maxY = Math.floor((Math.max(a.y, triB.y, triC.y) - 1) / SUBPIXEL);
+	if (width <= 0 || height <= 0) return;
+	const useBigInt = area > BIGINT_AREA_LIMIT;
+	const bigArea = useBigInt ? BigInt(area) : 0n;
+	const left = Math.max(0, minX);
+	const right = Math.min(width - 1, maxX);
+	const top = Math.max(0, minY);
+	const bottom = Math.min(height - 1, maxY);
+
+	const ab = { dx: triB.x - a.x, dy: triB.y - a.y };
+	const bc = { dx: triC.x - triB.x, dy: triC.y - triB.y };
+	const ca = { dx: a.x - triC.x, dy: a.y - triC.y };
+	const includeAb = isTopLeftEdge(ab.dx, ab.dy);
+	const includeBc = isTopLeftEdge(bc.dx, bc.dy);
+	const includeCa = isTopLeftEdge(ca.dx, ca.dy);
+
+	for (let py = top; py <= bottom; py += 1) {
+		const centerY = py * SUBPIXEL + SUBPIXEL / 2;
+		for (let px = left; px <= right; px += 1) {
+			const centerX = px * SUBPIXEL + SUBPIXEL / 2;
+			const weightA = edgeFunction(
+				triB.x,
+				triB.y,
+				triC.x,
+				triC.y,
+				centerX,
+				centerY,
+			);
+			const weightB = edgeFunction(triC.x, triC.y, a.x, a.y, centerX, centerY);
+			const weightC = edgeFunction(a.x, a.y, triB.x, triB.y, centerX, centerY);
+			if (weightA < 0 || weightB < 0 || weightC < 0) continue;
+			if (weightA === 0 && !includeBc) continue;
+			if (weightB === 0 && !includeCa) continue;
+			if (weightC === 0 && !includeAb) continue;
+
+			let u: number;
+			let v: number;
+			let depth: number;
+			if (useBigInt) {
+				const weightABig = BigInt(weightA);
+				const weightBBig = BigInt(weightB);
+				const weightCBig = BigInt(weightC);
+				u = divRoundBigInt(
+					weightABig * BigInt(a.u) +
+						weightBBig * BigInt(triB.u) +
+						weightCBig * BigInt(triC.u),
+					bigArea,
+				);
+				v = divRoundBigInt(
+					weightABig * BigInt(a.v) +
+						weightBBig * BigInt(triB.v) +
+						weightCBig * BigInt(triC.v),
+					bigArea,
+				);
+				depth = divRoundBigInt(
+					weightABig * BigInt(a.z) +
+						weightBBig * BigInt(triB.z) +
+						weightCBig * BigInt(triC.z),
+					bigArea,
+				);
+			} else {
+				u = divRound(weightA * a.u + weightB * triB.u + weightC * triC.u, area);
+				v = divRound(weightA * a.v + weightB * triB.v + weightC * triC.v, area);
+				depth = divRound(
+					weightA * a.z + weightB * triB.z + weightC * triC.z,
+					area,
+				);
+			}
+
+			const fragment = sample(source, u, v);
+			if (cutout && fragment[3] === 0) continue;
+
+			sink(py * width + px, depth, fragment);
+		}
+	}
+}
+
 /**
  * Rasterise one triangle. Vertices are not expected to be pre-ordered; the
  * winding is normalised to a positive area before coverage is decided.
@@ -234,90 +349,55 @@ export function rasterizeTriangle(
 	const cutout = options?.cutout ?? true;
 	const blend = options?.blend ?? "replace";
 
-	const a = vertexA;
-	let b = vertexB;
-	let c = vertexC;
-	let area = edgeFunction(a.x, a.y, b.x, b.y, c.x, c.y);
-	if (area < 0) {
-		const swapped = b;
-		b = c;
-		c = swapped;
-		area = -area;
-	}
-	if (area === 0) return;
-
-	const minX = Math.floor(Math.min(a.x, b.x, c.x) / SUBPIXEL);
-	const maxX = Math.floor((Math.max(a.x, b.x, c.x) - 1) / SUBPIXEL);
-	const minY = Math.floor(Math.min(a.y, b.y, c.y) / SUBPIXEL);
-	const maxY = Math.floor((Math.max(a.y, b.y, c.y) - 1) / SUBPIXEL);
-	if (target.width <= 0 || target.height <= 0) return;
-	const useBigInt = area > BIGINT_AREA_LIMIT;
-	const bigArea = useBigInt ? BigInt(area) : 0n;
-	const left = Math.max(0, minX);
-	const right = Math.min(target.width - 1, maxX);
-	const top = Math.max(0, minY);
-	const bottom = Math.min(target.height - 1, maxY);
-
-	const ab = { dx: b.x - a.x, dy: b.y - a.y };
-	const bc = { dx: c.x - b.x, dy: c.y - b.y };
-	const ca = { dx: a.x - c.x, dy: a.y - c.y };
-	const includeAb = isTopLeftEdge(ab.dx, ab.dy);
-	const includeBc = isTopLeftEdge(bc.dx, bc.dy);
-	const includeCa = isTopLeftEdge(ca.dx, ca.dy);
-
-	for (let py = top; py <= bottom; py += 1) {
-		const centerY = py * SUBPIXEL + SUBPIXEL / 2;
-		for (let px = left; px <= right; px += 1) {
-			const centerX = px * SUBPIXEL + SUBPIXEL / 2;
-			const weightA = edgeFunction(b.x, b.y, c.x, c.y, centerX, centerY);
-			const weightB = edgeFunction(c.x, c.y, a.x, a.y, centerX, centerY);
-			const weightC = edgeFunction(a.x, a.y, b.x, b.y, centerX, centerY);
-			if (weightA < 0 || weightB < 0 || weightC < 0) continue;
-			if (weightA === 0 && !includeBc) continue;
-			if (weightB === 0 && !includeCa) continue;
-			if (weightC === 0 && !includeAb) continue;
-
-			let u: number;
-			let v: number;
-			let depth: number;
-			if (useBigInt) {
-				const weightABig = BigInt(weightA);
-				const weightBBig = BigInt(weightB);
-				const weightCBig = BigInt(weightC);
-				u = divRoundBigInt(
-					weightABig * BigInt(a.u) +
-						weightBBig * BigInt(b.u) +
-						weightCBig * BigInt(c.u),
-					bigArea,
-				);
-				v = divRoundBigInt(
-					weightABig * BigInt(a.v) +
-						weightBBig * BigInt(b.v) +
-						weightCBig * BigInt(c.v),
-					bigArea,
-				);
-				depth = divRoundBigInt(
-					weightABig * BigInt(a.z) +
-						weightBBig * BigInt(b.z) +
-						weightCBig * BigInt(c.z),
-					bigArea,
-				);
-			} else {
-				u = divRound(weightA * a.u + weightB * b.u + weightC * c.u, area);
-				v = divRound(weightA * a.v + weightB * b.v + weightC * c.v, area);
-				depth = divRound(weightA * a.z + weightB * b.z + weightC * c.z, area);
-			}
-
-			const fragment = sample(source, u, v);
-			if (cutout && fragment[3] === 0) continue;
-
-			const pixelIndex = py * target.width + px;
+	scanTriangle(
+		target.width,
+		target.height,
+		vertexA,
+		vertexB,
+		vertexC,
+		source,
+		cutout,
+		(pixelIndex, depth, fragment) => {
 			const stored = target.depth[pixelIndex] as number;
-			if (depth < stored) continue;
+			if (depth < stored) return;
 			target.depth[pixelIndex] = depth;
 			writeFragment(target, pixelIndex, fragment, blend);
-		}
-	}
+		},
+	);
+}
+
+/**
+ * Rasterise a quad into a fragment sink instead of the target: coverage,
+ * interpolation and the cutout of alpha-zero fragments match
+ * {@link rasterizeQuad}, but nothing is depth-tested and nothing is written,
+ * so the caller can compose the whole translucent pass per pixel.
+ */
+export function rasterizeQuadFragments(
+	width: number,
+	height: number,
+	a: RasterVertex,
+	b: RasterVertex,
+	c: RasterVertex,
+	d: RasterVertex,
+	source: RasterSource,
+	sink: FragmentSink,
+	options?: Pick<RasterOptions, "cutout">,
+): void {
+	const cutout = options?.cutout ?? true;
+	scanTriangle(width, height, a, b, c, source, cutout, sink);
+	scanTriangle(width, height, a, c, d, source, cutout, sink);
+}
+
+/**
+ * Composite one fragment over the pixel already in `target` with integer
+ * straight-alpha src-over, leaving the depth buffer untouched.
+ */
+export function blendFragment(
+	target: RasterTarget,
+	pixelIndex: number,
+	fragment: RgbaColor,
+): void {
+	writeFragment(target, pixelIndex, fragment, "alpha");
 }
 
 /**

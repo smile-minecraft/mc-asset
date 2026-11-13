@@ -44,25 +44,127 @@ export function hasTranslucentAlpha(pixels: Uint8Array): boolean {
 	return false;
 }
 
-export function clampToEdge(value: number): number {
-	if (value < 0) return 0;
-	if (value > 16) return 16;
-	return value;
+/** Model UV values are kept as integers in 1/256 model units, like model coordinates. */
+const UV_SCALE = 256;
+/** One texture repeat along an axis: 16 model units. */
+const UV_LIMIT = 16 * UV_SCALE;
+
+/** One face's UV rectangle (1/256 model units), pixel size and face rotation. */
+export interface FaceRectangle {
+	readonly u1: number;
+	readonly v1: number;
+	readonly u2: number;
+	readonly v2: number;
+	/** Width of the drawn face rectangle in pixels. */
+	readonly width: number;
+	/** Height of the drawn face rectangle in pixels. */
+	readonly height: number;
+	readonly rotation: FaceRotation;
 }
 
-export function sampleTexture(
+/** Build a {@link FaceRectangle}, quantizing the model UVs to 1/256 model units. */
+export function faceRectangle(
+	uv: readonly [number, number, number, number],
+	width: number,
+	height: number,
+	rotation: FaceRotation,
+): FaceRectangle {
+	return {
+		u1: Math.round(uv[0] * UV_SCALE),
+		v1: Math.round(uv[1] * UV_SCALE),
+		u2: Math.round(uv[2] * UV_SCALE),
+		v2: Math.round(uv[3] * UV_SCALE),
+		width,
+		height,
+		rotation,
+	};
+}
+
+/** Which sample axis a face rotation reads, and whether it reads it backwards. */
+const FACE_ROTATION_AXES: Record<
+	FaceRotation,
+	{
+		readonly uFromV: boolean;
+		readonly uFlip: boolean;
+		readonly vFromU: boolean;
+		readonly vFlip: boolean;
+	}
+> = {
+	0: { uFromV: false, uFlip: false, vFromU: false, vFlip: false },
+	90: { uFromV: true, uFlip: false, vFromU: true, vFlip: true },
+	180: { uFromV: false, uFlip: true, vFromU: false, vFlip: true },
+	270: { uFromV: true, uFlip: true, vFromU: true, vFlip: false },
+};
+
+export function rotateFaceCoords(
+	fx: number,
+	fy: number,
+	rotation: FaceRotation,
+): readonly [number, number] {
+	const axes = FACE_ROTATION_AXES[rotation];
+	const su = axes.uFromV ? fy : fx;
+	const sv = axes.vFromU ? fx : fy;
+	return [axes.uFlip ? 1 - su : su, axes.vFlip ? 1 - sv : sv];
+}
+
+/**
+ * The texel index for one axis: `floor(clamp(u) * texels / 16)` where `u` is
+ * the exact fraction `(origin + span * num / den) / 256`. All integers; the
+ * quotient stays below 4096 and its denominator below 2**21, so the division
+ * is exact in double precision. A position outside [0, 16] clamps to the
+ * texture edge.
+ */
+function texelIndex(
+	origin: number,
+	span: number,
+	num: number,
+	den: number,
+	texels: number,
+): number {
+	let fixed = origin * den + span * num;
+	const limit = UV_LIMIT * den;
+	if (fixed < 0) fixed = 0;
+	else if (fixed > limit) fixed = limit;
+	const index = Math.floor((fixed * texels) / (den * UV_LIMIT));
+	return index < texels ? index : texels - 1;
+}
+
+/**
+ * Nearest-texel sample at the centre of one pixel of a textured face, using
+ * only integer arithmetic. The pixel centre is the exact fraction
+ * `(2x + 1) / (2 * width)` across the face, the face rotation permutes the
+ * two axes, and the resulting texture position picks a texel with
+ * {@link texelIndex}. `x` and `y` are offsets inside the face rectangle.
+ */
+export function sampleFacePixel(
 	decoded: DecodedTexture,
-	u: number,
-	v: number,
+	face: FaceRectangle,
+	x: number,
+	y: number,
 ): readonly [number, number, number, number] {
-	const cu = clampToEdge(u);
-	const cv = clampToEdge(v);
-	let tx = Math.floor((cu * decoded.width) / 16);
-	let ty = Math.floor((cv * decoded.height) / 16);
-	if (tx < 0) tx = 0;
-	if (ty < 0) ty = 0;
-	if (tx >= decoded.width) tx = decoded.width - 1;
-	if (ty >= decoded.height) ty = decoded.height - 1;
+	const uNum = 2 * x + 1;
+	const uDen = 2 * face.width;
+	const vNum = 2 * y + 1;
+	const vDen = 2 * face.height;
+	const axes = FACE_ROTATION_AXES[face.rotation];
+	const suNum = axes.uFromV ? vNum : uNum;
+	const suDen = axes.uFromV ? vDen : uDen;
+	const svNum = axes.vFromU ? uNum : vNum;
+	const svDen = axes.vFromU ? uDen : vDen;
+	const tx = texelIndex(
+		face.u1,
+		face.u2 - face.u1,
+		axes.uFlip ? suDen - suNum : suNum,
+		suDen,
+		decoded.width,
+	);
+	const ty = texelIndex(
+		face.v1,
+		face.v2 - face.v1,
+		axes.vFlip ? svDen - svNum : svNum,
+		svDen,
+		decoded.height,
+	);
 	const o = (ty * decoded.width + tx) * 4;
 	return [
 		decoded.pixels[o] as number,
@@ -70,17 +172,6 @@ export function sampleTexture(
 		decoded.pixels[o + 2] as number,
 		decoded.pixels[o + 3] as number,
 	];
-}
-
-export function rotateFaceCoords(
-	fx: number,
-	fy: number,
-	rotation: FaceRotation,
-): readonly [number, number] {
-	if (rotation === 90) return [fy, 1 - fx];
-	if (rotation === 180) return [1 - fx, 1 - fy];
-	if (rotation === 270) return [1 - fy, fx];
-	return [fx, fy];
 }
 
 /**

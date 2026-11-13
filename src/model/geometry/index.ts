@@ -19,6 +19,7 @@ export {
 	toSubpixel,
 } from "./projection.ts";
 export type {
+	FragmentSink,
 	RasterOptions,
 	RasterSource,
 	RasterTarget,
@@ -27,9 +28,11 @@ export type {
 	RgbaTexture,
 } from "./raster.ts";
 export {
+	blendFragment,
 	createRasterTarget,
 	DEPTH_EMPTY,
 	rasterizeQuad,
+	rasterizeQuadFragments,
 	rasterizeTriangle,
 } from "./raster.ts";
 export type { RotationAxis } from "./rotation.ts";

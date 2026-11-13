@@ -16,9 +16,9 @@ import {
 	autoUv,
 	checkerColor,
 	type DecodedTexture,
+	faceRectangle,
 	hasTranslucentAlpha,
-	rotateFaceCoords,
-	sampleTexture,
+	sampleFacePixel,
 } from "./pixels.ts";
 import { renderPreviewScene } from "./scene.ts";
 import type {
@@ -61,22 +61,27 @@ export type {
  * without `uv` uses the vanilla auto-UV of its element position, values outside
  * [0, 16] clamp to the texture edge, face `rotation` permutes the sampled
  * texture, and an unresolvable texture fills its rectangle with the fixed
- * checkerboard (8 px cells, magenta first, anchored at the image origin).
+ * checkerboard (8 px cells, magenta first, anchored at the image origin). Every
+ * sample position and texel index is integer arithmetic on the 1/256 model
+ * grid, so no floating-point rounding can drift between runs.
  *
  * Everything else goes through the geometry renderer in `scene.ts`: element
  * rotation (axis/angle with `rescale`, or the x / y / z form) is applied around
  * `origin`, all six faces of every cuboid are projected with the integer
- * geometry core, and partially transparent faces are blended from far to near
- * after the opaque pass. Without a `view` option the geometry renderer also
- * produces the three-view layout, so a rotated element shows up in all three
- * panels; with `view: { kind: "isometric" }` it renders one square 2:1
- * isometric panel for the requested camera direction.
+ * geometry core, and partially transparent faces are composed after the opaque
+ * pass, per pixel, from far to near. Without a `view` option the geometry
+ * renderer also produces the three-view layout, so a rotated element shows up
+ * in all three panels; with `view: { kind: "isometric" }` it renders one square
+ * 2:1 isometric panel for the requested camera direction.
  *
  * The report stays honest: anything not faithfully rendered is listed in
- * `coverage.skipped`, every texture problem also raises a warning, and
- * `unapplied` always states that display transforms and game lighting are not
- * applied (plus `tintindex` when the model uses it). This is a diagnostic
- * view, not a game renderer, and it never rewrites the model.
+ * `coverage.skipped` (including a panel the content is clipped by), every
+ * texture problem also raises a warning, and `unapplied` states that display
+ * transforms and game lighting are not applied. The geometry renderer adds
+ * `tintindex` when the model uses it; the compatibility renderer keeps its
+ * historical `display` / `lighting` list so its reports stay byte-identical.
+ * This is a diagnostic view, not a game renderer, and it never rewrites the
+ * model.
  */
 
 function isSupportedSize(value: unknown): value is ModelPreviewSize {
@@ -130,7 +135,7 @@ function addPreviewWarning(
 	warnings.push({ code, level: "warning", message, target });
 }
 
-/** The unapplied steps every preview has, plus tintindex when the model uses it. */
+/** The unapplied steps the geometry renderer has, plus tintindex when the model uses it. */
 function unappliedSteps(faces: readonly ModelFaceView[]): string[] {
 	const steps = ["display", "lighting"];
 	if (faces.some((face) => face.tintindex !== undefined)) {
@@ -335,7 +340,12 @@ export async function renderModelPreview(
 	}
 
 	const allFaces = inspection.elements.flatMap((element) => element.faces);
-	const unapplied = unappliedSteps(allFaces);
+	// The compatibility renderer keeps its historical report, byte for byte:
+	// `tintindex` is only listed when the geometry renderer runs, which is the
+	// path a new view, a rotated element or a visible translucent face takes.
+	const unapplied = needsGeometry
+		? unappliedSteps(allFaces)
+		: ["display", "lighting"];
 
 	let image: { readonly width: number; readonly height: number };
 	let panels: readonly ModelPreviewPanel[];
@@ -629,6 +639,9 @@ export async function renderModelPreview(
 					Math.max(localY0, localY1) - Math.min(localY0, localY1) + 1;
 				const rectMinX = Math.min(localX0, localX1);
 				const rectMinY = Math.min(localY0, localY1);
+				const rect = useChecker
+					? undefined
+					: faceRectangle([u1, v1, u2, v2], rectW, rectH, rotation);
 				const depthBuffer =
 					panelIndex === 0
 						? depthFront
@@ -644,18 +657,15 @@ export async function renderModelPreview(
 						const globalX = panelOriginX + lx;
 						const globalY = ly;
 						let rgba: readonly [number, number, number, number];
-						if (useChecker) {
+						if (rect === undefined) {
 							rgba = checkerColor(globalX, globalY);
 						} else {
-							const decoded = decodedTextureResult as DecodedTexture;
-							const u = lx - rectMinX;
-							const v = ly - rectMinY;
-							const fx = (u + 0.5) / rectW;
-							const fy = (v + 0.5) / rectH;
-							const [tx, ty] = rotateFaceCoords(fx, fy, rotation);
-							const sampleU = u1 + tx * (u2 - u1);
-							const sampleV = v1 + ty * (v2 - v1);
-							rgba = sampleTexture(decoded, sampleU, sampleV);
+							rgba = sampleFacePixel(
+								decodedTextureResult as DecodedTexture,
+								rect,
+								lx - rectMinX,
+								ly - rectMinY,
+							);
 						}
 						const o = (globalY * imageWidth + globalX) * 4;
 						flat[o] = rgba[0];

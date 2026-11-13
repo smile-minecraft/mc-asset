@@ -37,6 +37,8 @@ const YELLOW_REL = "assets/demo/textures/yellow.png";
 const MAGENTA_REL = "assets/demo/textures/magenta.png";
 const CYAN_REL = "assets/demo/textures/cyan.png";
 const MIX_REL = "assets/demo/textures/mix.png";
+const BLACK_REL = "assets/demo/textures/black.png";
+const GRAY_REL = "assets/demo/textures/gray.png";
 const PARENT_REL = "assets/demo/models/block/base.json";
 
 const RED: readonly [number, number, number, number] = [255, 0, 0, 255];
@@ -327,6 +329,45 @@ function coloredCubeContext(): ModelResolutionContext {
 		[YELLOW_REL]: solidPng(255, 255, 0),
 		[MAGENTA_REL]: solidPng(255, 0, 255),
 		[CYAN_REL]: solidPng(0, 255, 255),
+	});
+}
+
+/** One `north`-only element: a plane whose depth is its `from` z. */
+function northPlane(
+	from: readonly number[],
+	to: readonly number[],
+	texture: string,
+	rotation?: Record<string, unknown>,
+): Record<string, unknown> {
+	return {
+		from,
+		to,
+		...(rotation === undefined ? {} : { rotation }),
+		faces: { north: { texture } },
+	};
+}
+
+/** The translucent scenario: an opaque black backdrop, a grey backdrop and half-transparent planes. */
+function translucentContext(): ModelResolutionContext {
+	return memoryContext({
+		[BLACK_REL]: solidPng(0, 0, 0),
+		[GRAY_REL]: solidPng(64, 64, 64),
+		[RED_REL]: solidPng(255, 0, 0, 128),
+		[GREEN_REL]: solidPng(0, 255, 0, 128),
+		[BLUE_REL]: solidPng(0, 0, 255, 128),
+	});
+}
+
+function translucentModel(elements: readonly unknown[]): string {
+	return JSON.stringify({
+		textures: {
+			black: "demo:black",
+			gray: "demo:gray",
+			red: "demo:red",
+			green: "demo:green",
+			blue: "demo:blue",
+		},
+		elements,
 	});
 }
 
@@ -943,6 +984,148 @@ export const PREVIEW_CASES: ModelCase[] = [
 		},
 	},
 	{
+		name: "translucent planes keep their depth order per pixel",
+		async run(check) {
+			// An opaque black backdrop, a red plane at z = 8 and a blue plane
+			// turned 45 degrees about y that crosses z = 8 in the middle of the
+			// panel. Where the blue plane is nearer than the red one it must be
+			// composited last, and the other way round on the other side; a
+			// single far-to-near order for the whole face cannot do that.
+			const rendered = await renderModelPreview(
+				translucentModel([
+					northPlane([0, 0, 13], [16, 16, 16], "#black"),
+					northPlane([0, 0, 11], [16, 16, 12], "#green"),
+					northPlane([0, 0, 8], [16, 16, 9], "#red"),
+					northPlane([4, 0, 8], [12, 16, 8.5], "#blue", {
+						origin: [8, 8, 8.25],
+						axis: "y",
+						angle: 45,
+					}),
+				]),
+				{ path: PREVIEW_PATH, context: translucentContext(), size: 64 },
+			);
+			check.equal(rendered.report.coverage.status, "complete");
+			const { flat, width } = flatOf(rendered.png);
+			// Every plane is alpha 128 over the opaque backdrop, so each src-over
+			// step uses the weights 128 * 255 = 32640 for the source and
+			// 255 * 127 = 32385 for the destination over 65025:
+			//   green over black  = [0, 128, 0]
+			//   red over that     = [128, 64, 0]
+			//   blue over that    = [64, 32, 128]   (blue nearest)
+			//   red over the blue = [128, 32, 64]   (red nearest)
+			assertRgba(
+				check,
+				flat,
+				width,
+				30,
+				20,
+				[64, 32, 128, 255],
+				"near blue composited over far red",
+			);
+			assertRgba(
+				check,
+				flat,
+				width,
+				32,
+				32,
+				[128, 32, 64, 255],
+				"near red composited over far blue",
+			);
+			assertRgba(
+				check,
+				flat,
+				width,
+				10,
+				32,
+				[128, 64, 0, 255],
+				"red over green where the blue plane does not reach",
+			);
+		},
+	},
+	{
+		name: "swapping coplanar translucent elements keeps the pixels",
+		async run(check) {
+			// The red and blue planes are exactly coplanar, so their fragments tie
+			// on depth at every pixel. Only a second sort key that ignores the
+			// document order can keep both element orders byte-identical.
+			const elements = [
+				northPlane([0, 0, 10], [16, 16, 11], "#gray"),
+				northPlane([0, 0, 5], [16, 16, 6], "#red"),
+				northPlane([0, 0, 5], [16, 16, 6], "#blue"),
+			];
+			const forward = await renderModelPreview(translucentModel(elements), {
+				path: PREVIEW_PATH,
+				context: translucentContext(),
+				size: 64,
+			});
+			const reversed = await renderModelPreview(
+				translucentModel([...elements].reverse()),
+				{ path: PREVIEW_PATH, context: translucentContext(), size: 64 },
+			);
+			check.equal(
+				sha256(forward.png),
+				sha256(reversed.png),
+				"element order does not change the PNG",
+			);
+			check.equal(
+				sha256(JSON.stringify(forward.report)),
+				sha256(JSON.stringify(reversed.report)),
+				"element order does not change the report",
+			);
+			// Colour breaks the tie: blue (r = 0) is composited before red.
+			//   blue over grey = [32, 32, 160]
+			//   red over that  = [144, 16, 80]
+			const { flat, width } = flatOf(forward.png);
+			assertRgba(
+				check,
+				flat,
+				width,
+				32,
+				32,
+				[144, 16, 80, 255],
+				"both coplanar planes blended",
+			);
+		},
+	},
+	{
+		name: "three translucent layers blend from far to near",
+		async run(check) {
+			const elements = [
+				northPlane([0, 0, 14], [16, 16, 16], "#black"),
+				northPlane([0, 0, 12], [16, 16, 13], "#blue"),
+				northPlane([0, 0, 7], [16, 16, 8], "#green"),
+				northPlane([0, 0, 2], [16, 16, 3], "#red"),
+			];
+			const rendered = await renderModelPreview(translucentModel(elements), {
+				path: PREVIEW_PATH,
+				context: translucentContext(),
+				size: 64,
+			});
+			check.equal(rendered.report.coverage.status, "complete");
+			// blue over black = [0, 0, 128], green over that = [0, 128, 64],
+			// red over that = [128, 64, 32].
+			const { flat, width } = flatOf(rendered.png);
+			assertRgba(
+				check,
+				flat,
+				width,
+				32,
+				32,
+				[128, 64, 32, 255],
+				"three hand-computed layers",
+			);
+			const reversed = await renderModelPreview(
+				translucentModel([...elements].reverse()),
+				{ path: PREVIEW_PATH, context: translucentContext(), size: 64 },
+			);
+			check.equal(
+				sha256(rendered.png),
+				sha256(reversed.png),
+				"three layers do not depend on element order",
+			);
+		},
+	},
+	{
 		name: "size 128 centers the same cube with scale seven",
 		async run(check) {
 			const context = memoryContext({ [STONE_REL]: solidPng(255, 0, 0) });
@@ -1250,6 +1433,176 @@ export const PREVIEW_CASES: ModelCase[] = [
 					`${entry.name}: report stays byte-identical`,
 				);
 			}
+		},
+	},
+	{
+		name: "tintindex is listed only when the geometry renderer runs",
+		async run(check) {
+			const context = memoryContext({ [BLACK_REL]: solidPng(0, 0, 0) });
+			const text = JSON.stringify({
+				textures: { all: "demo:black" },
+				elements: [
+					{
+						from: [0, 0, 0],
+						to: [16, 16, 16],
+						faces: {
+							north: { texture: "#all", tintindex: 0 },
+							east: { texture: "#all" },
+							up: { texture: "#all" },
+						},
+					},
+				],
+			});
+			const threeView = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+			});
+			check.deepEqual(
+				[...threeView.report.unapplied],
+				["display", "lighting"],
+				"the compatibility renderer keeps its historical list",
+			);
+			// Both hashes were produced by 3e358c3, the release the compatibility
+			// renderer has to reproduce; `tintindex` never reached the report there.
+			check.equal(
+				sha256(threeView.png),
+				"cd21c5f6ac9aa06b8bf0e774064d5a48c2c2efcb6766a28aec36c17c0620832c",
+				"compatibility PNG stays byte-identical",
+			);
+			check.equal(
+				sha256(JSON.stringify(threeView.report)),
+				"e2eddba201867b7f960395d924c239f058f49363a94f75d502ff4dee3844cc99",
+				"compatibility report stays byte-identical",
+			);
+			const isometric = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				view: { kind: "isometric", direction: "south-east" },
+			});
+			check.deepEqual(
+				[...isometric.report.unapplied],
+				["display", "lighting", "tintindex"],
+				"the isometric view lists the tint it does not apply",
+			);
+			const rotated = await renderModelPreview(
+				JSON.stringify({
+					textures: { all: "demo:black" },
+					elements: [
+						{
+							from: [0, 0, 0],
+							to: [16, 16, 16],
+							rotation: { origin: [8, 8, 8], axis: "y", angle: 22.5 },
+							faces: { north: { texture: "#all", tintindex: 0 } },
+						},
+					],
+				}),
+				{ path: PREVIEW_PATH, context, size: 64 },
+			);
+			check.ok(
+				rotated.report.unapplied.includes("tintindex"),
+				"a rotated model lists the tint the geometry renderer does not apply",
+			);
+		},
+	},
+	{
+		name: "content that cannot fit the panel is reported as clipped",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 120, 60) });
+			// A 48 x 16 x 48 block turned 45 degrees about y and rescaled spans 96
+			// units, so a 64 px panel cannot hold it at the one-pixel-per-unit
+			// floor, while 128 px still can.
+			const text = JSON.stringify({
+				textures: { all: "demo:stone" },
+				elements: [
+					{
+						from: [0, 0, 0],
+						to: [48, 16, 48],
+						rotation: {
+							origin: [24, 8, 24],
+							axis: "y",
+							angle: 45,
+							rescale: true,
+						},
+						faces: {
+							north: { texture: "#all" },
+							east: { texture: "#all" },
+							up: { texture: "#all" },
+						},
+					},
+				],
+			});
+			const small = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+			});
+			check.equal(
+				small.report.coverage.status,
+				"partial",
+				"a clipped preview is not complete",
+			);
+			const clipped = small.report.coverage.skipped.filter(
+				(skip) => skip.kind === "content" && skip.reason === "clipped",
+			);
+			check.deepEqual(
+				clipped.map((skip) => skip.target),
+				["front", "right", "top"],
+				"every clipped panel is named",
+			);
+			check.equal(
+				clipped[0]?.detail,
+				"projected content spans 96x16 px, the panel is 64x64 px",
+				"the report says how far the content overflows",
+			);
+			const { flat, width } = flatOf(small.png);
+			const front = panelBox(flat, width, 0, 0, 63, 63);
+			check.deepEqual(
+				[front.minX, front.maxX],
+				[0, 63],
+				"the front panel really is cut at both sides",
+			);
+			const large = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 128,
+			});
+			check.equal(
+				large.report.coverage.status,
+				"complete",
+				"96 px of content fit a 128 px panel",
+			);
+			// The isometric scale bottoms out at one subpixel per unit, so a
+			// model thousands of units wide overflows that panel as well.
+			const huge = await renderModelPreview(
+				JSON.stringify({
+					textures: { all: "demo:stone" },
+					elements: [
+						{
+							from: [0, 0, 0],
+							to: [4000, 16, 16],
+							faces: { north: { texture: "#all" } },
+						},
+					],
+				}),
+				{
+					path: PREVIEW_PATH,
+					context,
+					size: 64,
+					view: { kind: "isometric", direction: "south-east" },
+				},
+			);
+			check.equal(huge.report.coverage.status, "partial");
+			check.ok(
+				huge.report.coverage.skipped.some(
+					(skip) =>
+						skip.kind === "content" &&
+						skip.reason === "clipped" &&
+						skip.target === "isometric",
+				),
+				"the isometric panel reports its clip",
+			);
 		},
 	},
 	{
