@@ -194,6 +194,25 @@ async function addSecondRecipe(projectDir: string): Promise<void> {
 	);
 }
 
+/** Write one more recipe file next to the demo recipe. */
+async function writeExtraRecipe(
+	projectDir: string,
+	fileName: string,
+	recipe: RecipeJson,
+): Promise<void> {
+	await writeFile(
+		join(projectDir, "recipes", fileName),
+		`${JSON.stringify(recipe, null, "\t")}\n`,
+		"utf8",
+	);
+}
+
+/** Change the demo recipe id, as a user renaming the recipe would. */
+async function renameRecipeId(projectDir: string, id: string): Promise<void> {
+	const recipe = await readRecipe(projectDir);
+	await writeRecipe(projectDir, { ...recipe, id });
+}
+
 async function walkFiles(directory: string): Promise<string[]> {
 	const found: string[] = [];
 	for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -604,6 +623,192 @@ export const DEMO_PACK_CASES: readonly DemoCase[] = [
 				});
 				assert.equal(summary.verdict, "pass");
 				assert.deepEqual(summary.fixList, []);
+			});
+		},
+	},
+	{
+		name: "moving a target to another recipe updates its lock ownership without rewriting the asset",
+		async run() {
+			await withDemoProject(async (projectDir) => {
+				await buildDemo(projectDir);
+				const lockPath = join(projectDir, "mc-asset.lock.json");
+				const before = parseLockText(await readFile(lockPath, "utf8"));
+				const heroBefore = before.outputs[HERO_TEXTURE_REL];
+				assert.ok(heroBefore, "the first recipe owns the hero texture");
+				const heroBytes = await readFile(join(projectDir, HERO_TEXTURE_REL));
+
+				const recipe = await readRecipe(projectDir);
+				const hero = recipe.targets.find(
+					(target) => target.id === "aurelian_hero",
+				);
+				assert.ok(hero, "the demo recipe declares the hero target");
+				await writeRecipe(projectDir, {
+					...recipe,
+					targets: recipe.targets.filter(
+						(target) => target.id !== "aurelian_hero",
+					),
+				});
+				await writeExtraRecipe(projectDir, "second.recipe.json", {
+					formatVersion: 3,
+					id: "second-demo",
+					targets: [hero],
+				});
+
+				const moved = await buildDemo(projectDir);
+				assert.deepEqual(
+					moved.completed,
+					[],
+					"the same bytes are not rewritten",
+				);
+				const afterMove = parseLockText(await readFile(lockPath, "utf8"));
+				assert.equal(
+					afterMove.outputs[HERO_TEXTURE_REL]?.recipeId,
+					"second-demo",
+					"the lock follows the target to its new recipe",
+				);
+				assert.equal(
+					afterMove.outputs[HERO_TEXTURE_REL]?.targetId,
+					"aurelian_hero",
+					"the lock keeps the target id",
+				);
+				assert.equal(
+					afterMove.outputs[HERO_TEXTURE_REL]?.outputHash,
+					heroBefore.outputHash,
+					"the recorded output is unchanged",
+				);
+				assert.deepEqual(
+					await readFile(join(projectDir, HERO_TEXTURE_REL)),
+					heroBytes,
+					"the asset file is unchanged",
+				);
+
+				const firstRecipePath = join(projectDir, RECIPE_REL);
+				const secondRecipePath = join(
+					projectDir,
+					"recipes",
+					"second.recipe.json",
+				);
+				const firstOnly = await buildDemo(projectDir, firstRecipePath);
+				assert.deepEqual(firstOnly.completed, []);
+				const afterFirst = parseLockText(await readFile(lockPath, "utf8"));
+				assert.deepEqual(
+					afterFirst.outputs[HERO_TEXTURE_REL],
+					afterMove.outputs[HERO_TEXTURE_REL],
+					"building the old recipe leaves the moved entry alone",
+				);
+
+				const secondPlan = await planPackBuild(projectPath(projectDir), {
+					recipe: secondRecipePath,
+				});
+				assert.ok(
+					secondPlan.outputs.every(
+						(output) => output.judgement === "own-clean",
+					),
+					"the new recipe sees only its own clean output",
+				);
+				const secondOnly = await executePackBuild(secondPlan);
+				assert.deepEqual(
+					secondOnly.completed,
+					[],
+					"the new recipe rewrites nothing",
+				);
+			});
+		},
+	},
+	{
+		name: "two recipe files that share an id keep each other's lock entries in a single-recipe build",
+		async run() {
+			await withDemoProject(async (projectDir) => {
+				await writeExtraRecipe(projectDir, "second.recipe.json", {
+					formatVersion: 3,
+					id: "aurelian-demo",
+					targets: [
+						{
+							id: "second_hero",
+							steps: [
+								{
+									type: "entityTemplate",
+									layout: "player_wide",
+									output: "assets/{namespace}/textures/entity/second_hero.png",
+								},
+							],
+						},
+					],
+				});
+				const first = await buildDemo(projectDir);
+				assert.equal(first.completed.length, 21, "both recipe files build");
+
+				const lockPath = join(projectDir, "mc-asset.lock.json");
+				const before = parseLockText(await readFile(lockPath, "utf8"));
+				const secondLocked = before.outputs[SECOND_HERO_TEXTURE_REL];
+				assert.ok(secondLocked, "the second recipe file is locked");
+
+				const firstRecipePath = join(projectDir, RECIPE_REL);
+				const secondRecipePath = join(
+					projectDir,
+					"recipes",
+					"second.recipe.json",
+				);
+				const firstOnly = await buildDemo(projectDir, firstRecipePath);
+				assert.deepEqual(
+					firstOnly.completed,
+					[],
+					"the first file rewrites nothing",
+				);
+				const afterFirst = parseLockText(await readFile(lockPath, "utf8"));
+				assert.deepEqual(
+					afterFirst.outputs[SECOND_HERO_TEXTURE_REL],
+					secondLocked,
+					"the shared id keeps the other file's entry",
+				);
+
+				const secondPlan = await planPackBuild(projectPath(projectDir), {
+					recipe: secondRecipePath,
+				});
+				assert.ok(
+					secondPlan.outputs.every(
+						(output) => output.judgement === "own-clean",
+					),
+					"the second file is still tracked as own-clean",
+				);
+				const secondOnly = await executePackBuild(secondPlan);
+				assert.deepEqual(secondOnly.completed, []);
+			});
+		},
+	},
+	{
+		name: "renaming the recipe id prunes the old id's stale entries in a full build",
+		async run() {
+			await withDemoProject(async (projectDir) => {
+				await buildDemo(projectDir);
+				const lockPath = join(projectDir, "mc-asset.lock.json");
+				const before = parseLockText(await readFile(lockPath, "utf8"));
+				assert.ok(before.outputs[HERO_TEXTURE_REL], "the hero starts locked");
+
+				await renameRecipeId(projectDir, "aurelian-demo-v2");
+				await removeRecipeTarget(projectDir, "aurelian_hero");
+				await unlink(join(projectDir, HERO_TEXTURE_REL));
+
+				const rebuilt = await buildDemo(projectDir);
+				assert.deepEqual(rebuilt.completed, [], "only lock records change");
+				const after = parseLockText(await readFile(lockPath, "utf8"));
+				assert.equal(
+					after.outputs[HERO_TEXTURE_REL],
+					undefined,
+					"the removed target leaves the lock",
+				);
+				assert.ok(
+					Object.values(after.outputs).every(
+						(entry) => entry.recipeId === "aurelian-demo-v2",
+					),
+					"every surviving entry records the new id",
+				);
+
+				const summary = await checkResourcePack({
+					projectPath: projectPath(projectDir),
+				});
+				assert.equal(summary.verdict, "pass", "pack check passes again");
+				assert.deepEqual(summary.fixList, [], "nothing to fix");
 			});
 		},
 	},

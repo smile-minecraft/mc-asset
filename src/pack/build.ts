@@ -203,6 +203,14 @@ export interface PackBuildPlan {
 	readonly lock?: LockDocument | undefined;
 	/** Recipe ids this run planned; `--recipe` narrows it to one file. */
 	readonly plannedRecipeIds?: readonly string[];
+	/**
+	 * Recipe ids whose stale lock entries this run may prune. A single-recipe
+	 * build omits an id another unplanned recipe file also declares, and an
+	 * unreadable one disables pruning, so those records survive.
+	 */
+	readonly prunableRecipeIds?: readonly string[];
+	/** True when this run scanned every recipe file in the project. */
+	readonly fullPack?: boolean;
 	/** Every output path this run planned, across all four output families. */
 	readonly plannedOutputPaths?: readonly string[];
 }
@@ -407,6 +415,49 @@ function assertOutputInsideOutputDir(
 }
 
 /**
+ * Recipe ids a single-recipe build may prune.
+ *
+ * The run planned one file, so any id a sibling recipe file also declares
+ * could own lock entries this run never planned. An unreadable sibling could
+ * hide such an id, so it disables pruning entirely rather than guess.
+ */
+function recipeIdsSafeToPrune(
+	projectDir: string,
+	recipeDirName: string,
+	plannedFiles: readonly string[],
+	plannedRecipeIds: readonly string[],
+): string[] {
+	const recipeDir = join(projectDir, recipeDirName);
+	if (!existsSync(recipeDir)) {
+		return [...plannedRecipeIds];
+	}
+	const planned = new Set(plannedFiles.map((file) => resolve(file)));
+	const siblingIds = new Set<string>();
+	let entries: string[];
+	try {
+		entries = readdirSync(recipeDir)
+			.filter((f) => f.endsWith(".recipe.json"))
+			.sort(compareCodeUnits);
+	} catch {
+		return [];
+	}
+	for (const entry of entries) {
+		const file = resolve(join(recipeDir, entry));
+		if (planned.has(file)) {
+			continue;
+		}
+		let siblingId: string;
+		try {
+			siblingId = parseRecipeText(readFileSync(file, "utf8")).id;
+		} catch {
+			return [];
+		}
+		siblingIds.add(siblingId);
+	}
+	return plannedRecipeIds.filter((id) => !siblingIds.has(id));
+}
+
+/**
  * Plan a resource pack build without writing any files.
  *
  * Reads project document, recipe(s), sources, and lockfile; expands targets;
@@ -438,15 +489,18 @@ export async function planPackBuild(
 	const modelRules = resolveModelRules(format);
 
 	let recipeFiles: string[] = [];
-	if (options.recipe !== undefined && options.recipe !== "") {
-		const resolvedRecipe = isAbsolute(options.recipe)
-			? options.recipe
-			: resolve(projectDir, options.recipe);
+	let fullPack = false;
+	const recipeOption = options.recipe ?? "";
+	const singleRecipe = recipeOption !== "";
+	if (singleRecipe) {
+		const resolvedRecipe = isAbsolute(recipeOption)
+			? recipeOption
+			: resolve(projectDir, recipeOption);
 		if (!existsSync(resolvedRecipe)) {
 			throw new McAssetError(
 				"FILESYSTEM_ERROR",
-				`Recipe file not found: ${options.recipe}`,
-				{ path: options.recipe },
+				`Recipe file not found: ${recipeOption}`,
+				{ path: recipeOption },
 			);
 		}
 		recipeFiles = [resolvedRecipe];
@@ -457,6 +511,7 @@ export async function planPackBuild(
 				.filter((f) => f.endsWith(".recipe.json"))
 				.sort(compareCodeUnits);
 			recipeFiles = entries.map((f) => join(recipeDir, f));
+			fullPack = true;
 		}
 	}
 
@@ -515,6 +570,15 @@ export async function planPackBuild(
 		}
 		recipes.push({ file, recipe, expanded });
 	}
+
+	const prunableRecipeIds = singleRecipe
+		? recipeIdsSafeToPrune(
+				projectDir,
+				project.recipeDir,
+				recipeFiles,
+				plannedRecipeIds,
+			)
+		: plannedRecipeIds;
 
 	// Declared outputs are counted before any source is read, exactly as
 	// before; generator-backed outputs join the count during planning and the
@@ -1020,24 +1084,10 @@ export async function planPackBuild(
 		);
 	}
 
-	// Every path this run plans, across all four output families. The lock
-	// prunes an entry only when its recipe is planned here and its path is
-	// absent, so a new output family belongs in this set.
-	const plannedOutputPaths: string[] = [];
-	for (const tp of targetPlans) {
-		if (tp.texturePlan !== undefined) {
-			plannedOutputPaths.push(tp.texturePlan.path);
-		}
-		if (tp.mcmetaPlan !== undefined) {
-			plannedOutputPaths.push(tp.mcmetaPlan.path);
-		}
-		for (const mp of tp.modelPlans ?? []) {
-			plannedOutputPaths.push(mp.path);
-		}
-		for (const gp of tp.generatedPlans ?? []) {
-			plannedOutputPaths.push(gp.path);
-		}
-	}
+	// Every path this run plans, across all four output families. A new output
+	// family belongs in this set, or a full-pack run would treat it as stale.
+	const plannedOutputPaths: string[] =
+		targetPlans.flatMap(plannedPathsOfTarget);
 
 	const plannedModelPaths = new Set<string>();
 	for (const tp of targetPlans) {
@@ -1097,6 +1147,8 @@ export async function planPackBuild(
 		targetPlans,
 		lock,
 		plannedRecipeIds,
+		prunableRecipeIds,
+		fullPack,
 		plannedOutputPaths,
 	};
 }
@@ -1223,19 +1275,85 @@ function buildJsonOutputText(
 	);
 }
 
+/** Every output path one target plans, across all four output families. */
+function plannedPathsOfTarget(tp: TargetPlanInternal): string[] {
+	const paths: string[] = [];
+	if (tp.texturePlan !== undefined) {
+		paths.push(tp.texturePlan.path);
+	}
+	if (tp.mcmetaPlan !== undefined) {
+		paths.push(tp.mcmetaPlan.path);
+	}
+	for (const mp of tp.modelPlans ?? []) {
+		paths.push(mp.path);
+	}
+	for (const gp of tp.generatedPlans ?? []) {
+		paths.push(gp.path);
+	}
+	return paths;
+}
+
+interface OwnershipUpdate {
+	readonly path: string;
+	readonly targetId: string;
+	readonly recipeId: string;
+}
+
+/**
+ * Lock records whose planned output already exists under another recipe or
+ * target id. The bytes and hashes are unchanged, so the entry only needs to
+ * follow the target to its new owner; the asset file is not rewritten.
+ */
+function collectOwnershipUpdates(
+	plan: PackBuildPlan,
+	targetPlans: readonly TargetPlanInternal[],
+): OwnershipUpdate[] {
+	const lockOutputs = plan.lock?.outputs ?? {};
+	const updates: OwnershipUpdate[] = [];
+	for (const tp of targetPlans) {
+		for (const path of plannedPathsOfTarget(tp)) {
+			const existing = lockOutputs[path];
+			if (existing === undefined) {
+				continue;
+			}
+			if (
+				existing.recipeId === tp.recipeId &&
+				existing.targetId === tp.targetId
+			) {
+				continue;
+			}
+			updates.push({
+				path,
+				targetId: tp.targetId,
+				recipeId: tp.recipeId,
+			});
+		}
+	}
+	return updates.sort((a, b) => compareCodeUnits(a.path, b.path));
+}
+
 /**
  * Lock entries this run must forget: the entry's recipe is part of the run,
  * but the recipe no longer plans that path, so the user removed the target or
  * the step that wrote it. Entries owned by a recipe outside the run stay put,
  * so `--recipe one.recipe.json` builds one recipe without touching the records
  * of the others.
+ *
+ * A full-pack run scanned every recipe file, so a planned-path miss belongs to
+ * no recipe at all; it is stale whatever `recipeId` the old entry recorded.
  */
 function collectStaleLockPaths(plan: PackBuildPlan): string[] {
-	const plannedRecipeIds = new Set(plan.plannedRecipeIds ?? []);
+	const prunableRecipeIds = new Set(
+		plan.prunableRecipeIds ?? plan.plannedRecipeIds ?? [],
+	);
 	const plannedOutputPaths = new Set(plan.plannedOutputPaths ?? []);
+	const fullPack = plan.fullPack === true;
 	const stale: string[] = [];
 	for (const [path, entry] of Object.entries(plan.lock?.outputs ?? {})) {
-		if (plannedRecipeIds.has(entry.recipeId) && !plannedOutputPaths.has(path)) {
+		if (plannedOutputPaths.has(path)) {
+			continue;
+		}
+		if (fullPack || prunableRecipeIds.has(entry.recipeId)) {
 			stale.push(path);
 		}
 	}
@@ -1280,14 +1398,19 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 	);
 
 	const staleLockPaths = collectStaleLockPaths(plan);
+	const ownershipUpdates = collectOwnershipUpdates(plan, targetPlans);
 
-	if (targetsToExecute.length === 0 && staleLockPaths.length === 0) {
+	if (
+		targetsToExecute.length === 0 &&
+		staleLockPaths.length === 0 &&
+		ownershipUpdates.length === 0
+	) {
 		return { completed: [] };
 	}
 
 	// 1. Safe-output preflight across all outputs to write. A run that only
-	// prunes stale lock entries stages no target here and writes no file; the
-	// lock below is the only thing it touches.
+	// prunes stale entries or moves lock ownership stages no target here and
+	// writes no file; the lock below is the only thing it touches.
 	const outputTargets: OutputTarget[] = [];
 	for (const tp of targetsToExecute) {
 		const texturePlan = tp.texturePlan;
@@ -1607,6 +1730,17 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 
 	for (const stalePath of staleLockPaths) {
 		delete updatedOutputs[stalePath];
+	}
+
+	for (const update of ownershipUpdates) {
+		const existing = updatedOutputs[update.path];
+		if (existing !== undefined) {
+			updatedOutputs[update.path] = {
+				...existing,
+				targetId: update.targetId,
+				recipeId: update.recipeId,
+			};
+		}
 	}
 
 	for (const tp of targetsToExecute) {
