@@ -35,6 +35,7 @@ import { encodePng } from "../io/png.ts";
 import { parseMcpx, serializeMcpx } from "../mcpx/index.ts";
 import { planParticleAsset } from "../particle/index.ts";
 import { loadParticleFrames } from "../particle/load.ts";
+import { PACK_BUILD_MAX_DECODED_PIXELS } from "./budget.ts";
 import { isJsonObject, isRelativeProjectPath } from "./document.ts";
 import type { RecipeStep } from "./recipe.ts";
 
@@ -112,6 +113,13 @@ export interface GeneratedInput {
 export interface GeneratedStepPlan {
 	readonly outputs: readonly GeneratedOutput[];
 	readonly inputs: readonly GeneratedInput[];
+	/** Bytes of every source file the step read. */
+	readonly sourceBytes: number;
+	/**
+	 * Decoded source-image pixels plus pixels of the canvases this step holds:
+	 * template and atlas buffers the build must charge to its memory budget.
+	 */
+	readonly decodedPixels: number;
 }
 
 /** What a generator-backed step needs from the project being planned. */
@@ -207,6 +215,31 @@ function assertStepFields(
 				`Unknown field '${key}' in ${step.type} step for target '${context.targetId}'.`,
 			);
 		}
+	}
+}
+
+/**
+ * A step that reads images stops once its own decoded pixels pass the public
+ * pack budget. Without this, a directory of large frames would all be held in
+ * memory before the build's total check could refuse the plan; the total is
+ * still checked across every target once the step returns.
+ */
+function assertDecodedPixelBudget(
+	context: GeneratedStepContext,
+	decodedPixels: number,
+): void {
+	if (decodedPixels > PACK_BUILD_MAX_DECODED_PIXELS) {
+		throw new McAssetError(
+			"RESOURCE_LIMIT_EXCEEDED",
+			`${context.step.type} step decodes ${decodedPixels} pixels, over the budget of ${PACK_BUILD_MAX_DECODED_PIXELS}.`,
+			{
+				limit: PACK_BUILD_MAX_DECODED_PIXELS,
+				actual: decodedPixels,
+				targetId: context.targetId,
+				stepType: context.step.type,
+				stepIndex: context.stepIndex,
+			},
+		);
 	}
 }
 
@@ -353,6 +386,7 @@ function readSourceText(
 function loadEntityLayout(context: GeneratedStepContext): {
 	layout: EntityLayout;
 	input?: GeneratedInput;
+	sourceBytes: number;
 } {
 	const raw = context.step.layout;
 	if (raw === undefined) {
@@ -360,6 +394,7 @@ function loadEntityLayout(context: GeneratedStepContext): {
 			layout: resolveEntityLayoutDocument(
 				getEntityLayoutDocument("player_wide"),
 			),
+			sourceBytes: 0,
 		};
 	}
 	if (typeof raw !== "string" || raw.trim() === "") {
@@ -374,6 +409,7 @@ function loadEntityLayout(context: GeneratedStepContext): {
 	if (builtin !== undefined) {
 		return {
 			layout: resolveEntityLayoutDocument(getEntityLayoutDocument(builtin)),
+			sourceBytes: 0,
 		};
 	}
 	const path = resolve(context.recipeDir, raw);
@@ -400,12 +436,14 @@ function loadEntityLayout(context: GeneratedStepContext): {
 	} catch (error) {
 		translateGeneratorFailure(error, context);
 	}
+	const layoutBytes = TEXT_ENCODER.encode(text);
 	return {
 		layout,
 		input: {
 			ref: `entity-layout:${raw}`,
-			sha256: sha256Hex(TEXT_ENCODER.encode(text)),
+			sha256: sha256Hex(layoutBytes),
 		},
+		sourceBytes: layoutBytes.length,
 	};
 }
 
@@ -415,6 +453,9 @@ function planEntityTemplate(context: GeneratedStepContext): GeneratedStepPlan {
 	parseOverride(step.override, context);
 	const fill = optionalBoolean(step.fill, "fill", context, true);
 	const loaded = loadEntityLayout(context);
+	const canvasPixels =
+		loaded.layout.texture.width * loaded.layout.texture.height;
+	assertDecodedPixelBudget(context, canvasPixels);
 	const template = buildEntityTemplate(loaded.layout, { fill });
 	const output =
 		step.output === undefined
@@ -435,6 +476,8 @@ function planEntityTemplate(context: GeneratedStepContext): GeneratedStepPlan {
 	return {
 		outputs,
 		inputs: loaded.input === undefined ? [] : [loaded.input],
+		sourceBytes: loaded.sourceBytes,
+		decodedPixels: canvasPixels,
 	};
 }
 
@@ -589,7 +632,12 @@ function planEquipment(context: GeneratedStepContext): GeneratedStepPlan {
 			generatedOutput(texture.relativePath, "equipmentTexture", texture.png),
 		);
 	}
-	return { outputs, inputs: [] };
+	let decodedPixels = 0;
+	for (const texture of plan.textures) {
+		decodedPixels += texture.width * texture.height;
+	}
+	assertDecodedPixelBudget(context, decodedPixels);
+	return { outputs, inputs: [], sourceBytes: 0, decodedPixels };
 }
 
 /** A bitmap atlas location names its own path inside the pack. */
@@ -602,7 +650,12 @@ function atlasLocationToAssets(texture: string): string {
 async function loadFontIcon(
 	icon: FontSpecIcon,
 	context: GeneratedStepContext,
-): Promise<{ source: FontGlyphSource; input: GeneratedInput }> {
+): Promise<{
+	source: FontGlyphSource;
+	input: GeneratedInput;
+	sourceBytes: number;
+	decodedPixels: number;
+}> {
 	const path = icon.path;
 	let bytes: Uint8Array;
 	try {
@@ -656,6 +709,8 @@ async function loadFontIcon(
 			sha256: sha256Hex(bytes),
 			filePath: path,
 		},
+		sourceBytes: bytes.length,
+		decodedPixels: canvas.width * canvas.height,
 	};
 }
 
@@ -707,17 +762,22 @@ async function planFontStep(
 			`font spec declares namespace '${spec.namespace}', which differs from the project namespace '${context.namespace}'.`,
 		);
 	}
-	const inputs: GeneratedInput[] = [
-		{
-			ref: `font-spec:${declared}`,
-			sha256: sha256Hex(TEXT_ENCODER.encode(specText)),
-		},
-	];
+	const inputs: GeneratedInput[] = [];
+	const specBytes = TEXT_ENCODER.encode(specText);
+	inputs.push({
+		ref: `font-spec:${declared}`,
+		sha256: sha256Hex(specBytes),
+	});
 	const sources: FontGlyphSource[] = [];
+	let sourceBytes = specBytes.length;
+	let decodedPixels = 0;
 	for (const icon of spec.icons) {
 		const loaded = await loadFontIcon(icon, context);
 		inputs.push(loaded.input);
 		sources.push(loaded.source);
+		sourceBytes += loaded.sourceBytes;
+		decodedPixels += loaded.decodedPixels;
+		assertDecodedPixelBudget(context, decodedPixels);
 	}
 	let plan: ReturnType<typeof planFont>;
 	try {
@@ -740,7 +800,9 @@ async function planFontStep(
 				atlas.atlas.png,
 			),
 		);
+		decodedPixels += atlas.atlasWidth * atlas.atlasHeight;
 	}
+	assertDecodedPixelBudget(context, decodedPixels);
 	// The icon-to-character table is project documentation, not a pack asset:
 	// it lands under the project root so no client reads it and no pack scan
 	// has to interpret it.
@@ -756,7 +818,7 @@ async function planFontStep(
 			"project",
 		),
 	);
-	return { outputs, inputs };
+	return { outputs, inputs, sourceBytes, decodedPixels };
 }
 
 async function planParticleStep(
@@ -796,7 +858,9 @@ async function planParticleStep(
 	const fullPath = resolve(context.recipeDir, declared);
 	let loaded: Awaited<ReturnType<typeof loadParticleFrames>>;
 	try {
-		loaded = await loadParticleFrames(fullPath);
+		loaded = await loadParticleFrames(fullPath, {
+			maxDecodedPixels: PACK_BUILD_MAX_DECODED_PIXELS,
+		});
 	} catch (error) {
 		translateGeneratorFailure(error, context);
 	}
@@ -830,7 +894,12 @@ async function planParticleStep(
 			generatedOutput(texture.relativePath, "particleTexture", texture.data),
 		);
 	}
-	return { outputs, inputs };
+	return {
+		outputs,
+		inputs,
+		sourceBytes: loaded.sourceBytes,
+		decodedPixels: loaded.decodedPixels,
+	};
 }
 
 /** Plan one generator-backed step; every refusal happens before a write. */

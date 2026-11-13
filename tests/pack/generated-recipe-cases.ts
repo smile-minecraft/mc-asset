@@ -19,8 +19,10 @@ import { decodeImage } from "../../src/io/decode.ts";
 import { encodePng } from "../../src/io/png.ts";
 import { parseMcpx } from "../../src/mcpx/index.ts";
 import { executePackBuild, planPackBuild } from "../../src/pack/build.ts";
+import { planGeneratedStep } from "../../src/pack/generate.ts";
 import { initializePackProject } from "../../src/pack/init.ts";
 import { parseLockText } from "../../src/pack/lock.ts";
+import type { RecipeStep } from "../../src/pack/recipe.ts";
 import { planParticleAsset } from "../../src/particle/index.ts";
 import { loadParticleFrames } from "../../src/particle/load.ts";
 
@@ -278,6 +280,98 @@ async function expectedFontPlan(projectDir: string, spec: unknown) {
 		sources.push({ name: icon.name, canvas });
 	}
 	return planFont(parsed, sources);
+}
+
+const BASE_GRID = `[palette]
+. = transparent
+B = #3355AAFF
+
+[grid]
+.B..
+BBBB
+BBBB
+.B..
+`;
+
+/**
+ * One target that carries both a recipe `source` and a generator-backed step.
+ * The source keeps the texture pipeline alive, so the step list reaches the
+ * execute loop with pixel steps before it — the case that used to be refused
+ * only by a real build, never by `--dry-run`.
+ */
+function mixedSourceCase(
+	name: string,
+	step: RecipeStep,
+	generatedOutputs: readonly string[],
+	prepare?: (projectDir: string) => Promise<void>,
+): GeneratedCase {
+	return {
+		name,
+		async run() {
+			await withProject(async (projectDir) => {
+				if (prepare !== undefined) {
+					await prepare(projectDir);
+				}
+				await writeText(projectDir, "recipes/sources/base.grid", BASE_GRID);
+				await writeRecipe(projectDir, "mixed", {
+					formatVersion: 3,
+					id: "mixed-steps",
+					sources: {
+						base: { kind: "grid", path: "sources/base.grid" },
+					},
+					targets: [
+						{
+							id: "hero",
+							source: "base",
+							output: "assets/{namespace}/textures/item/hero.png",
+							steps: [{ type: "outline" }, step],
+						},
+					],
+				});
+				const texture = `pack/assets/${NAMESPACE}/textures/item/hero.png`;
+				const expected = [texture, ...generatedOutputs].sort();
+				const dry = await planPackBuild(projectPath(projectDir), {
+					dryRun: true,
+				});
+				assert.deepEqual(
+					dry.outputs.map((output) => output.path).sort(),
+					expected,
+					"the dry run plans both halves",
+				);
+				assert.ok(dry.outputs.every((output) => output.judgement === "new"));
+				for (const path of expected) {
+					assert.equal(
+						await bytesAt(join(projectDir, path)),
+						null,
+						`the dry run wrote ${path}`,
+					);
+				}
+				const executed = await build(projectDir);
+				assert.deepEqual([...executed.completed].sort(), expected);
+				for (const path of expected) {
+					assert.ok(
+						await bytesAt(join(projectDir, path)),
+						`${path} exists after the real build`,
+					);
+				}
+			});
+		},
+	};
+}
+
+function stepContext(
+	projectDir: string,
+	targetId: string,
+	step: RecipeStep,
+): Parameters<typeof planGeneratedStep>[0] {
+	return {
+		targetId,
+		stepIndex: 0,
+		step,
+		namespace: NAMESPACE,
+		packFormat: "69.0",
+		recipeDir: join(projectDir, "recipes"),
+	};
 }
 
 export const GENERATED_RECIPE_CASES: readonly GeneratedCase[] = [
@@ -1318,6 +1412,227 @@ TTTTTTTT
 				);
 				const executed = await build(projectDir);
 				assert.equal(executed.completed.length, 1);
+			});
+		},
+	},
+	mixedSourceCase(
+		"a source target mixed with an entityTemplate step builds both outputs",
+		{ type: "entityTemplate" },
+		[`pack/assets/${NAMESPACE}/textures/entity/hero.png`],
+	),
+	mixedSourceCase(
+		"a source target mixed with an equipment step builds both outputs",
+		{ type: "equipment", layers: ["humanoid", "humanoid_leggings"] },
+		[
+			`pack/assets/${NAMESPACE}/equipment/hero.json`,
+			`pack/assets/${NAMESPACE}/textures/entity/equipment/humanoid/hero.png`,
+			`pack/assets/${NAMESPACE}/textures/entity/equipment/humanoid_leggings/hero.png`,
+		],
+	),
+	mixedSourceCase(
+		"a source target mixed with a font step builds both outputs",
+		{ type: "font", spec: "sources/icons.font.json" },
+		[
+			`pack/assets/${NAMESPACE}/font/icons.json`,
+			`pack/assets/${NAMESPACE}/textures/font/icons.png`,
+			"font/icons.table.json",
+		],
+		async (projectDir) => {
+			await writeFontSpec(
+				projectDir,
+				fontSpec([{ name: "gem", path: "icon_gem.mcpx" }]),
+			);
+		},
+	),
+	mixedSourceCase(
+		"a source target mixed with a particle step builds both outputs",
+		{ type: "particle", frames: "sources/spark" },
+		[
+			`pack/assets/${NAMESPACE}/particles/hero.json`,
+			`pack/assets/${NAMESPACE}/textures/particle/hero_0.png`,
+		],
+		async (projectDir) => {
+			await writeText(
+				projectDir,
+				"recipes/sources/spark/frame_0.mcpx",
+				SPARK_A,
+			);
+		},
+	),
+	{
+		name: "generator steps charge their source bytes and decoded pixels",
+		async run() {
+			await withProject(async (projectDir) => {
+				const entity = await planGeneratedStep(
+					stepContext(projectDir, "hero", { type: "entityTemplate" }),
+				);
+				assert.equal(entity.decodedPixels, 64 * 64);
+				assert.equal(entity.sourceBytes, 0);
+
+				const equipment = await planGeneratedStep(
+					stepContext(projectDir, "gear", {
+						type: "equipment",
+						layers: ["humanoid"],
+					}),
+				);
+				assert.equal(equipment.decodedPixels, 64 * 32);
+				assert.equal(equipment.sourceBytes, 0);
+
+				await writeFontSpec(
+					projectDir,
+					fontSpec([{ name: "gem", path: "icon_gem.mcpx" }]),
+				);
+				const font = await planGeneratedStep(
+					stepContext(projectDir, "icons", {
+						type: "font",
+						spec: "sources/icons.font.json",
+					}),
+				);
+				const specBytes = (
+					await readFile(join(projectDir, "recipes/sources/icons.font.json"))
+				).length;
+				const iconBytes = (
+					await readFile(join(projectDir, "recipes/sources/icon_gem.mcpx"))
+				).length;
+				assert.equal(font.decodedPixels, 4 * 4 + 4 * 4);
+				assert.equal(font.sourceBytes, specBytes + iconBytes);
+
+				await writeText(
+					projectDir,
+					"recipes/sources/spark/frame_0.mcpx",
+					SPARK_A,
+				);
+				await writeText(
+					projectDir,
+					"recipes/sources/spark/frame_1.mcpx",
+					SPARK_B,
+				);
+				const particle = await planGeneratedStep(
+					stepContext(projectDir, "spark", {
+						type: "particle",
+						frames: "sources/spark",
+					}),
+				);
+				const frameBytes = (
+					await readFile(join(projectDir, "recipes/sources/spark/frame_0.mcpx"))
+				).length;
+				const secondFrameBytes = (
+					await readFile(join(projectDir, "recipes/sources/spark/frame_1.mcpx"))
+				).length;
+				assert.equal(particle.decodedPixels, 4 * 4 * 2);
+				assert.equal(particle.sourceBytes, frameBytes + secondFrameBytes);
+			});
+		},
+	},
+	{
+		name: "particle frames over the decoded pixel budget are refused before any write",
+		async run() {
+			await withProject(async (projectDir) => {
+				const frameDir = join(projectDir, "recipes", "sources", "huge");
+				await mkdir(frameDir, { recursive: true });
+				const big = createCanvas(4096, 4096);
+				addLayer(big, { id: "base" });
+				await writeFile(join(frameDir, "000.png"), encodePng(big));
+				const extra = createCanvas(2, 2);
+				addLayer(extra, { id: "base" });
+				await writeFile(join(frameDir, "001.png"), encodePng(extra));
+				await writeRecipe(projectDir, "particle", {
+					formatVersion: 3,
+					id: "particle",
+					targets: [
+						{
+							id: "spark",
+							steps: [{ type: "particle", frames: "sources/huge" }],
+						},
+					],
+				});
+				const dryRefusal = await refusalOf(async () =>
+					planPackBuild(projectPath(projectDir), { dryRun: true }),
+				);
+				assert.equal(dryRefusal.code, "RESOURCE_LIMIT_EXCEEDED");
+				const realRefusal = await refusalOf(async () => {
+					await executePackBuild(await planPackBuild(projectPath(projectDir)));
+				});
+				assert.equal(realRefusal.code, "RESOURCE_LIMIT_EXCEEDED");
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+					"the lock is not written",
+				);
+				assert.equal(
+					await bytesAt(
+						onDisk(projectDir, "assets/aurelian/particles/spark.json"),
+					),
+					null,
+					"the definition is not written",
+				);
+				assert.equal(
+					await bytesAt(
+						onDisk(projectDir, "assets/aurelian/textures/particle/spark_0.png"),
+					),
+					null,
+					"no sprite is written",
+				);
+			});
+		},
+	},
+	{
+		name: "source pixels and generator canvas pixels share one decoded pixel budget",
+		async run() {
+			await withProject(async (projectDir) => {
+				const big = createCanvas(4096, 4096);
+				addLayer(big, { id: "base" });
+				await mkdir(join(projectDir, "recipes", "sources"), {
+					recursive: true,
+				});
+				await writeFile(
+					join(projectDir, "recipes", "sources", "huge.png"),
+					encodePng(big),
+				);
+				await writeRecipe(projectDir, "mixed-budget", {
+					formatVersion: 3,
+					id: "mixed-budget",
+					sources: {
+						huge: { kind: "png", path: "sources/huge.png" },
+					},
+					targets: [
+						{
+							id: "t1",
+							source: "huge",
+							output: `assets/${NAMESPACE}/textures/item/t1.png`,
+							steps: [{ type: "outline" }],
+						},
+						{ id: "hero", steps: [{ type: "entityTemplate" }] },
+					],
+				});
+				const dryRefusal = await refusalOf(async () =>
+					planPackBuild(projectPath(projectDir), { dryRun: true }),
+				);
+				assert.equal(
+					dryRefusal.code,
+					"RESOURCE_LIMIT_EXCEEDED",
+					"the source leaves no room for the template canvas",
+				);
+				const realRefusal = await refusalOf(async () => {
+					await executePackBuild(await planPackBuild(projectPath(projectDir)));
+				});
+				assert.equal(realRefusal.code, "RESOURCE_LIMIT_EXCEEDED");
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+				);
+				assert.equal(
+					await bytesAt(
+						onDisk(projectDir, `assets/${NAMESPACE}/textures/item/t1.png`),
+					),
+					null,
+				);
+				assert.equal(
+					await bytesAt(
+						onDisk(projectDir, `assets/${NAMESPACE}/textures/entity/hero.png`),
+					),
+					null,
+				);
 			});
 		},
 	},

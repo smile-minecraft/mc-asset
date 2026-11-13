@@ -68,6 +68,11 @@ import {
 	parseBlockstateStep,
 } from "./block.ts";
 import {
+	PACK_BUILD_MAX_DECODED_PIXELS,
+	PACK_BUILD_MAX_OUTPUTS,
+	PACK_BUILD_MAX_SOURCE_BYTES,
+} from "./budget.ts";
+import {
 	canonicalDocumentText,
 	isJsonObject,
 	isPathInsideDirectory,
@@ -508,11 +513,11 @@ export async function planPackBuild(
 	// Declared outputs are counted before any source is read, exactly as
 	// before; generator-backed outputs join the count during planning and the
 	// same budget is checked again once every plan exists.
-	if (totalOutputCount > 4096) {
+	if (totalOutputCount > PACK_BUILD_MAX_OUTPUTS) {
 		throw new McAssetError(
 			"RESOURCE_LIMIT_EXCEEDED",
-			`Planned outputs (${totalOutputCount}) exceed budget of 4096.`,
-			{ count: totalOutputCount, limit: 4096 },
+			`Planned outputs (${totalOutputCount}) exceed budget of ${PACK_BUILD_MAX_OUTPUTS}.`,
+			{ count: totalOutputCount, limit: PACK_BUILD_MAX_OUTPUTS },
 		);
 	}
 
@@ -521,6 +526,30 @@ export async function planPackBuild(
 	if (existsSync(lockPath)) {
 		const lockText = readFileSync(lockPath, "utf8");
 		lock = parseLockText(lockText);
+	}
+
+	// The three public build budgets are checked as planning reads, so a dry
+	// run and a real build refuse at the same point. Recipe sources,
+	// procedural generate sources, and every input a generator-backed step
+	// reads all charge the same totals.
+	let totalSourceBytes = 0;
+	let totalDecodedPixels = 0;
+
+	function assertBuildBudgets(): void {
+		if (totalSourceBytes > PACK_BUILD_MAX_SOURCE_BYTES) {
+			throw new McAssetError(
+				"RESOURCE_LIMIT_EXCEEDED",
+				`Total source file bytes exceed 256 MiB limit: ${totalSourceBytes}.`,
+				{ limit: PACK_BUILD_MAX_SOURCE_BYTES, actual: totalSourceBytes },
+			);
+		}
+		if (totalDecodedPixels > PACK_BUILD_MAX_DECODED_PIXELS) {
+			throw new McAssetError(
+				"RESOURCE_LIMIT_EXCEEDED",
+				`Total decoded source pixels exceed ${PACK_BUILD_MAX_DECODED_PIXELS} limit: ${totalDecodedPixels}.`,
+				{ limit: PACK_BUILD_MAX_DECODED_PIXELS, actual: totalDecodedPixels },
+			);
+		}
 	}
 
 	function checkSourceFileBudget(filePath: string): void {
@@ -534,11 +563,11 @@ export async function planPackBuild(
 				{ path: filePath },
 			);
 		}
-		if (size > 268435456) {
+		if (size > PACK_BUILD_MAX_SOURCE_BYTES) {
 			throw new McAssetError(
 				"RESOURCE_LIMIT_EXCEEDED",
 				`Total source file bytes exceed 256 MiB limit: ${size}.`,
-				{ limit: 268435456, actual: size },
+				{ limit: PACK_BUILD_MAX_SOURCE_BYTES, actual: size },
 			);
 		}
 	}
@@ -582,12 +611,14 @@ export async function planPackBuild(
 		}
 		const data = { bytes, text, sha256, pixels };
 		sourceCache.set(filePath, data);
+		totalSourceBytes += bytes.length;
+		totalDecodedPixels += pixels;
+		assertBuildBudgets();
 		return data;
 	}
 
 	const outputs: BuildOutputPlan[] = [];
 	const targetPlans: TargetPlanInternal[] = [];
-	let totalGeneratePixels = 0;
 
 	for (const { file: recipeFile, recipe, expanded } of recipes) {
 		const styleRef = recipe.style ?? project.style ?? "vanilla";
@@ -656,7 +687,8 @@ export async function planPackBuild(
 						);
 					}
 					const genDims = parseSize(sourceDecl.size);
-					totalGeneratePixels += genDims.width * genDims.height;
+					totalDecodedPixels += genDims.width * genDims.height;
+					assertBuildBudgets();
 					const palettePath = sourceDecl.palette.toLowerCase().endsWith(".mcpx")
 						? resolve(dirname(recipeFile), sourceDecl.palette)
 						: undefined;
@@ -740,6 +772,9 @@ export async function planPackBuild(
 					packFormat: format,
 					recipeDir: dirname(recipeFile),
 				});
+				totalSourceBytes += planned.sourceBytes;
+				totalDecodedPixels += planned.decodedPixels;
+				assertBuildBudgets();
 				stepInputs.push(
 					...planned.inputs.map(({ ref, sha256 }) => ({ ref, sha256 })),
 				);
@@ -971,34 +1006,11 @@ export async function planPackBuild(
 		}
 	}
 
-	if (totalOutputCount > 4096) {
+	if (totalOutputCount > PACK_BUILD_MAX_OUTPUTS) {
 		throw new McAssetError(
 			"RESOURCE_LIMIT_EXCEEDED",
-			`Planned outputs (${totalOutputCount}) exceed budget of 4096.`,
-			{ count: totalOutputCount, limit: 4096 },
-		);
-	}
-
-	let totalSourceBytes = 0;
-	let totalDecodedPixels = totalGeneratePixels;
-	for (const data of sourceCache.values()) {
-		totalSourceBytes += data.bytes.length;
-		totalDecodedPixels += data.pixels;
-	}
-
-	if (totalSourceBytes > 268435456) {
-		throw new McAssetError(
-			"RESOURCE_LIMIT_EXCEEDED",
-			`Total source file bytes exceed 256 MiB limit: ${totalSourceBytes}.`,
-			{ limit: 268435456, actual: totalSourceBytes },
-		);
-	}
-
-	if (totalDecodedPixels > 16777216) {
-		throw new McAssetError(
-			"RESOURCE_LIMIT_EXCEEDED",
-			`Total decoded source pixels exceed 16777216 limit: ${totalDecodedPixels}.`,
-			{ limit: 16777216, actual: totalDecodedPixels },
+			`Planned outputs (${totalOutputCount}) exceed budget of ${PACK_BUILD_MAX_OUTPUTS}.`,
+			{ count: totalOutputCount, limit: PACK_BUILD_MAX_OUTPUTS },
 		);
 	}
 
@@ -1475,9 +1487,12 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 						step.type === "model" ||
 						step.type === "itemDefinition" ||
 						step.type === "blockModel" ||
-						step.type === "blockstate"
+						step.type === "blockstate" ||
+						GENERATED_STEP_TYPES.has(step.type)
 					) {
-						// JSON outputs are validated and rendered after the pixel steps.
+						// JSON outputs are validated and rendered after the pixel
+						// steps, and generator outputs were planned with their bytes
+						// above; neither touches the target texture canvas.
 					} else {
 						throw new McAssetError(
 							"RECIPE_INVALID",
