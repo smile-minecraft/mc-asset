@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `src/model/geometry/` module for integer-only 3D geometry: `FixedVec3` points and `Mat3` rotation matrices in Q16 fixed point (right-handed; +y up, +x east, +z south), `rotationMatrix` taking milli-degrees where exact multiples of 22.5 degrees use a precomputed integer table and other angles use an interpolated quarter-turn sine table (measured 1.08 units in the last place), `projectOrthographic` for the three preview views, and `projectIsometric` for 2:1 isometric views with four camera directions (`south-east`, `south-west`, `north-west`, `north-east`) sharing x + y + z depth. `rasterizeTriangle` and `rasterizeQuad` fill RGBA8 buffers with a top-left coverage rule (each shared-edge pixel is written exactly once), a z-buffer that keeps the larger depth with ties going to the later draw, nearest-texel sampling with clamp-to-edge wrapping, cutout of alpha-zero fragments before the depth test, and a choice of `replace` or integer src-over blending, producing byte-identical output on Bun and Node.
+
 ### Fixed
 
 - Recipe targets without a `source` and with only `model` / `itemDefinition` steps no longer plan a blank texture or write outside the output directory, and a planned output must stay below the output directory.
