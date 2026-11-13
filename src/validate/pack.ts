@@ -31,7 +31,11 @@ import {
 	spriteIdForTextureValue,
 } from "./atlas.ts";
 import type { ValidateFindingLevel } from "./checks.ts";
-import { checkPackMcmeta, type PackMcmetaCheckResult } from "./pack-mcmeta.ts";
+import {
+	checkPackMcmeta,
+	overlayDirectoriesForTarget,
+	type PackMcmetaCheckResult,
+} from "./pack-mcmeta.ts";
 import {
 	collectBlockstateModelRefs,
 	collectItemModelRefs,
@@ -69,8 +73,12 @@ import {
 	checkEquipmentReferences,
 	checkFontReferences,
 	checkParticleReferences,
+	checkPostEffectReferences,
+	checkSoundReferences,
+	checkWaypointStyleReferences,
 	isLegacyEquipmentLocation,
 	type ReferenceSink,
+	type ResourceReferenceInput,
 } from "./resource-references.ts";
 
 /**
@@ -311,10 +319,30 @@ function isUninterpretedDirectoryFile(rel: string): boolean {
 	return classifyResourceKind(parts[2] as string) === "uninterpreted";
 }
 
-async function collectPackFiles(packRoot: string): Promise<string[]> {
+/**
+ * Walk `assets/` under one tree root. The base pack must hold it; an
+ * overlay directory may not, because an overlay can carry data-only
+ * content. A missing `assets/` on a required root is FILESYSTEM_ERROR.
+ */
+async function collectAssetFiles(
+	root: string,
+	required: boolean,
+): Promise<string[]> {
+	try {
+		await readdir(`${root}/assets`);
+	} catch {
+		if (!required) {
+			return [];
+		}
+		throw new McAssetError(
+			"FILESYSTEM_ERROR",
+			`Cannot read pack root: ${root}.`,
+			{ path: root },
+		);
+	}
 	const out: string[] = [];
 	async function walk(dirRel: string): Promise<void> {
-		const entries = (await readdir(`${packRoot}/${dirRel}`)).sort(compareBytes);
+		const entries = (await readdir(`${root}/${dirRel}`)).sort(compareBytes);
 		for (const entry of entries) {
 			const rel = dirRel === "" ? entry : `${dirRel}/${entry}`;
 			if (isIgnoredSystemPath(rel)) {
@@ -322,7 +350,7 @@ async function collectPackFiles(packRoot: string): Promise<string[]> {
 			}
 			let children: string[] | undefined;
 			try {
-				children = (await readdir(`${packRoot}/${rel}`)).sort(compareBytes);
+				children = (await readdir(`${root}/${rel}`)).sort(compareBytes);
 			} catch {
 				children = undefined;
 			}
@@ -333,15 +361,13 @@ async function collectPackFiles(packRoot: string): Promise<string[]> {
 			}
 		}
 	}
-	try {
-		await walk("assets");
-	} catch {
-		throw new McAssetError(
-			"FILESYSTEM_ERROR",
-			`Cannot read pack root: ${packRoot}.`,
-			{ path: packRoot },
-		);
-	}
+	await walk("assets");
+	out.sort(compareBytes);
+	return out;
+}
+
+async function collectPackFiles(packRoot: string): Promise<string[]> {
+	const out = await collectAssetFiles(packRoot, true);
 	// The root pack.mcmeta joins the scan when present; anything else at
 	// the root (pack.png and friends) stays out of the starter's scope.
 	try {
@@ -352,14 +378,40 @@ async function collectPackFiles(packRoot: string): Promise<string[]> {
 		// No pack.mcmeta: version-dependent checks simply stay skipped.
 	}
 	out.sort(compareBytes);
-	if (out.length > MAX_PACK_FILES) {
+	return out;
+}
+
+/**
+ * Merge the base pack with every effective overlay. Overlays apply in
+ * declaration order and later entries override earlier ones; every overlay
+ * overrides the base pack at the same relative path. The map keeps the
+ * absolute source path for each surviving rel, so a shadowed base file is
+ * never read and a model check sees exactly the bytes the game loads.
+ */
+async function collectEffectivePackTree(
+	packRoot: string,
+	baseRels: readonly string[],
+	overlayDirectories: readonly string[],
+): Promise<{ rels: string[]; sources: Map<string, string> }> {
+	const sources = new Map<string, string>();
+	for (const rel of baseRels) {
+		sources.set(rel, `${packRoot}/${rel}`);
+	}
+	for (const directory of overlayDirectories) {
+		const overlayRoot = `${packRoot}/${directory}`;
+		for (const rel of await collectAssetFiles(overlayRoot, false)) {
+			sources.set(rel, `${overlayRoot}/${rel}`);
+		}
+	}
+	const rels = [...sources.keys()].sort(compareBytes);
+	if (rels.length > MAX_PACK_FILES) {
 		throw new McAssetError(
 			"RESOURCE_LIMIT_EXCEEDED",
-			`Pack holds ${out.length} files, above the scan limit of ${MAX_PACK_FILES}.`,
-			{ files: out.length, limit: MAX_PACK_FILES },
+			`Pack holds ${rels.length} files, above the scan limit of ${MAX_PACK_FILES}.`,
+			{ files: rels.length, limit: MAX_PACK_FILES },
 		);
 	}
-	return out;
+	return { rels, sources };
 }
 
 /**
@@ -1398,15 +1450,19 @@ function checkItemModelDefinitions(
 }
 
 /**
- * Equipment, particle and font references. The checkers report through a
- * sink that feeds the same finding, error and unresolved bookkeeping as
- * every other reference source.
+ * Equipment, particle, font, sound, post-effect and waypoint-style
+ * references. The checkers report through a sink that feeds the same
+ * finding, error and unresolved bookkeeping as every other reference
+ * source.
  */
 function checkResourceTypeReferences(
 	rels: {
 		equipmentRels: string[];
 		particleRels: string[];
 		fontRels: string[];
+		soundRels: string[];
+		postEffectRels: string[];
+		waypointStyleRels: string[];
 	},
 	state: ScanState,
 	context: ResourceContext,
@@ -1448,10 +1504,13 @@ function checkResourceTypeReferences(
 			);
 		},
 	};
-	const groups: Array<[string[], typeof checkEquipmentReferences]> = [
+	const groups: Array<[string[], (input: ResourceReferenceInput) => void]> = [
 		[rels.equipmentRels, checkEquipmentReferences],
 		[rels.particleRels, checkParticleReferences],
 		[rels.fontRels, checkFontReferences],
+		[rels.soundRels, checkSoundReferences],
+		[rels.postEffectRels, checkPostEffectReferences],
+		[rels.waypointStyleRels, checkWaypointStyleReferences],
 	];
 	for (const [group, check] of groups) {
 		for (const rel of group) {
@@ -1796,7 +1855,7 @@ export async function scanPack(
 	packRoot: string,
 	options?: PackScanOptions,
 ): Promise<PackReport> {
-	const rels = await collectPackFiles(packRoot);
+	const baseRels = await collectPackFiles(packRoot);
 	const rootDirectories = await collectRootDirectories(packRoot);
 	const dependencyPaths = options?.dependencyPaths ?? [];
 	const dependencies: LayerIndex[] = [];
@@ -1807,12 +1866,6 @@ export async function scanPack(
 		options?.vanillaPath === undefined
 			? undefined
 			: await buildLayerIndex(options.vanillaPath);
-	const context = createResourceContext(
-		layerIndexFromRels(rels),
-		dependencies,
-		vanilla,
-	);
-	const knownFiles = new Set(rels);
 	const state: ScanState = {
 		findings: [],
 		docs: new Map(),
@@ -1838,6 +1891,69 @@ export async function scanPack(
 	const equipmentRels: string[] = [];
 	const particleRels: string[] = [];
 	const fontRels: string[] = [];
+	const soundRels: string[] = [];
+	const postEffectRels: string[] = [];
+	const waypointStyleRels: string[] = [];
+	// The root pack.mcmeta parses for INVALID_JSON and, with no version
+	// flag, lends its resolved resource-pack format (max_format, then
+	// min_format, then legacy pack_format) as the scan target. The file is
+	// only read, never written; an unusable value keeps the version
+	// undetermined with no default applied.
+	let mcmetaDoc: unknown;
+	let mcmetaParsed = false;
+	if (baseRels.includes("pack.mcmeta")) {
+		try {
+			const bytes = new Uint8Array(await readFile(`${packRoot}/pack.mcmeta`));
+			const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+			mcmetaDoc = JSON.parse(text) as unknown;
+			mcmetaParsed = true;
+		} catch {
+			push(
+				state.findings,
+				"PACK_INVALID_JSON",
+				"error",
+				`"pack.mcmeta" is not valid JSON.`,
+				"pack.mcmeta",
+			);
+			state.errorFiles.add("pack.mcmeta");
+		}
+		await checkDiskName("pack.mcmeta", state);
+	}
+	let effectiveTarget = options?.target ?? "default (engine defaults)";
+	let effectivePackFormat = options?.packFormat;
+	if (effectivePackFormat === undefined) {
+		const fromMcmeta = resourcePackFormatFromMcmeta(mcmetaDoc);
+		if (fromMcmeta !== undefined) {
+			effectivePackFormat = fromMcmeta;
+			effectiveTarget = `pack.mcmeta resource-pack ${fromMcmeta}`;
+		} else {
+			push(
+				state.findings,
+				"PACK_VERSION_UNDETERMINED",
+				"warning",
+				VERSION_UNDETERMINED_MESSAGE,
+				undefined,
+			);
+		}
+	}
+	// Effective overlays are merged over the base pack before any file is
+	// read, so every check sees the content the game would load for the
+	// target. A shadowed base file is not read at all.
+	const overlayDirectories = overlayDirectoriesForTarget(
+		mcmetaDoc,
+		effectivePackFormat,
+		rootDirectories,
+	);
+	const { rels, sources } = await collectEffectivePackTree(
+		packRoot,
+		baseRels,
+		overlayDirectories,
+	);
+	const context = createResourceContext(
+		layerIndexFromRels(rels),
+		dependencies,
+		vanilla,
+	);
 	for (const rel of rels) {
 		if (rel === "pack.mcmeta") {
 			continue;
@@ -1847,7 +1963,9 @@ export async function scanPack(
 		}
 		let bytes: Uint8Array;
 		try {
-			bytes = new Uint8Array(await readFile(`${packRoot}/${rel}`));
+			bytes = new Uint8Array(
+				await readFile(sources.get(rel) ?? `${packRoot}/${rel}`),
+			);
 		} catch {
 			throw new McAssetError(
 				"FILESYSTEM_ERROR",
@@ -1885,54 +2003,18 @@ export async function scanPack(
 				particleRels.push(rel);
 			} else if (restLower.startsWith("font/")) {
 				fontRels.push(rel);
+			} else if (restLower.startsWith("post_effect/")) {
+				postEffectRels.push(rel);
+			} else if (restLower.startsWith("waypoint_style/")) {
+				waypointStyleRels.push(rel);
+			} else if (restLower === "sounds.json") {
+				soundRels.push(rel);
 			}
 		}
-	}
-	// The root pack.mcmeta parses for INVALID_JSON and, with no version
-	// flag, lends its resolved resource-pack format (max_format, then
-	// min_format, then legacy pack_format) as the scan target. The file is
-	// only read, never written; an unusable value keeps the version
-	// undetermined with no default applied.
-	let mcmetaDoc: unknown;
-	let mcmetaParsed = false;
-	if (knownFiles.has("pack.mcmeta")) {
-		try {
-			const bytes = new Uint8Array(await readFile(`${packRoot}/pack.mcmeta`));
-			const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-			mcmetaDoc = JSON.parse(text) as unknown;
-			mcmetaParsed = true;
-		} catch {
-			push(
-				state.findings,
-				"PACK_INVALID_JSON",
-				"error",
-				`"pack.mcmeta" is not valid JSON.`,
-				"pack.mcmeta",
-			);
-			state.errorFiles.add("pack.mcmeta");
-		}
-		await checkDiskName("pack.mcmeta", state);
 	}
 	for (const rel of rels) {
 		checkAnimationSheet(rel, state);
 		checkGuiScalingBorder(rel, state);
-	}
-	let effectiveTarget = options?.target ?? "default (engine defaults)";
-	let effectivePackFormat = options?.packFormat;
-	if (effectivePackFormat === undefined) {
-		const fromMcmeta = resourcePackFormatFromMcmeta(mcmetaDoc);
-		if (fromMcmeta !== undefined) {
-			effectivePackFormat = fromMcmeta;
-			effectiveTarget = `pack.mcmeta resource-pack ${fromMcmeta}`;
-		} else {
-			push(
-				state.findings,
-				"PACK_VERSION_UNDETERMINED",
-				"warning",
-				VERSION_UNDETERMINED_MESSAGE,
-				undefined,
-			);
-		}
 	}
 	// Only a pack.mcmeta that parsed reaches the structure check; an absent
 	// or broken one keeps its own findings and says nothing about ranges,
@@ -2107,7 +2189,14 @@ export async function scanPack(
 	}
 	checkItemModelDefinitions(state, context, options, mcmetaDoc);
 	checkResourceTypeReferences(
-		{ equipmentRels, particleRels, fontRels },
+		{
+			equipmentRels,
+			particleRels,
+			fontRels,
+			soundRels,
+			postEffectRels,
+			waypointStyleRels,
+		},
 		state,
 		context,
 		effectivePackFormat,

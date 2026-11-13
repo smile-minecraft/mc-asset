@@ -242,6 +242,100 @@ export const REMOVED_ITEM_TINT_TYPES_FACT: VersionedFact<RemovedItemTypesValue> 
 	};
 
 /**
+ * Resource path facts for the pack scan. Each path rule was read from the
+ * official client jar (or the official asset index where the client jar
+ * ships no sounds) and is version-gated where the directory or field first
+ * appears. These stay outside COMPAT_FACTS: that list is the frozen §95
+ * compatibility table, not every path rule the scan applies.
+ */
+export interface PostEffectValue {
+	directory: "post_effect/";
+	shaderRoot: "shaders/";
+	textureRoot: "textures/effect/";
+	/**
+	 * Passes split their shaders into `vertex_shader`/`fragment_shader`
+	 * from this pack format on; before it one `program` names a shader
+	 * program document under `shaders/`.
+	 */
+	splitShadersSince: "55.0";
+}
+
+export const POST_EFFECT_FACT: VersionedFact<PostEffectValue> = {
+	fact: "post-effect-directory",
+	since: { packFormat: "42.0" },
+	value: {
+		directory: "post_effect/",
+		shaderRoot: "shaders/",
+		textureRoot: "textures/effect/",
+		splitShadersSince: "55.0",
+	},
+	status: "verified",
+	source:
+		'Minecraft Java Edition 1.21.2 client.jar: assets/minecraft/post_effect/ holds the post-effect definitions. Its passes name one program (assets/minecraft/post_effect/invert.json has "program": "minecraft:post/invert" and the jar ships assets/minecraft/shaders/post/invert.json next to the .vsh/.fsh it points at); the 1.21.5 client.jar switches post_effect/invert.json to "vertex_shader": "minecraft:core/screenquad" and "fragment_shader": "minecraft:post/invert", which is what net.minecraft.client.renderer.PostChainConfig$Pass reads on 26.3 (vertexShaderId/fragmentShaderId under ShaderManager SHADER_PATH = shaders). PostChain resolves a TextureInput location to textures/effect/<path>.png. Pack formats 42.0 (1.21.2), 46.0 (1.21.4), and 55.0 (1.21.5) in the release table.',
+	checkedAt: "2026-11-13",
+};
+
+export interface WaypointStyleValue {
+	directory: "waypoint_style/";
+	spriteRoot: "textures/gui/sprites/";
+	spritePrefix: "hud/locator_bar_dot/";
+}
+
+export const WAYPOINT_STYLE_FACT: VersionedFact<WaypointStyleValue> = {
+	fact: "waypoint-style-directory",
+	since: { packFormat: "63.0" },
+	value: {
+		directory: "waypoint_style/",
+		spriteRoot: "textures/gui/sprites/",
+		spritePrefix: "hud/locator_bar_dot/",
+	},
+	status: "verified",
+	source:
+		"Minecraft Java Edition 1.21.6 client.jar: assets/minecraft/waypoint_style/{default,bowtie}.json; net.minecraft.client.resources.WaypointStyle.ICON_LOCATION_PREFIX = hud/locator_bar_dot/ prepends every sprite id, and assets/minecraft/atlases/gui.json lists the gui/sprites directory, which maps sprite ids to textures/gui/sprites/<path>.png. Pack format 63.0 for 1.21.6 in the release table.",
+	checkedAt: "2026-11-13",
+};
+
+export interface EquipmentTrimOverridesValue {
+	fields: ["texture", "palette"];
+	trimTextureRoot: "textures/trims/entity/";
+	paletteRoot: "textures/palettes/";
+	/** Layer types the renderer asks for a trim texture. */
+	trimLayerTypes: readonly ["humanoid", "humanoid_leggings", "wolf_body"];
+}
+
+export const EQUIPMENT_TRIM_OVERRIDES_FACT: VersionedFact<EquipmentTrimOverridesValue> =
+	{
+		fact: "equipment-trim-overrides",
+		since: { packFormat: "97.1" },
+		value: {
+			fields: ["texture", "palette"],
+			trimTextureRoot: "textures/trims/entity/",
+			paletteRoot: "textures/palettes/",
+			trimLayerTypes: ["humanoid", "humanoid_leggings", "wolf_body"],
+		},
+		status: "verified",
+		source:
+			'Minecraft Java Edition 26.3 client.jar: net.minecraft.client.resources.model.EquipmentClientInfo$TrimOverride carries textureId/paletteId, and EquipmentLayerRenderer$TrimTextureKey builds the texture as LayerType.trimAssetPrefix() (= trims/entity/<layerType>) plus the pattern asset id, then "textures/" + path + ".png" (constant pool of the class), so texture resolves to textures/trims/entity/<layerType>/<path>.png and palette to textures/palettes/<path>.png. EquipmentLayerRenderer.renderLayers sets hasTrim false for HUMANOID_BABY, so only entries whose LayerType is rendered with a trim (humanoid, humanoid_leggings, wolf_body from HumanoidArmorLayer/WolfArmorLayer) are asked for a texture; the vanilla tree ships trims/entity/humanoid and trims/entity/humanoid_leggings only. No release jar from 1.21.2 through 26.2 ships an `equipment/*.json` carrying `trim_overrides`; the field first appears in five files of the 26.3 jar. Pack format 97.1 for 26.3 in the release table.',
+		checkedAt: "2026-11-13",
+	};
+
+export interface SoundEventValue {
+	file: "sounds.json";
+	soundRoot: "sounds/";
+	extension: ".ogg";
+}
+
+export const SOUND_EVENT_FACT: VersionedFact<SoundEventValue> = {
+	fact: "sound-event-file",
+	since: { packFormat: "12.0" },
+	value: { file: "sounds.json", soundRoot: "sounds/", extension: ".ogg" },
+	status: "verified",
+	source:
+		'The client jars ship no sounds (1.21.11 and 26.3 client.jar contain neither assets/minecraft/sounds.json nor assets/minecraft/sounds/**); the official Mojang asset indexes list minecraft/sounds.json and minecraft/sounds/**.ogg for 1.19.3, 1.21.11 (index 29), and 26.3 (index 34). 26.3 client.jar resolves each sound through net.minecraft.client.resources.sounds.Sound.SOUND_LISTER = FileToIdConverter("sounds", ".ogg") → assets/<namespace>/sounds/<name>.ogg, and SoundEventRegistrationSerializer reads sounds[] entries as a name string or an object whose optional type is file (default) or event; an event names another sound event instead of a file. Pack format 12.0 is the oldest release the version table covers (1.19.3).',
+	checkedAt: "2026-11-13",
+};
+
+/**
  * Pack formats the release table covers (1.19.3 = 12.0 through 26.3 =
  * 97.1, see src/cli/version-options.ts). Outside it a version cannot be
  * called checked for a feature the table says nothing about.

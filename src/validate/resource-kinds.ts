@@ -16,7 +16,12 @@
 
 export type ResourceKindClass = "checked" | "inert" | "uninterpreted";
 
-/** Directories whose references the pack scan resolves. */
+/**
+ * Directories (and the namespace-level `sounds.json`) whose references the
+ * pack scan resolves. `shaders` stays out: its include rules differ between
+ * releases (`#moj_import` before 26.3, `#include` from 26.3 on), so the scan
+ * has no single rule it can prove.
+ */
 const CHECKED_KINDS: ReadonlySet<string> = new Set([
 	"textures",
 	"models",
@@ -26,13 +31,19 @@ const CHECKED_KINDS: ReadonlySet<string> = new Set([
 	"equipment",
 	"particles",
 	"font",
+	"post_effect",
+	"waypoint_style",
+	"sounds.json",
 ]);
 
 /**
  * Directories whose content cannot reference a texture or a model.
- * `lang` holds translation key/value strings only.
+ * `lang` holds translation key/value strings only, and `sounds` holds Ogg
+ * Vorbis audio (the client's FileToIdConverter("sounds", ".ogg") feeds
+ * JOrbisAudioStream, never a JSON model); the sound files themselves are
+ * checked through `sounds.json` references.
  */
-const INERT_KINDS: ReadonlySet<string> = new Set(["lang"]);
+const INERT_KINDS: ReadonlySet<string> = new Set(["lang", "sounds"]);
 
 export function classifyResourceKind(kind: string): ResourceKindClass {
 	if (CHECKED_KINDS.has(kind)) {

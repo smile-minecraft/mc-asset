@@ -41,19 +41,24 @@ import type { PackCoverageSkip } from "./pack.ts";
  * every minor of that major, which is why 2147483647 needs no special
  * case here. The old and new resource pack formats split at 65.
  *
- * Coverage: an overlay whose version range covers the scan target has its
- * contents left uninterpreted, so it records one skip beside the matching
- * PACK_COVERAGE_SKIPPED warning. An overlay directory the pack root does
- * not hold records the warning alone, because there is nothing to leave
- * uninterpreted. Without a resolved target no overlay is effective, so
- * nothing is skipped.
+ * Overlays are applied by the scan itself: `overlayDirectoriesForTarget`
+ * answers the directories whose range covers the effective target, in
+ * load order, and the scan merges their assets over the base pack before
+ * reading anything. A declared directory the pack root does not hold warns
+ * and contributes nothing. Source (26.3 client.jar):
+ * `net.minecraft.server.packs.OverlayMetadataSection$OverlayEntry` reads
+ * `directory` plus `min_format`/`max_format` (or the legacy `formats`)
+ * through `PackFormat.validateHolderList`, which fails the whole section
+ * when one entry is refused and drops an entry that declares no range;
+ * `OverlayedPackResources` stacks `Lists.reverse(entries)` ahead of the
+ * base pack and returns the first hit, so a later entry overrides an
+ * earlier one and every overlay overrides the base.
  */
 
-/** Finding codes this module can produce, coverage skips included. */
+/** Finding codes this module can produce. */
 export type PackMcmetaFindingCode =
 	| "PACK_MCMETA_INVALID"
-	| "PACK_MCMETA_SUSPICIOUS"
-	| "PACK_COVERAGE_SKIPPED";
+	| "PACK_MCMETA_SUSPICIOUS";
 
 export interface PackMcmetaInput {
 	/** Parsed pack.mcmeta document; never a raw file or a parse error. */
@@ -72,6 +77,11 @@ export interface PackMcmetaFinding {
 
 export interface PackMcmetaCheckResult {
 	findings: PackMcmetaFinding[];
+	/**
+	 * Coverage skips this check records. Overlays are merged into the scan
+	 * before any file is read, so nothing is skipped here today; callers
+	 * still treat a non-empty list as content they must not trust.
+	 */
 	skipped: PackCoverageSkip[];
 }
 
@@ -106,6 +116,17 @@ interface OverlayEntry {
 	raw: Record<string, unknown>;
 	directory: string;
 	min: FormatParts | undefined;
+	max: FormatParts | undefined;
+	/** The directory name uses characters the game refuses. */
+	directoryInvalid: boolean;
+	/** `min_format` parsed as a negative number. */
+	negativeMin: boolean;
+	/** `max_format` parsed as a negative number. */
+	negativeMax: boolean;
+	/** A readable min sits above a readable max. */
+	reversed: boolean;
+	/** The block-wide legacy formats rule this entry breaks. */
+	formatsViolation: "missing" | "forbidden" | undefined;
 	broken: boolean;
 }
 
@@ -358,70 +379,64 @@ function overlayTargetRange(entry: OverlayEntry): DeclaredRange | undefined {
 }
 
 /**
- * Overlay entries: directory names, per-entry ranges, the legacy formats
- * rule across the whole block, and the coverage skip for every entry that
- * applies to the scan target. An entry that already carries an error
- * keeps to itself, so one defect never drags a second code or a skip
- * along, and a declared directory the pack root does not hold warns
- * without a skip because there is nothing to leave uninterpreted.
+ * Read the overlay entries the game's codec would accept far enough to
+ * judge them: every record with a string `directory` becomes one entry,
+ * with the name and range defects marked so the reporting pass can name
+ * them and the application pass can skip them. `unreadable` marks an
+ * entry shape the codec cannot read at all, which drops the whole
+ * `overlays` block the way one refused entry does.
  */
-function checkOverlays(
-	input: PackMcmetaInput,
-	skipped: PackCoverageSkip[],
-	error: (message: string) => void,
-	warn: (message: string) => void,
-	noteCoverage: (message: string) => void,
-): void {
-	if (!isRecord(input.doc)) {
-		return;
+function readOverlayEntries(doc: unknown): {
+	entries: OverlayEntry[];
+	unreadable: boolean;
+} {
+	if (!isRecord(doc) || doc.overlays === undefined) {
+		return { entries: [], unreadable: false };
 	}
-	const overlays = input.doc.overlays;
+	const overlays = doc.overlays;
 	if (!isRecord(overlays) || !Array.isArray(overlays.entries)) {
-		return;
+		return { entries: [], unreadable: true };
 	}
 	const entries: OverlayEntry[] = [];
+	let unreadable = false;
 	for (const raw of overlays.entries) {
-		if (!isRecord(raw)) {
+		if (!isRecord(raw) || typeof raw.directory !== "string") {
+			unreadable = true;
 			continue;
 		}
 		const directory = raw.directory;
-		if (typeof directory !== "string") {
-			continue;
-		}
 		const minParsed = parseFormatValue(raw.min_format);
 		const maxParsed = parseFormatValue(raw.max_format);
 		const min = isParts(minParsed) ? minParsed : undefined;
 		const max = isParts(maxParsed) ? maxParsed : undefined;
-		let broken = false;
-		if (!OVERLAY_DIRECTORY_PATTERN.test(directory)) {
-			error(
-				`overlay "${directory}" uses characters outside [-_a-zA-Z0-9.]; the game refuses the entry.`,
-			);
-			broken = true;
-		}
-		if (minParsed === "negative") {
-			error(
-				`overlay "${directory}" declares a negative "min_format"; version values cannot be negative.`,
-			);
-			broken = true;
-		}
-		if (maxParsed === "negative") {
-			error(
-				`overlay "${directory}" declares a negative "max_format"; version values cannot be negative.`,
-			);
-			broken = true;
-		}
-		if (min !== undefined && max !== undefined && isReversed(min, max)) {
-			error(
-				`overlay "${directory}" declares "min_format" above "max_format"; the entry covers no version.`,
-			);
-			broken = true;
-		}
-		entries.push({ raw, directory, min, broken });
+		const directoryInvalid = !OVERLAY_DIRECTORY_PATTERN.test(directory);
+		const negativeMin = minParsed === "negative";
+		const negativeMax = maxParsed === "negative";
+		const reversed =
+			min !== undefined && max !== undefined && isReversed(min, max);
+		entries.push({
+			raw,
+			directory,
+			min,
+			max,
+			directoryInvalid,
+			negativeMin,
+			negativeMax,
+			reversed,
+			formatsViolation: undefined,
+			broken: directoryInvalid || negativeMin || negativeMax || reversed,
+		});
 	}
-	// The legacy formats field follows the whole block: one entry reaching
-	// below 65.0 forces the field on every entry, and with no such entry
-	// the field must stay absent.
+	return { entries, unreadable };
+}
+
+/**
+ * The legacy formats field follows the whole block: one entry reaching
+ * below 65.0 forces the field on every entry, and with no such entry the
+ * field must stay absent. Broken entries neither force the rule nor
+ * receive it.
+ */
+function markFormatsRule(entries: OverlayEntry[]): void {
 	const reachesOldFormats = entries.some((entry) => {
 		if (entry.broken) {
 			return false;
@@ -435,20 +450,61 @@ function checkOverlays(
 		}
 		const hasFormats = entry.raw.formats !== undefined;
 		if (reachesOldFormats && !hasFormats) {
-			error(
-				`overlay "${entry.directory}" declares no "formats" although an entry reaches resource pack formats below 65; every entry must carry the legacy range.`,
-			);
+			entry.formatsViolation = "missing";
 			entry.broken = true;
 		} else if (!reachesOldFormats && hasFormats) {
-			error(
-				`overlay "${entry.directory}" declares "formats" although no entry reaches resource pack formats below 65; the legacy field must be absent.`,
-			);
+			entry.formatsViolation = "forbidden";
 			entry.broken = true;
 		}
 	}
-	const targetText = input.packFormat;
-	const target = parseTargetFormat(targetText);
-	const seenSkips = new Set<string>();
+}
+
+/**
+ * Overlay entries: directory names, per-entry ranges, the legacy formats
+ * rule across the whole block, and warnings for what loads but looks wrong.
+ * An entry that already carries an error keeps to itself, so one defect
+ * never drags a second code along.
+ */
+function checkOverlays(
+	input: PackMcmetaInput,
+	error: (message: string) => void,
+	warn: (message: string) => void,
+): void {
+	const entries = readOverlayEntries(input.doc).entries;
+	for (const entry of entries) {
+		if (entry.directoryInvalid) {
+			error(
+				`overlay "${entry.directory}" uses characters outside [-_a-zA-Z0-9.]; the game refuses the entry.`,
+			);
+		}
+		if (entry.negativeMin) {
+			error(
+				`overlay "${entry.directory}" declares a negative "min_format"; version values cannot be negative.`,
+			);
+		}
+		if (entry.negativeMax) {
+			error(
+				`overlay "${entry.directory}" declares a negative "max_format"; version values cannot be negative.`,
+			);
+		}
+		if (entry.reversed) {
+			error(
+				`overlay "${entry.directory}" declares "min_format" above "max_format"; the entry covers no version.`,
+			);
+		}
+	}
+	markFormatsRule(entries);
+	for (const entry of entries) {
+		if (entry.formatsViolation === "missing") {
+			error(
+				`overlay "${entry.directory}" declares no "formats" although an entry reaches resource pack formats below 65; every entry must carry the legacy range.`,
+			);
+		} else if (entry.formatsViolation === "forbidden") {
+			error(
+				`overlay "${entry.directory}" declares "formats" although no entry reaches resource pack formats below 65; the legacy field must be absent.`,
+			);
+		}
+	}
 	for (const entry of entries) {
 		if (entry.broken) {
 			continue;
@@ -467,9 +523,38 @@ function checkOverlays(
 			warn(
 				`overlay "${entry.directory}" is declared by "pack.mcmeta" but the pack root holds no such directory.`,
 			);
-			continue;
 		}
-		if (target === undefined || targetText === undefined) {
+	}
+}
+
+/**
+ * The overlay directories the game would stack over the base pack for the
+ * given target, in load order: later entries override earlier ones, and
+ * every overlay overrides the base pack. A directory the root does not
+ * hold, an entry without a readable range, and an entry whose range misses
+ * the target are absent. One refused or unreadable entry makes the game
+ * drop the whole overlays section, so no overlay applies then; no resolved
+ * target means no overlay can be placed either.
+ */
+export function overlayDirectoriesForTarget(
+	doc: unknown,
+	packFormat: string | undefined,
+	rootDirectories: ReadonlySet<string>,
+): string[] {
+	const { entries, unreadable } = readOverlayEntries(doc);
+	markFormatsRule(entries);
+	const target = parseTargetFormat(packFormat);
+	if (target === undefined || packFormat === undefined) {
+		return [];
+	}
+	if (unreadable || entries.some((entry) => entry.broken)) {
+		return [];
+	}
+	// Map insertion order keeps declaration order; re-inserting a repeated
+	// directory moves it to its last (highest-priority) position.
+	const applicable = new Map<string, true>();
+	for (const entry of entries) {
+		if (!rootDirectories.has(entry.directory)) {
 			continue;
 		}
 		const range = overlayTargetRange(entry);
@@ -479,27 +564,17 @@ function checkOverlays(
 		if (isBelowTarget(target, range.min) || isAboveTarget(target, range.max)) {
 			continue;
 		}
-		if (seenSkips.has(entry.directory)) {
-			continue;
-		}
-		seenSkips.add(entry.directory);
-		skipped.push({
-			kind: "overlay",
-			reason: "overlay-not-interpreted",
-			target: entry.directory,
-		});
-		noteCoverage(
-			`overlay "${entry.directory}" applies to scan target ${targetText} but is not interpreted; coverage recorded as skipped.`,
-		);
+		applicable.delete(entry.directory);
+		applicable.set(entry.directory, true);
 	}
+	return [...applicable.keys()];
 }
 
 /**
  * Check one parsed pack.mcmeta: the description, the declared pack range,
- * the legacy majors, every overlay entry name and range, the overlay
- * formats rule, and the coverage of each overlay the scan leaves
- * uninterpreted. Pure over its input; findings and skips come back for
- * the scan to merge.
+ * the legacy majors, every overlay entry name and range, and the overlay
+ * formats rule. Pure over its input; findings (and the, today always
+ * empty, coverage skips) come back for the scan to merge.
  */
 export function checkPackMcmeta(input: PackMcmetaInput): PackMcmetaCheckResult {
 	const findings: PackMcmetaFinding[] = [];
@@ -513,9 +588,6 @@ export function checkPackMcmeta(input: PackMcmetaInput): PackMcmetaCheckResult {
 			level: "warning",
 			message,
 		});
-	};
-	const noteCoverage = (message: string): void => {
-		findings.push({ code: "PACK_COVERAGE_SKIPPED", level: "warning", message });
 	};
 	const doc = isRecord(input.doc) ? input.doc : undefined;
 	const pack = doc !== undefined && isRecord(doc.pack) ? doc.pack : undefined;
@@ -546,6 +618,6 @@ export function checkPackMcmeta(input: PackMcmetaInput): PackMcmetaCheckResult {
 			}
 		}
 	}
-	checkOverlays(input, skipped, error, warn, noteCoverage);
+	checkOverlays(input, error, warn);
 	return { findings, skipped };
 }
