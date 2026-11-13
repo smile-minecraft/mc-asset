@@ -26,6 +26,10 @@ import {
 import { checkedOperationCount } from "../model/edit-support.ts";
 import { exportModelDocument } from "../model/export.ts";
 import {
+	ISOMETRIC_DIRECTIONS,
+	type IsometricDirection,
+} from "../model/geometry/index.ts";
+import {
 	inspectModel,
 	type ModelCoverage,
 	type ModelInspectReport,
@@ -36,6 +40,7 @@ import { MODEL_LIMITS } from "../model/limits.ts";
 import {
 	type ModelPreviewReport,
 	type ModelPreviewSize,
+	type ModelPreviewView,
 	renderModelPreview,
 } from "../model/preview/render.ts";
 import type { ModelSpec } from "../model/types.ts";
@@ -83,6 +88,10 @@ export interface ModelCliOptions {
 	operations?: string | undefined; // path or "-"
 	binding?: string | undefined; // path or "-"
 	size?: string | undefined;
+	/** three-view (default) or isometric. */
+	view?: string | undefined;
+	/** Isometric camera direction; only with view=isometric. */
+	viewDirection?: string | undefined;
 	output?: string | undefined;
 	stdout?: boolean | undefined;
 	itemOutput?: string | undefined;
@@ -192,6 +201,9 @@ export interface ModelRequest {
 	readonly minecraftVersion?: string | undefined;
 	readonly resourcePackVersion?: string | undefined;
 	readonly size?: number | undefined;
+	/** three-view (default) or isometric; the shared preview parser validates it. */
+	readonly view?: string | undefined;
+	readonly viewDirection?: string | undefined;
 	readonly outputPath?: string | undefined;
 	readonly itemOutputPath?: string | undefined;
 	readonly blockstateOutputPath?: string | undefined;
@@ -228,6 +240,8 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"operations",
 		"binding",
 		"size",
+		"view",
+		"viewDirection",
 		"outputPath",
 		"itemOutputPath",
 		"blockstateOutputPath",
@@ -240,6 +254,8 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"operations",
 		"binding",
 		"size",
+		"view",
+		"viewDirection",
 		"outputPath",
 		"itemOutputPath",
 		"blockstateOutputPath",
@@ -252,6 +268,8 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"operations",
 		"binding",
 		"size",
+		"view",
+		"viewDirection",
 		"packPath",
 		"vanillaPath",
 		"dependencyPaths",
@@ -264,6 +282,8 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"spec",
 		"binding",
 		"size",
+		"view",
+		"viewDirection",
 		"packPath",
 		"vanillaPath",
 		"dependencyPaths",
@@ -276,6 +296,8 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"spec",
 		"operations",
 		"size",
+		"view",
+		"viewDirection",
 		"vanillaPath",
 		"dependencyPaths",
 		"textureOutputDir",
@@ -707,6 +729,7 @@ function outputChoice(request: ModelRequest): {
 async function runPreview(request: ModelRequest): Promise<ModelOutcome> {
 	const modelPath = requireInput(request);
 	const size = previewSize(request);
+	const view = previewView(request);
 	const packRoot =
 		request.packPath === undefined
 			? undefined
@@ -753,6 +776,7 @@ async function runPreview(request: ModelRequest): Promise<ModelOutcome> {
 			: { minecraftVersion: target.minecraftVersion }),
 		...(context === undefined ? {} : { context }),
 		size,
+		...(view === undefined ? {} : { view }),
 	});
 	// The PNG and the report are computed before anything is written.
 	const payloads = new Map<string, Uint8Array>();
@@ -781,6 +805,41 @@ function previewSize(request: ModelRequest): ModelPreviewSize {
 		`preview size must be one of 64, 128, or 256: ${String(value)}.`,
 		{ field: "size", size: value },
 	);
+}
+
+/**
+ * Parse the preview view. A missing or explicit `three-view` keeps the
+ * existing report and PNG bytes; an isometric view takes a camera direction
+ * that defaults to south-east. A direction without the isometric view is
+ * refused rather than silently ignored.
+ */
+function previewView(request: ModelRequest): ModelPreviewView | undefined {
+	if (request.view === undefined || request.view === "three-view") {
+		if (request.viewDirection !== undefined) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				"viewDirection requires view isometric.",
+				{ field: "viewDirection" },
+			);
+		}
+		return undefined;
+	}
+	if (request.view !== "isometric") {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			`view must be three-view or isometric: ${String(request.view)}.`,
+			{ field: "view", view: request.view },
+		);
+	}
+	const direction = request.viewDirection ?? "south-east";
+	if (!(ISOMETRIC_DIRECTIONS as readonly string[]).includes(direction)) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			`viewDirection must be one of ${ISOMETRIC_DIRECTIONS.join(", ")}: ${String(direction)}.`,
+			{ field: "viewDirection", viewDirection: direction },
+		);
+	}
+	return { kind: "isometric", direction: direction as IsometricDirection };
 }
 
 function modelTargets(
@@ -1470,6 +1529,9 @@ function reportLines(
 			`mode: ${report.mode}`,
 			`path: ${report.path}`,
 			`size: ${String(report.size)}`,
+			...(report.view === undefined
+				? []
+				: [`view: ${report.view.kind} (${report.view.direction})`]),
 			coverageLine(report.coverage),
 		];
 	}
@@ -1598,6 +1660,8 @@ export async function runModel(
 			textureOutputDir: options.textures,
 			texturePaths: textureOption(options.texture),
 			size: options.size === undefined ? undefined : Number(options.size),
+			view: options.view,
+			viewDirection: options.viewDirection,
 			stdout: options.stdout,
 			force: options.force,
 			mkdir: options.mkdir,

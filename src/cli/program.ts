@@ -1790,6 +1790,14 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		if (mode === "preview")
 			command
 				.option("--size <n>", "Panel edge: 64, 128, or 256 (default 64).")
+				.option(
+					"--view <view>",
+					"Preview view: three-view (default) or isometric.",
+				)
+				.option(
+					"--view-direction <direction>",
+					"Isometric camera: south-east (default), south-west, north-west, or north-east.",
+				)
 				.option("--output <file>")
 				.option("--force")
 				.option("--mkdir");

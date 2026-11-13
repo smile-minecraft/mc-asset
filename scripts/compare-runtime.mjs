@@ -34,7 +34,8 @@
 //   - model: create, apply and export text outputs, and the inspect and
 //   - validate reports in canonical JSON (fixed spec, operations, binding),
 //   - plus the model preview PNG bytes (fixed cube render with its texture,
-//   - source model and texture untouched)
+//   - and an isometric preview of a rotated two-part model with the same
+//   - texture, source model and texture untouched)
 // Any difference exits non-zero so CI fails. stderr, timing, and absolute
 // paths never enter the comparison. Temp dirs are always cleaned up.
 import { PNG } from "pngjs";
@@ -499,6 +500,63 @@ function compareModel(bunDir, nodeDir, workdir) {
 	) {
 		fail("model preview changed its source texture");
 	}
+
+	// Isometric preview: a rotated part exercises the geometry renderer and
+	// the four-direction camera, and both runtimes must produce the same PNG.
+	const isoModelText = JSON.stringify({
+		textures: { all: "mypack:block/ruby" },
+		elements: [
+			{
+				from: [2, 0, 2],
+				to: [14, 6, 14],
+				faces: {
+					north: { texture: "#all" },
+					east: { texture: "#all" },
+					up: { texture: "#all" },
+				},
+			},
+			{
+				from: [8, 6, 8],
+				to: [14, 12, 14],
+				rotation: { origin: [8, 6, 8], axis: "y", angle: 22.5 },
+				faces: {
+					north: { texture: "#all" },
+					east: { texture: "#all" },
+					up: { texture: "#all" },
+				},
+			},
+		],
+	});
+	const isoRel = join("pack", "assets", "mypack", "models", "block", "preview-iso.json");
+	for (const dir of [bunDir, nodeDir]) {
+		writeFileSync(join(dir, isoRel), isoModelText);
+	}
+	for (const [run, dir] of [[runBun, bunDir], [runNode, nodeDir]]) {
+		run(
+			[
+				"model",
+				"preview",
+				join(dir, isoRel),
+				"--pack",
+				join(dir, "pack"),
+				...version,
+				"--size",
+				"64",
+				"--view",
+				"isometric",
+				"--view-direction",
+				"north-west",
+				"--output",
+				join(dir, "model-preview-iso.png"),
+			],
+			"model-preview-iso",
+		);
+	}
+	compareFile(
+		"model-preview-iso.png",
+		join(bunDir, "model-preview-iso.png"),
+		join(nodeDir, "model-preview-iso.png"),
+	);
 }
 
 function main() {
