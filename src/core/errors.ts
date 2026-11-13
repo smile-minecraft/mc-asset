@@ -100,6 +100,7 @@ export type ErrorCode =
 	| "ENTITY_LAYOUT_INVALID"
 	| "ENTITY_LAYOUT_UNSUPPORTED_VERSION"
 	| "ENTITY_LAYOUT_OVERLAP"
+	| "ENTITY_TEXTURE_SIZE_MISMATCH"
 	| "EQUIPMENT_INVALID"
 	| "EQUIPMENT_VERSION_UNSUPPORTED"
 	| "EMPTY_SELECTION"
@@ -199,6 +200,9 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	ENTITY_LAYOUT_INVALID: 2,
 	ENTITY_LAYOUT_UNSUPPORTED_VERSION: 5,
 	ENTITY_LAYOUT_OVERLAP: 2,
+	// The 3D preview cannot draw a texture whose size differs from the layout;
+	// it refuses before writing an image, so this is a validation failure.
+	ENTITY_TEXTURE_SIZE_MISMATCH: 3,
 	// Equipment definitions and their texture templates. An unknown layer
 	// type, a malformed path, or a layer type with no verified layout refuses
 	// before any output path is planned; a target format without equipment

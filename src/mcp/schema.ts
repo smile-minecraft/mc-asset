@@ -594,13 +594,18 @@ export type CompareAssetsInput = z.infer<
 	z.ZodObject<typeof compareAssetsInput>
 >;
 
-export const ENTITY_MODES = ["template", "inspect", "validate"] as const;
+export const ENTITY_MODES = [
+	"template",
+	"inspect",
+	"validate",
+	"preview",
+] as const;
 
 export const entityAssetInput = {
 	mode: z
 		.enum(ENTITY_MODES)
 		.describe(
-			"inspect is read-only; template writes a per-face PNG and/or .mcpx; validate checks a texture against a layout.",
+			"inspect is read-only; template writes a per-face PNG and/or .mcpx; validate checks a texture against a layout; preview renders four isometric views of the texture wrapped around the layout's parts.",
 		),
 	layout: z
 		.union([z.string().min(1), z.record(z.string(), z.unknown())])
@@ -612,7 +617,7 @@ export const entityAssetInput = {
 		.string()
 		.min(1)
 		.optional()
-		.describe("validate: texture raster path (PNG, JPEG, WebP)."),
+		.describe("validate or preview: texture raster path (PNG, JPEG, WebP)."),
 	fill: z
 		.boolean()
 		.optional()
@@ -624,7 +629,7 @@ export const entityAssetInput = {
 		.min(1)
 		.optional()
 		.describe(
-			"template: explicit .png path. When omitted, the image is returned as a standard image block.",
+			"template or preview: explicit .png path. When omitted, the image is returned as a standard image block.",
 		),
 	outputMcpxPath: z
 		.string()
@@ -632,6 +637,13 @@ export const entityAssetInput = {
 		.optional()
 		.describe(
 			"template: explicit .mcpx path. When omitted, the source text is returned in the report.",
+		),
+	size: z
+		.number()
+		.int()
+		.optional()
+		.describe(
+			"preview: panel edge size, one of 64, 128, or 256; default 128. The image is 4 panels wide plus a label strip.",
 		),
 };
 export type EntityAssetInput = z.infer<z.ZodObject<typeof entityAssetInput>>;

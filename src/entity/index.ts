@@ -9,6 +9,7 @@ export { entityLayoutSummary, inspectEntityLayout } from "./inspect.ts";
 export {
 	ENTITY_LAYOUT_FORMAT,
 	ENTITY_LAYOUT_VERSION,
+	MAX_ENTITY_INFLATE,
 	MAX_ENTITY_PARTS,
 	parseEntityLayoutDocument,
 	resolveEntityLayout,
@@ -20,6 +21,21 @@ export {
 	getEntityLayoutDocument,
 	listEntityLayoutIds,
 } from "./layouts.ts";
+export type {
+	EntityPreviewCoverage,
+	EntityPreviewDirection,
+	EntityPreviewOptions,
+	EntityPreviewPanel,
+	EntityPreviewRange,
+	EntityPreviewReport,
+	EntityPreviewResult,
+	EntityPreviewSize,
+	EntityPreviewSkip,
+} from "./preview.ts";
+export {
+	ENTITY_PREVIEW_DIRECTIONS,
+	renderEntityPreview,
+} from "./preview.ts";
 export type {
 	EntityTemplate,
 	EntityTemplateOptions,

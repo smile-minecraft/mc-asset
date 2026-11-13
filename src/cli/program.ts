@@ -1910,6 +1910,31 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			},
 		);
 
+	entity
+		.command("preview <texture>")
+		.description(
+			"Render four isometric views of a texture wrapped around the layout's parts as one labeled PNG.",
+		)
+		.option(...entityLayoutOption)
+		.option("--size <n>", "Panel edge size: 64, 128, or 256.", "128")
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option("--force", "Allow overwriting an existing output file.")
+		.option("--mkdir", "Create missing parent directories.")
+		.action(
+			async (texture: string, options: EntityCliOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runEntity(
+					"preview" as EntityMode,
+					texture,
+					options,
+					globals.json === true,
+					streams,
+				);
+				process.exitCode = code;
+			},
+		);
+
 	program
 		.command("equipment <id>")
 		.description(

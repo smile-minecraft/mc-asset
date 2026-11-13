@@ -33,12 +33,20 @@ export interface EntityPartDocument {
 	readonly mirror?: boolean | undefined;
 	/** Defaults to "base". */
 	readonly layer?: EntityLayer | undefined;
-	/** Minimum model-space corner; carried for later 3D preview output. */
+	/** Minimum model-space corner; required by the 3D preview. */
 	readonly origin?: readonly [number, number, number] | undefined;
-	/** Rotation pivot in model space; carried for later interchange. */
+	/** Rotation pivot in model space; required by the 3D preview when rotated. */
 	readonly pivot?: readonly [number, number, number] | undefined;
-	/** Euler rotation in degrees; carried for later interchange. */
+	/** Euler rotation in degrees; absent means none. */
 	readonly rotation?: readonly [number, number, number] | undefined;
+	/**
+	 * Outward growth on every side in model units (texture pixels), the same
+	 * value as Blockbench's cube `inflate`: 0.5 for a player hat, 0.25 for the
+	 * jacket, sleeves, and pants. The UV footprint still uses `size`; the
+	 * preview stretches each face cell over the inflated box, as the game does.
+	 * Values must be multiples of 1/256 so the fixed-point preview is exact.
+	 */
+	readonly inflate?: number | undefined;
 }
 
 export interface EntityLayoutDocument {
@@ -81,6 +89,7 @@ export interface EntityPart {
 	readonly origin?: readonly [number, number, number] | undefined;
 	readonly pivot?: readonly [number, number, number] | undefined;
 	readonly rotation?: readonly [number, number, number] | undefined;
+	readonly inflate?: number | undefined;
 	readonly faces: readonly EntityFace[];
 }
 
