@@ -20,6 +20,10 @@ import {
 	resolveEntityLayoutDocument,
 } from "../entity/index.ts";
 import { buildEntityTemplate } from "../entity/template.ts";
+import {
+	type EquipmentLayerRequest,
+	planEquipmentAsset,
+} from "../equipment/index.ts";
 import { encodePng } from "../io/png.ts";
 import { serializeMcpx } from "../mcpx/index.ts";
 import { isJsonObject, isRelativeProjectPath } from "./document.ts";
@@ -28,10 +32,15 @@ import type { RecipeStep } from "./recipe.ts";
 /** Step types that delegate to a single-asset generator. */
 export const GENERATED_STEP_TYPES: ReadonlySet<string> = new Set([
 	"entityTemplate",
+	"equipment",
 ]);
 
 /** Lock kinds a generator-backed step writes. */
-export type GeneratedOutputKind = "entityTemplate" | "entityTemplateSource";
+export type GeneratedOutputKind =
+	| "entityTemplate"
+	| "entityTemplateSource"
+	| "equipmentDefinition"
+	| "equipmentTexture";
 
 /** The file extension each generated family writes. */
 const EXTENSION_BY_KIND: Readonly<
@@ -39,6 +48,8 @@ const EXTENSION_BY_KIND: Readonly<
 > = {
 	entityTemplate: ".png",
 	entityTemplateSource: ".mcpx",
+	equipmentDefinition: ".json",
+	equipmentTexture: ".png",
 };
 
 /** One file a step produces, with the bytes fixed before any write. */
@@ -96,6 +107,26 @@ const ENTITY_TEMPLATE_FIELDS: ReadonlySet<string> = new Set([
 	"mcpxOutput",
 	"fill",
 	"override",
+]);
+
+const EQUIPMENT_FIELDS: ReadonlySet<string> = new Set([
+	"type",
+	"id",
+	"layers",
+	"template",
+	"fill",
+	"override",
+]);
+
+const EQUIPMENT_LAYER_FIELDS: ReadonlySet<string> = new Set([
+	"type",
+	"texture",
+	"dyeable",
+	"usePlayerTexture",
+]);
+
+const EQUIPMENT_DYEABLE_FIELDS: ReadonlySet<string> = new Set([
+	"colorWhenUndyed",
 ]);
 
 const TEXT_ENCODER = new TextEncoder();
@@ -217,14 +248,18 @@ function parseOverride(value: unknown, context: GeneratedStepContext): boolean {
  * `RECIPE_VERSION_UNSUPPORTED`; every other malformed input becomes
  * `RECIPE_INVALID`; the original code is kept as `cause`.
  */
+const GENERATOR_VERSION_CODES: ReadonlySet<string> = new Set([
+	"ENTITY_LAYOUT_UNSUPPORTED_VERSION",
+	"EQUIPMENT_VERSION_UNSUPPORTED",
+]);
+
 function translateGeneratorFailure(
 	error: unknown,
 	context: GeneratedStepContext,
 ): never {
 	if (error instanceof McAssetError) {
 		const details = isJsonObject(error.details) ? error.details : {};
-		const unsupportedVersion =
-			error.code === "ENTITY_LAYOUT_UNSUPPORTED_VERSION";
+		const unsupportedVersion = GENERATOR_VERSION_CODES.has(error.code);
 		throw new McAssetError(
 			unsupportedVersion ? "RECIPE_VERSION_UNSUPPORTED" : "RECIPE_INVALID",
 			error.message,
@@ -353,12 +388,169 @@ function planEntityTemplate(context: GeneratedStepContext): GeneratedStepPlan {
 	};
 }
 
+/** One `layers[]` entry: the short string form or the full object form. */
+function parseEquipmentLayer(
+	value: unknown,
+	index: number,
+	context: GeneratedStepContext,
+): EquipmentLayerRequest {
+	const field = `layers[${index}]`;
+	if (typeof value === "string") {
+		if (value.trim() === "") {
+			stepFailure(
+				context,
+				field,
+				`equipment step entry at ${field} must name a layer type.`,
+			);
+		}
+		return { type: value };
+	}
+	if (!isJsonObject(value)) {
+		stepFailure(
+			context,
+			field,
+			`equipment step entry at ${field} must be a layer type string or an object.`,
+		);
+	}
+	for (const key of Object.keys(value)) {
+		if (!EQUIPMENT_LAYER_FIELDS.has(key)) {
+			stepFailure(
+				context,
+				`${field}.${key}`,
+				`Unknown field '${key}' in equipment layer at ${field}.`,
+			);
+		}
+	}
+	if (typeof value.type !== "string" || value.type.trim() === "") {
+		stepFailure(
+			context,
+			`${field}.type`,
+			`equipment step entry at ${field} needs a non-empty layer type.`,
+		);
+	}
+	if (
+		value.texture !== undefined &&
+		(typeof value.texture !== "string" || value.texture.trim() === "")
+	) {
+		stepFailure(
+			context,
+			`${field}.texture`,
+			`equipment step entry at ${field} needs a non-empty texture name.`,
+		);
+	}
+	const layer: {
+		type: string;
+		texture?: string;
+		dyeable?: { colorWhenUndyed?: number };
+		usePlayerTexture?: boolean;
+	} = { type: value.type };
+	if (value.texture !== undefined) {
+		layer.texture = value.texture as string;
+	}
+	if (value.dyeable !== undefined) {
+		if (!isJsonObject(value.dyeable)) {
+			stepFailure(
+				context,
+				`${field}.dyeable`,
+				`equipment layer 'dyeable' at ${field} must be an object.`,
+			);
+		}
+		for (const key of Object.keys(value.dyeable)) {
+			if (!EQUIPMENT_DYEABLE_FIELDS.has(key)) {
+				stepFailure(
+					context,
+					`${field}.dyeable.${key}`,
+					`Unknown field '${key}' in equipment layer 'dyeable' at ${field}.`,
+				);
+			}
+		}
+		const color = value.dyeable.colorWhenUndyed;
+		if (color !== undefined && typeof color !== "number") {
+			stepFailure(
+				context,
+				`${field}.dyeable.colorWhenUndyed`,
+				`equipment layer 'dyeable.colorWhenUndyed' at ${field} must be an integer.`,
+			);
+		}
+		layer.dyeable =
+			color === undefined ? {} : { colorWhenUndyed: color as number };
+	}
+	if (value.usePlayerTexture !== undefined) {
+		if (typeof value.usePlayerTexture !== "boolean") {
+			stepFailure(
+				context,
+				`${field}.usePlayerTexture`,
+				`equipment layer 'usePlayerTexture' at ${field} must be a boolean.`,
+			);
+		}
+		layer.usePlayerTexture = value.usePlayerTexture;
+	}
+	return layer;
+}
+
+function planEquipment(context: GeneratedStepContext): GeneratedStepPlan {
+	const step = context.step;
+	assertStepFields(step, EQUIPMENT_FIELDS, context);
+	parseOverride(step.override, context);
+	const id =
+		step.id === undefined
+			? context.targetId
+			: typeof step.id === "string" && step.id.trim() !== ""
+				? step.id
+				: stepFailure(
+						context,
+						"id",
+						`equipment step field 'id' must be a non-empty string for target '${context.targetId}'.`,
+					);
+	if (!Array.isArray(step.layers) || step.layers.length === 0) {
+		stepFailure(
+			context,
+			"layers",
+			`equipment step needs a non-empty 'layers' array for target '${context.targetId}'.`,
+		);
+	}
+	const layers = step.layers.map((layer, index) =>
+		parseEquipmentLayer(layer, index, context),
+	);
+	const template = optionalBoolean(step.template, "template", context, true);
+	const fill = optionalBoolean(step.fill, "fill", context, true);
+	let plan: ReturnType<typeof planEquipmentAsset>;
+	try {
+		plan = planEquipmentAsset({
+			namespace: context.namespace,
+			id,
+			packFormat: context.packFormat,
+			layers,
+			template,
+			fill,
+		});
+	} catch (error) {
+		translateGeneratorFailure(error, context);
+	}
+	const outputs: GeneratedOutput[] = [
+		generatedOutput(
+			plan.definition.relativePath,
+			"equipmentDefinition",
+			TEXT_ENCODER.encode(plan.definition.text),
+		),
+	];
+	for (const texture of plan.textures) {
+		outputs.push(
+			generatedOutput(texture.relativePath, "equipmentTexture", texture.png),
+		);
+	}
+	return { outputs, inputs: [] };
+}
+
 /** Plan one generator-backed step; every refusal happens before a write. */
 export async function planGeneratedStep(
 	context: GeneratedStepContext,
 ): Promise<GeneratedStepPlan> {
 	if (context.step.type === "entityTemplate") {
 		return planEntityTemplate(context);
+	}
+	if (context.step.type === "equipment") {
+		return planEquipment(context);
 	}
 	throw new McAssetError(
 		"RECIPE_INVALID",

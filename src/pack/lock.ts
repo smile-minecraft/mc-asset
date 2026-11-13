@@ -24,6 +24,8 @@ export const LOCK_ENTRY_KINDS = [
 	"blockstate",
 	"entityTemplate",
 	"entityTemplateSource",
+	"equipmentDefinition",
+	"equipmentTexture",
 ] as const;
 
 /** One output family a lock entry can name. */

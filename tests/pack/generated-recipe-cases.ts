@@ -8,6 +8,7 @@ import {
 	resolveEntityLayoutDocument,
 } from "../../src/entity/index.ts";
 import { buildEntityTemplate } from "../../src/entity/template.ts";
+import { planEquipmentAsset } from "../../src/equipment/index.ts";
 import { encodePng } from "../../src/io/png.ts";
 import { executePackBuild, planPackBuild } from "../../src/pack/build.ts";
 import { initializePackProject } from "../../src/pack/init.ts";
@@ -34,6 +35,7 @@ interface GeneratedCase {
 
 async function withProject(
 	body: (projectDir: string) => Promise<void>,
+	minecraftVersion = "1.21.9",
 ): Promise<void> {
 	const dir = await mkdtemp(join(tmpdir(), "mc-asset-generated-"));
 	try {
@@ -41,7 +43,7 @@ async function withProject(
 		await initializePackProject({
 			projectDir,
 			namespace: NAMESPACE,
-			minecraftVersion: "1.21.9",
+			minecraftVersion,
 			name: "aurelian-forge",
 		});
 		await body(projectDir);
@@ -421,6 +423,226 @@ export const GENERATED_RECIPE_CASES: readonly GeneratedCase[] = [
 				);
 				assert.equal(refusal.code, "RECIPE_INVALID");
 				assert.equal(refusal.details?.requiredFormatVersion, 3);
+			});
+		},
+	},
+	{
+		name: "an equipment step writes the definition and both armor templates",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "armor", {
+					formatVersion: 3,
+					id: "hero-armor",
+					targets: [
+						{
+							id: "hero_armor",
+							steps: [
+								{
+									type: "equipment",
+									layers: ["humanoid", "humanoid_leggings"],
+								},
+							],
+						},
+					],
+				});
+				await build(projectDir);
+				const expected = planEquipmentAsset({
+					namespace: NAMESPACE,
+					id: "hero_armor",
+					packFormat: "69.0",
+					layers: [{ type: "humanoid" }, { type: "humanoid_leggings" }],
+				});
+				const definitionPath = "assets/aurelian/equipment/hero_armor.json";
+				const definition = await bytesAt(onDisk(projectDir, definitionPath));
+				assert.ok(definition);
+				assert.equal(
+					sha256(definition),
+					sha256(new TextEncoder().encode(expected.definition.text)),
+					"the definition is the generator's text",
+				);
+				for (const texture of expected.textures) {
+					const bytes = await bytesAt(onDisk(projectDir, texture.relativePath));
+					assert.ok(bytes, `${texture.relativePath} exists`);
+					assert.equal(
+						sha256(bytes),
+						sha256(texture.png),
+						`${texture.relativePath} is the generator's PNG`,
+					);
+				}
+				const lock = parseLockText(
+					await readFile(join(projectDir, "mc-asset.lock.json"), "utf8"),
+				);
+				assert.equal(
+					lock.outputs[`pack/${definitionPath}`]?.kind,
+					"equipmentDefinition",
+				);
+				const textureEntries = Object.entries(lock.outputs).filter(
+					([, entry]) => entry.kind === "equipmentTexture",
+				);
+				assert.equal(textureEntries.length, 2, "two armor sheets are locked");
+				assert.ok(
+					textureEntries.every(([, entry]) => entry.targetId === "hero_armor"),
+				);
+			});
+		},
+	},
+	{
+		name: "an equipment step without templates writes the definition alone",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "armor", {
+					formatVersion: 3,
+					id: "standalone",
+					targets: [
+						{
+							id: "hero_armor",
+							steps: [
+								{ type: "equipment", template: false, layers: ["wings"] },
+							],
+						},
+					],
+				});
+				const plan = await planPackBuild(projectPath(projectDir));
+				assert.equal(plan.outputs.length, 1, "one JSON document");
+				await executePackBuild(plan);
+				const lock = parseLockText(
+					await readFile(join(projectDir, "mc-asset.lock.json"), "utf8"),
+				);
+				assert.deepEqual(Object.keys(lock.outputs), [
+					"pack/assets/aurelian/equipment/hero_armor.json",
+				]);
+			});
+		},
+	},
+	{
+		name: "equipment layer options reach the document unchanged",
+		async run() {
+			await withProject(async (projectDir) => {
+				const layers = [
+					{
+						type: "humanoid",
+						texture: "hero_helmet",
+						dyeable: { colorWhenUndyed: -1 },
+					},
+					{ type: "wings", usePlayerTexture: true },
+				];
+				await writeRecipe(projectDir, "armor", {
+					formatVersion: 3,
+					id: "hero-armor",
+					targets: [
+						{ id: "hero_armor", steps: [{ type: "equipment", layers }] },
+					],
+				});
+				await build(projectDir);
+				const expected = planEquipmentAsset({
+					namespace: NAMESPACE,
+					id: "hero_armor",
+					packFormat: "69.0",
+					layers,
+				});
+				assert.equal(
+					await readFile(
+						onDisk(projectDir, expected.definition.relativePath),
+						"utf8",
+					),
+					expected.definition.text,
+				);
+			});
+		},
+	},
+	{
+		name: "equipment version and layer gates surface as recipe refusals",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "armor", {
+					formatVersion: 3,
+					id: "too-old",
+					targets: [
+						{
+							id: "hero_armor",
+							steps: [{ type: "equipment", layers: ["humanoid"] }],
+						},
+					],
+				});
+				const refusal = await refusalOf(async () =>
+					planPackBuild(projectPath(projectDir)),
+				);
+				assert.equal(refusal.code, "RECIPE_VERSION_UNSUPPORTED");
+				assert.equal(refusal.details?.cause, "EQUIPMENT_VERSION_UNSUPPORTED");
+			}, "1.20.4");
+		},
+	},
+	{
+		name: "an equipment layer the target predates is a recipe version refusal",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "armor", {
+					formatVersion: 3,
+					id: "too-new",
+					targets: [
+						{
+							id: "hero_armor",
+							steps: [{ type: "equipment", layers: ["humanoid_baby"] }],
+						},
+					],
+				});
+				const refusal = await refusalOf(async () =>
+					planPackBuild(projectPath(projectDir)),
+				);
+				assert.equal(refusal.code, "RECIPE_VERSION_UNSUPPORTED");
+				assert.equal(refusal.details?.cause, "EQUIPMENT_VERSION_UNSUPPORTED");
+			});
+		},
+	},
+	{
+		name: "an unknown equipment layer type is a recipe refusal",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "armor", {
+					formatVersion: 3,
+					id: "unknown",
+					targets: [
+						{
+							id: "hero_armor",
+							steps: [{ type: "equipment", layers: ["cape"] }],
+						},
+					],
+				});
+				const refusal = await refusalOf(async () =>
+					planPackBuild(projectPath(projectDir)),
+				);
+				assert.equal(refusal.code, "RECIPE_INVALID");
+				assert.equal(refusal.details?.cause, "EQUIPMENT_INVALID");
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+				);
+			});
+		},
+	},
+	{
+		name: "a hand-edited equipment texture refuses the batch",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "armor", {
+					formatVersion: 3,
+					id: "hero-armor",
+					targets: [
+						{
+							id: "hero_armor",
+							steps: [{ type: "equipment", layers: ["humanoid"] }],
+						},
+					],
+				});
+				await build(projectDir);
+				const texturePath =
+					"assets/aurelian/textures/entity/equipment/humanoid/hero_armor.png";
+				await writePackFile(projectDir, texturePath, "hand edit");
+				const refusal = await refusalOf(async () => build(projectDir));
+				assert.equal(refusal.code, "PACK_BUILD_CONFLICT");
+				assert.deepEqual(refusal.details?.conflicts, [
+					{ path: `pack/${texturePath}`, reason: "own-modified" },
+				]);
 			});
 		},
 	},
