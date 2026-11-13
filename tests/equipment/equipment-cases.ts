@@ -17,6 +17,8 @@ import {
 	undyedColorFromHex,
 } from "../../src/cli/cmd-equipment.ts";
 import { buildProgram } from "../../src/cli/program.ts";
+import { getPixel } from "../../src/core/canvas.ts";
+import { ENTITY_FACE_COLORS } from "../../src/entity/template.ts";
 import {
 	type EquipmentTextureOutput,
 	planEquipmentAsset,
@@ -490,6 +492,30 @@ export const EQUIPMENT_CASES: readonly EquipmentCase[] = [
 					.map((region) => region.partId),
 				Array(6).fill("hat"),
 			);
+
+			// The template actually paints each reported cell with its face
+			// color, so the regions and the pixels cannot drift apart.
+			const decoded = decodePng(texture.png);
+			assert.deepEqual(getPixel(decoded.canvas, "base", 12, 12), {
+				...ENTITY_FACE_COLORS.front,
+			});
+			assert.deepEqual(getPixel(decoded.canvas, "base", 8, 0), {
+				...ENTITY_FACE_COLORS.top,
+			});
+			assert.deepEqual(getPixel(decoded.canvas, "base", 60, 12), {
+				...ENTITY_FACE_COLORS.back,
+			});
+
+			const transparent = planEquipmentAsset({
+				namespace: "demo",
+				id: "gear",
+				packFormat: "46.0",
+				layers: [{ type: "humanoid" }],
+				fill: false,
+			}).textures[0];
+			assert.ok(transparent !== undefined);
+			const blank = decodePng(transparent.png);
+			assert.equal(getPixel(blank.canvas, "base", 12, 12).a, 0);
 		},
 	},
 	{
@@ -668,6 +694,50 @@ export const EQUIPMENT_CASES: readonly EquipmentCase[] = [
 				});
 				assertRefused(bad, "INVALID_ARGUMENT", 2);
 				assert.deepEqual(await listAll(badPack), []);
+			});
+		},
+	},
+	{
+		name: "use_player_texture lands only on the marked layer entry",
+		async run() {
+			await withTempRoot("equipment-player-texture-", async (root) => {
+				const pack = join(root, "pack");
+				const run = await runEquipmentCli("gear", {
+					namespace: GENERATED.namespace,
+					outputDir: pack,
+					resourcePackVersion: "46",
+					layer: ["humanoid", "wings"],
+					playerTexture: ["wings"],
+					mkdir: true,
+				});
+				const result = assertOk(run);
+				assert.deepEqual(result.layers.humanoid, [{ texture: "demo:gear" }]);
+				assert.deepEqual(result.layers.wings, [
+					{ texture: "demo:gear", use_player_texture: true },
+				]);
+				const definition = await readJson(
+					join(pack, "assets", "demo", "equipment", "gear.json"),
+				);
+				const layers = definition.layers as Record<
+					string,
+					Record<string, unknown>[]
+				>;
+				assert.equal(layers.wings?.[0]?.use_player_texture, true);
+				assert.ok(
+					layers.humanoid?.[0] !== undefined &&
+						!("use_player_texture" in layers.humanoid[0]),
+				);
+
+				const unlayered = await runEquipmentCli("gear", {
+					namespace: GENERATED.namespace,
+					outputDir: join(root, "never"),
+					resourcePackVersion: "46",
+					layer: ["humanoid"],
+					playerTexture: ["wings"],
+					mkdir: true,
+				});
+				assertRefused(unlayered, "INVALID_ARGUMENT", 2);
+				assert.deepEqual(await listAll(join(root, "never")), []);
 			});
 		},
 	},
