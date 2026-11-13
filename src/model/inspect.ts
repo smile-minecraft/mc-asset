@@ -1,3 +1,4 @@
+import { isBuiltinModel } from "../profiles/builtin-models.ts";
 import { decideUnresolvedVariable } from "../validate/reference-graph.ts";
 import type { ResolutionSource } from "../validate/resource-context.ts";
 import { validateResourceLocation } from "../validate/resource-location.ts";
@@ -163,6 +164,18 @@ export interface ModelAnalyzeOptions {
 	readonly modelId?: string | undefined;
 	readonly context?: ModelResolutionContext | undefined;
 	readonly path: string;
+	/**
+	 * Treat a parent reference written without a namespace as `minecraft:`
+	 * when it names a builtin template.
+	 *
+	 * Every Minecraft resource location defaults to the `minecraft` namespace
+	 * (`ResourceLocation.parse("item/generated")`), and the 1.21.4 vanilla
+	 * `item/handheld.json` itself writes `"parent": "item/generated"`. The
+	 * inspect and validate reports keep their historical `unresolved` result
+	 * for that spelling, so only the preview asks for the alias and reads the
+	 * builtin template's `display` / `gui_light` from it.
+	 */
+	readonly builtinParentAliases?: boolean | undefined;
 }
 
 function member(node: JsonNode, key: string): JsonNode | undefined {
@@ -385,11 +398,19 @@ async function analyze(
 	for (let depth = 0; nextParent !== undefined; depth += 1) {
 		const pointer = depth === 0 ? "/parent" : "";
 		const resolution = resolveModelReference(context, nextParent);
+		const builtinAlias =
+			options.builtinParentAliases === true &&
+			!nextParent.includes(":") &&
+			isBuiltinModel(`minecraft:${nextParent}`) &&
+			(resolution.status === "unresolved" || resolution.status === "missing");
 		if (depth === 0) {
 			parentReport = {
 				value: nextParent,
-				status:
-					resolution.status === "case-mismatch" ? "missing" : resolution.status,
+				status: builtinAlias
+					? "builtin"
+					: resolution.status === "case-mismatch"
+						? "missing"
+						: resolution.status,
 				...(resolution.source === undefined
 					? {}
 					: { source: resolution.source }),
@@ -398,8 +419,10 @@ async function analyze(
 					: { target: resolution.target }),
 			};
 		}
-		if (resolution.status === "builtin") {
-			builtinTerminus = resolution.target ?? nextParent;
+		if (resolution.status === "builtin" || builtinAlias) {
+			builtinTerminus = builtinAlias
+				? `minecraft:${nextParent}`
+				: (resolution.target ?? nextParent);
 			parentTermination = { status: "complete", reason: "builtin" };
 			break;
 		}

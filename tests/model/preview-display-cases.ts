@@ -4,6 +4,7 @@ import { runModel, runModelRequest } from "../../src/cli/cmd-model.ts";
 import { McAssetError } from "../../src/core/errors.ts";
 import { handleModelAsset } from "../../src/mcp/handlers-model-optimize.ts";
 import type { FixedVec3 } from "../../src/model/geometry/index.ts";
+import { inspectModel } from "../../src/model/inspect.ts";
 import {
 	builtinDisplaySource,
 	builtinGuiLight,
@@ -15,10 +16,12 @@ import {
 	shadeForNormal,
 } from "../../src/model/preview/display.ts";
 import { renderModelPreview } from "../../src/model/preview/render.ts";
+import { buildParentModel } from "../../src/pack/item-templates.ts";
 import { captureStreams } from "../cli/optimize-model-cases.ts";
 import type { CaseCheck, ModelCase } from "./json-document-cases.ts";
 import {
 	assertRgba,
+	bandPng,
 	coloredCubeContext,
 	coloredCubeModel,
 	cubeModel,
@@ -32,6 +35,7 @@ import {
 	STONE_REL,
 	sha256,
 	solidPng,
+	splitPng,
 	withTempRoot,
 } from "./preview-cases.ts";
 
@@ -920,8 +924,13 @@ export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
 			);
 			check.deepEqual(
 				Object.keys(spellings.report.tint?.tints ?? {}),
-				["2.0", "1e1", "0x10"],
-				"entries that are not array indices still sort by their numeric tint index",
+				["2", "10", "16"],
+				"the report keys are the canonical decimal index, in numeric order",
+			);
+			check.deepEqual(
+				spellings.report.tint?.tints,
+				{ "2": "#020000", "10": "#0a0000", "16": "#100000" },
+				"each spelling keeps its own colour under the canonical key",
 			);
 
 			await expectCode(
@@ -1585,6 +1594,354 @@ export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
 			for (const value of ["#80c04", "#80c0400", "#gggggg", "", "red"]) {
 				check.equal(parseTintColor(value), undefined, `${value} is rejected`);
 			}
+		},
+	},
+	{
+		name: "a builtin parent written without a namespace resolves like minecraft:",
+		async run(check) {
+			const filesFor = (parent: string): Record<string, Uint8Array> => ({
+				[ITEM_BASE_PATH]: encoder.encode(JSON.stringify({ parent })),
+				[STONE_REL]: solidPng(200, 200, 200),
+			});
+			for (const entry of [
+				{ template: "item/generated", slot: "fixed" as const },
+				{ template: "item/handheld", slot: "firstperson_righthand" as const },
+			]) {
+				const options = {
+					path: PREVIEW_PATH,
+					size: 64 as const,
+					display: entry.slot,
+					lighting: true,
+				};
+				const alias = await renderModelPreview(childOf("demo:item/base"), {
+					...options,
+					context: memoryContext(filesFor(entry.template)),
+				});
+				const named = await renderModelPreview(childOf("demo:item/base"), {
+					...options,
+					context: memoryContext(filesFor(`minecraft:${entry.template}`)),
+				});
+				check.equal(
+					alias.report.display?.from,
+					`minecraft:${entry.template}`,
+					`${entry.template}: the default namespace names the template`,
+				);
+				check.equal(
+					alias.report.display?.applied,
+					true,
+					`${entry.template}: the template transform is applied`,
+				);
+				check.deepEqual(
+					alias.report.display,
+					named.report.display,
+					`${entry.template}: same display report as the explicit namespace`,
+				);
+				check.deepEqual(
+					alias.report.lighting,
+					named.report.lighting,
+					`${entry.template}: same lighting report as the explicit namespace`,
+				);
+				check.equal(
+					sha256(alias.png),
+					sha256(named.png),
+					`${entry.template}: the same bytes as the explicit namespace`,
+				);
+				check.equal(
+					JSON.stringify(alias.report),
+					JSON.stringify(named.report),
+					`${entry.template}: the whole report matches the explicit namespace`,
+				);
+			}
+
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
+			const direct = await renderModelPreview(childOf("item/generated"), {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				display: "head",
+				lighting: true,
+			});
+			check.equal(
+				direct.report.display?.from,
+				"minecraft:item/generated",
+				"a namespace-less direct parent is the template",
+			);
+			check.deepEqual(
+				[...(direct.report.display?.translation ?? [])],
+				[0, 13, 7],
+				"the generated head transform is applied",
+			);
+			check.equal(
+				direct.report.lighting?.guiLight,
+				"front",
+				"the generated gui_light is applied",
+			);
+
+			// The alias is a preview rule: inspect and validate keep reporting
+			// the namespace-less parent exactly as before.
+			const inspection = await inspectModel(childOf("item/generated"), {
+				path: PREVIEW_PATH,
+				context,
+			});
+			check.equal(
+				inspection.parent?.status,
+				"unresolved",
+				"inspect still reports the namespace-less parent as unresolved",
+			);
+			check.equal(
+				inspection.coverage.status,
+				"partial",
+				"inspect still lists the unread parent in coverage",
+			);
+		},
+	},
+	{
+		name: "a recipe-built item model draws its layer plane and shows the pose",
+		async run(check) {
+			const itemModel = buildParentModel({ item: "ruby", namespace: "demo" });
+			const context = memoryContext({
+				"assets/demo/textures/item/ruby.png": splitPng(),
+			});
+			const modelPath = "assets/demo/models/item/ruby.json";
+			const render = (rotation: readonly [number, number, number]) =>
+				renderModelPreview(
+					JSON.stringify({ ...itemModel, display: { gui: { rotation } } }),
+					{
+						path: modelPath,
+						context,
+						size: 64,
+						display: "gui",
+						lighting: true,
+					},
+				);
+			const flat = await render([0, 0, 0]);
+			const turned = await render([30, 225, 0]);
+			const flatPixels = flatOf(flat.png);
+			const turnedPixels = flatOf(turned.png);
+			const flatBox = panelBox(
+				flatPixels.flat,
+				flatPixels.width,
+				0,
+				0,
+				flatPixels.width - 1,
+				flatPixels.height - 1,
+			);
+			const turnedBox = panelBox(
+				turnedPixels.flat,
+				turnedPixels.width,
+				0,
+				0,
+				turnedPixels.width - 1,
+				turnedPixels.height - 1,
+			);
+			check.deepEqual(
+				[flatBox.minX, flatBox.minY, flatBox.maxX, flatBox.maxY],
+				[16, 16, 47, 47],
+				"the unrotated 16-unit plane is a 32 px square in the 64 px panel",
+			);
+			check.ok(
+				turnedBox.count > 0,
+				"the turned pose draws the item instead of a transparent image",
+			);
+			check.ok(
+				sha256(flat.png) !== sha256(turned.png),
+				"the gui rotation changes the image",
+			);
+			check.ok(
+				turnedBox.width !== flatBox.width ||
+					turnedBox.height !== flatBox.height,
+				"the turned pose is not the flat square",
+			);
+			assertRgba(
+				check,
+				flatPixels.flat,
+				flatPixels.width,
+				20,
+				32,
+				[255, 0, 0, 255],
+				"the left half of layer0 is drawn",
+			);
+			assertRgba(
+				check,
+				flatPixels.flat,
+				flatPixels.width,
+				43,
+				32,
+				[0, 255, 0, 255],
+				"the right half of layer0 is drawn",
+			);
+			check.equal(
+				flat.report.display?.applied,
+				true,
+				"the model's own gui display entry is applied",
+			);
+			check.equal(
+				flat.report.coverage.status,
+				"complete",
+				"the drawn layer covers the model, so coverage is complete",
+			);
+			check.ok(
+				flat.report.unapplied.includes("generated-item-edge-quads"),
+				"the 1 px edge quads the preview omits are listed",
+			);
+		},
+	},
+	{
+		name: "generated item layers stack with the upper layer in front",
+		async run(check) {
+			const context = memoryContext({
+				"assets/demo/textures/item/ruby.png": splitPng(),
+				"assets/demo/textures/item/ruby_top.png": bandPng(0, 0, 255),
+			});
+			const rendered = await renderModelPreview(
+				JSON.stringify({
+					parent: "minecraft:item/generated",
+					textures: {
+						layer0: "demo:item/ruby",
+						layer1: "demo:item/ruby_top",
+					},
+				}),
+				{
+					path: "assets/demo/models/item/ruby.json",
+					context,
+					size: 64,
+					display: "gui",
+				},
+			);
+			const pixels = flatOf(rendered.png);
+			check.equal(
+				rendered.report.coverage.status,
+				"complete",
+				"both layers resolve, so coverage is complete",
+			);
+			assertRgba(
+				check,
+				pixels.flat,
+				pixels.width,
+				32,
+				18,
+				[0, 0, 255, 255],
+				"layer1 covers layer0 where it is opaque",
+			);
+			assertRgba(
+				check,
+				pixels.flat,
+				pixels.width,
+				20,
+				32,
+				[255, 0, 0, 255],
+				"layer0 shows through layer1's transparent texels",
+			);
+			assertRgba(
+				check,
+				pixels.flat,
+				pixels.width,
+				43,
+				32,
+				[0, 255, 0, 255],
+				"layer0's right half is drawn under layer1's empty area",
+			);
+
+			// The generator stops at the first missing layer, so a gap ends the
+			// generated geometry; layer2 alone must not appear.
+			const gap = await renderModelPreview(
+				JSON.stringify({
+					parent: "minecraft:item/generated",
+					textures: {
+						layer0: "demo:item/ruby",
+						layer2: "demo:item/ruby_top",
+					},
+				}),
+				{
+					path: "assets/demo/models/item/ruby.json",
+					context,
+					size: 64,
+					display: "gui",
+				},
+			);
+			const gapPixels = flatOf(gap.png);
+			check.deepEqual(
+				panelColors(
+					gapPixels.flat,
+					gapPixels.width,
+					0,
+					0,
+					gapPixels.width - 1,
+					gapPixels.height - 1,
+				),
+				["0,255,0", "255,0,0"],
+				"a layer after a gap is not generated",
+			);
+
+			// A layer texture only the parent declares has no resolved texture
+			// in the inspection report, so it is reported instead of drawn.
+			const inherited = await renderModelPreview(
+				JSON.stringify({ parent: "demo:item/base" }),
+				{
+					path: "assets/demo/models/item/ruby.json",
+					context: memoryContext({
+						"assets/demo/models/item/base.json": encoder.encode(
+							JSON.stringify({
+								parent: "minecraft:item/generated",
+								textures: { layer0: "demo:item/ruby" },
+							}),
+						),
+						"assets/demo/textures/item/ruby.png": splitPng(),
+					}),
+					size: 64,
+					display: "gui",
+				},
+			);
+			check.equal(
+				inherited.report.coverage.status,
+				"partial",
+				"an inherited layer ends the drawn run and is reported",
+			);
+			check.ok(
+				inherited.report.coverage.skipped.some(
+					(entry) =>
+						entry.kind === "generated-item-layer" &&
+						entry.reason === "inherited-texture" &&
+						entry.target === "layer0",
+				),
+				"the undrawn inherited layer is named",
+			);
+		},
+	},
+	{
+		name: "mcp tint spellings are reported under the canonical numeric index",
+		async run(check) {
+			await withTempRoot(async (root) => {
+				const { pack, model } = await makePack(
+					root,
+					solidPng(200, 200, 200),
+					testCube(),
+				);
+				const mcp = await handleModelAsset({
+					mode: "preview",
+					inputPath: model,
+					packPath: pack,
+					size: 64,
+					tints: { "10": "#010203", "02": "#040506" },
+				});
+				check.equal(mcp.isError, undefined, "mcp render succeeds");
+				const textBlock = mcp.content.find((entry) => entry.type === "text");
+				check.ok(textBlock?.type === "text", "mcp report");
+				if (textBlock?.type !== "text") return;
+				const report = JSON.parse(textBlock.text) as {
+					tint?: { tints?: Record<string, string> };
+				};
+				check.deepEqual(
+					Object.keys(report.tint?.tints ?? {}),
+					["2", "10"],
+					"mixed spellings report in numeric order",
+				);
+				check.deepEqual(
+					report.tint?.tints,
+					{ "2": "#040506", "10": "#010203" },
+					"each colour keeps its index under the canonical key",
+				);
+			});
 		},
 	},
 ];

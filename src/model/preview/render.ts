@@ -24,6 +24,7 @@ import {
 	type PreviewDisplaySlot,
 	type RgbTint,
 } from "./display.ts";
+import { isItemLayerName, itemLayerElements } from "./item-layers.ts";
 import {
 	autoUv,
 	checkerColor,
@@ -88,6 +89,12 @@ export type {
  * renders one square panel through the game display slot's transform and
  * optionally applies the fixed face shading and a tint colour.
  *
+ * A recipe-built item model has no `elements` at all: it is a `parent` plus
+ * `layer0` .. `layer4` textures, and the client generates its flat geometry
+ * from them. The preview generates the same layer planes (`item-layers.ts`)
+ * and sends them through the geometry renderer, so a two-dimensional item is
+ * drawn and its `display` rotation, scale and translation are visible.
+ *
  * The report stays honest: anything not faithfully rendered is listed in
  * `coverage.skipped` (including a panel the content is clipped by), every
  * texture problem also raises a warning, and `unapplied` names the steps this
@@ -95,7 +102,8 @@ export type {
  * not requested, uncoloured `tintindex` faces, ambient occlusion, world light,
  * shadows, perspective projection, the per-slot camera rig, left-hand
  * mirroring, the GUI item shader lighting (the fixed factors come from
- * block-face shading), and the hand, head, item-frame and dropped-item poses.
+ * block-face shading), the hand, head, item-frame and dropped-item poses, and
+ * the 1 px edge quads of generated item layers.
  * The compatibility renderer keeps its historical `display` / `lighting` list
  * so its reports stay byte-identical. This is a diagnostic view, not a game
  * renderer, and it never rewrites the model.
@@ -190,6 +198,8 @@ function previewUnapplied(input: {
 	readonly lighting: boolean;
 	readonly guiLight: "front" | "side";
 	readonly uncoloredFaces: number;
+	/** True when the flat planes of a recipe-built item model were drawn. */
+	readonly generatedItemPlanes: boolean;
 }): string[] {
 	const steps: string[] = [];
 	if (input.display === undefined) steps.push("display");
@@ -201,6 +211,11 @@ function previewUnapplied(input: {
 		"shadows",
 		"perspective-projection",
 	);
+	if (input.generatedItemPlanes) {
+		// `ItemModelGenerator` also builds 1 px edge quads around the opaque
+		// outline of every layer; the preview draws the front plane only.
+		steps.push("generated-item-edge-quads");
+	}
 	if (input.display !== undefined) {
 		steps.push("camera-rig", "left-hand-mirroring");
 		steps.push(...DISPLAY_POSE_UNAPPLIED[input.display]);
@@ -232,15 +247,18 @@ function previewUnapplied(input: {
 function sortedTints(
 	tints: Readonly<Record<string, RgbTint>>,
 ): Record<string, string> {
+	const entries = Object.entries(tints).map(([key, value]) => ({
+		index: Number(key),
+		color: value,
+	}));
+	entries.sort((a, b) => a.index - b.index);
 	const result: Record<string, string> = {};
-	for (const [key, value] of Object.entries(tints).sort(
-		(a, b) => Number(a[0]) - Number(b[0]),
-	)) {
-		// Compare the numeric key explicitly: integer-like keys enumerate in
-		// ascending order already, but another spelling of the same index
-		// (for example "1e1") keeps insertion order and must still sort by
-		// value.
-		result[key] = formatTintColor(value);
+	for (const entry of entries) {
+		// Key the report by the canonical decimal spelling: "02" and "0x10"
+		// name the same tint index as "2" and "16", and a plain object only
+		// enumerates integer-like keys in ascending order. Keeping the written
+		// spelling would let insertion order decide the report's order.
+		result[String(entry.index)] = formatTintColor(entry.color);
 	}
 	return result;
 }
@@ -293,6 +311,11 @@ export async function renderModelPreview(
 			? {}
 			: { minecraftVersion: options.minecraftVersion }),
 		...(options.context === undefined ? {} : { context: options.context }),
+		// A model file may write `"parent": "item/generated"`; Minecraft reads
+		// that as `minecraft:item/generated`. Only the preview follows the
+		// default namespace into the builtin template table, so the inspect and
+		// validate reports keep their existing result for that spelling.
+		builtinParentAliases: true,
 	});
 	const inspection = inspectionResult.report;
 	const builtinTerminus = inspectionResult.builtinTerminus;
@@ -409,11 +432,46 @@ export async function renderModelPreview(
 		readonly maxXFixed: number;
 		readonly maxYFixed: number;
 		readonly maxZFixed: number;
-		readonly element: (typeof inspection.elements)[number];
+		readonly element: ModelElementView;
+	}
+
+	// A recipe-built item model is `parent` plus `textures.layer0` with no
+	// `elements` of its own; the client generates its flat geometry from the
+	// layer textures. Synthesising the planes here sends them through the same
+	// element, rasterisation and blending pipeline as authored elements, so
+	// the preview draws the item instead of a transparent image that claims
+	// complete coverage. A model that declares `elements` itself — even an
+	// empty array — keeps them; generation only applies when the chain has no
+	// elements at all.
+	const noElements = inspection.elementsSource.from === "none";
+	const generatedLayers = noElements
+		? itemLayerElements(inspection.textures)
+		: [];
+	const elements: readonly ModelElementView[] = [
+		...inspection.elements,
+		...generatedLayers,
+	];
+	// The generator reads the effective texture map, but the inspection report
+	// only carries a resolution for the model's own textures. A layer that only
+	// a parent declares ends the generated run, so name it instead of returning
+	// a transparent image that claims complete coverage.
+	if (noElements) {
+		const nextLayer = generatedLayers.length;
+		for (const texture of inspection.inheritedTextures) {
+			if (!isItemLayerName(texture.name)) continue;
+			if (Number(texture.name.slice("layer".length)) !== nextLayer) continue;
+			addSkip(
+				skipped,
+				"generated-item-layer",
+				"inherited-texture",
+				texture.name,
+				`Layer ${texture.name} is declared by ${texture.from}; the preview generates layers from the model's own textures only.`,
+			);
+		}
 	}
 
 	const drawn: DrawnElement[] = [];
-	for (const element of inspection.elements) {
+	for (const element of elements) {
 		const target = `elements[${element.index}]`;
 		const coords = [
 			element.from[0],
@@ -494,23 +552,23 @@ export async function renderModelPreview(
 		}
 	}
 
-	const faceFor = (
-		element: (typeof inspection.elements)[number],
-		face: Direction,
-	) => element.faces.find((entry) => entry.face === face);
+	const faceFor = (element: ModelElementView, face: Direction) =>
+		element.faces.find((entry) => entry.face === face);
 
 	// The compatibility renderer covers three axis-aligned faces per element
 	// and cannot rotate a part or blend a translucent one. Any rotation, and
 	// any partially transparent face that renderer would draw, switches the
 	// whole model to the geometry renderer. Faces the compatibility renderer
 	// never draws (south, west, down) do not change its output, so they do not
-	// switch it.
+	// switch it. Generated item planes have only a south face, so they always
+	// take the geometry renderer.
 	let needsGeometry =
 		view.kind === "isometric" ||
 		view.kind === "display" ||
 		options.lighting === true ||
 		options.tint !== undefined ||
 		options.tints !== undefined ||
+		generatedLayers.length > 0 ||
 		drawn.some((entry) => entry.element.rotation !== undefined);
 	if (!needsGeometry) {
 		outer: for (const entry of drawn) {
@@ -534,7 +592,7 @@ export async function renderModelPreview(
 		}
 	}
 
-	const allFaces = inspection.elements.flatMap((element) => element.faces);
+	const allFaces = elements.flatMap((element) => element.faces);
 	// The compatibility renderer keeps its historical report, byte for byte:
 	// `tintindex` is only listed when the geometry renderer runs, which is the
 	// path a new view, a rotated element or a visible translucent face takes.
@@ -587,12 +645,13 @@ export async function renderModelPreview(
 		}
 		if (newPreviewOptions) {
 			unapplied = previewUnapplied({
-				elements: inspection.elements,
+				elements,
 				display: options.display,
 				displayApplied: displaySource !== undefined,
 				lighting: options.lighting === true,
 				guiLight,
 				uncoloredFaces: scene.uncoloredFaces,
+				generatedItemPlanes: generatedLayers.length > 0,
 			});
 			if (
 				(options.tint !== undefined || options.tints !== undefined) &&

@@ -133,7 +133,7 @@ export function solidPng(r: number, g: number, b: number, a = 255): Uint8Array {
 	return encodePng(canvas);
 }
 
-function splitPng(): Uint8Array {
+export function splitPng(): Uint8Array {
 	const size = 16;
 	const canvas = createCanvas(size, size);
 	const layer = addLayer(canvas, { id: "base" });
@@ -146,6 +146,26 @@ function splitPng(): Uint8Array {
 			pixels[o + 1] = left ? 0 : 255;
 			pixels[o + 2] = 0;
 			pixels[o + 3] = 255;
+		}
+	}
+	replaceLayerPixels(canvas, layer.id, pixels);
+	return encodePng(canvas);
+}
+
+/** 16x16 texture: an opaque band across the top `rows` texels, transparent below. */
+export function bandPng(r: number, g: number, b: number, rows = 4): Uint8Array {
+	const size = 16;
+	const canvas = createCanvas(size, size);
+	const layer = addLayer(canvas, { id: "base" });
+	const pixels = new Uint8Array(size * size * 4);
+	for (let y = 0; y < size; y += 1) {
+		for (let x = 0; x < size; x += 1) {
+			const o = (y * size + x) * 4;
+			const inside = y < rows;
+			pixels[o] = inside ? r : 0;
+			pixels[o + 1] = inside ? g : 0;
+			pixels[o + 2] = inside ? b : 0;
+			pixels[o + 3] = inside ? 255 : 0;
 		}
 	}
 	replaceLayerPixels(canvas, layer.id, pixels);
