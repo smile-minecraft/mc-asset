@@ -1,12 +1,13 @@
 import { McAssetError } from "../core/errors.ts";
 
-/** Frozen profile set: generic plus the four Minecraft asset profiles. */
+/** Frozen profile set: generic plus the five Minecraft asset profiles. */
 export const SUPPORTED_PROFILES = [
 	"generic",
 	"minecraft:item",
 	"minecraft:block",
 	"minecraft:gui",
 	"minecraft:particle",
+	"minecraft:entity",
 ] as const;
 
 export type SupportedProfile = (typeof SUPPORTED_PROFILES)[number];

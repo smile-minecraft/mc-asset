@@ -41,12 +41,20 @@ export const PARTICLE_PROFILE: AssetProfile = {
 		"Minecraft particle texture without a forced uniform size; predicted handling only.",
 };
 
+export const ENTITY_PROFILE: AssetProfile = {
+	id: "minecraft:entity",
+	alphaClassificationAware: true,
+	description:
+		"Minecraft entity texture mapped through box UV across cube parts; predicted handling only.",
+};
+
 const PROFILES: Record<AssetProfileId, AssetProfile> = {
 	generic: GENERIC_PROFILE,
 	"minecraft:item": ITEM_PROFILE,
 	"minecraft:block": BLOCK_PROFILE,
 	"minecraft:gui": GUI_PROFILE,
 	"minecraft:particle": PARTICLE_PROFILE,
+	"minecraft:entity": ENTITY_PROFILE,
 };
 
 export function listAssetProfileIds(): AssetProfileId[] {
@@ -56,6 +64,7 @@ export function listAssetProfileIds(): AssetProfileId[] {
 		"minecraft:block",
 		"minecraft:gui",
 		"minecraft:particle",
+		"minecraft:entity",
 	];
 }
 
@@ -65,7 +74,8 @@ export function isAssetProfileId(value: unknown): value is AssetProfileId {
 		value === "minecraft:item" ||
 		value === "minecraft:block" ||
 		value === "minecraft:gui" ||
-		value === "minecraft:particle"
+		value === "minecraft:particle" ||
+		value === "minecraft:entity"
 	);
 }
 
@@ -107,6 +117,9 @@ export function describeAssetProfilePredicted(
 	}
 	if (profile.id === "minecraft:particle") {
 		return "predicted profile minecraft:particle keeps its own size with predicted alpha; atlas reference is predicted and unverified.";
+	}
+	if (profile.id === "minecraft:entity") {
+		return "predicted profile minecraft:entity maps the texture through box UV across cube parts; in-game rendering is unverified.";
 	}
 	return "predicted profile generic has no Minecraft-specific restrictions.";
 }

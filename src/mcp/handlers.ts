@@ -2950,6 +2950,7 @@ export async function handleMcmetaAsset(
 	}
 }
 
+export { handleEntityAsset } from "./handlers-entity.ts";
 export {
 	handleModelAsset,
 	handleOptimizeAsset,

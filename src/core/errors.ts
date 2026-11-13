@@ -89,6 +89,9 @@ export type ErrorCode =
 	| "MODEL_INVALID_DISPLAY"
 	| "MODEL_VERSION_FEATURE"
 	| "MODEL_SUSPICIOUS_VALUE"
+	| "ENTITY_LAYOUT_INVALID"
+	| "ENTITY_LAYOUT_UNSUPPORTED_VERSION"
+	| "ENTITY_LAYOUT_OVERLAP"
 	| "EMPTY_SELECTION"
 	| "SELF_INTERSECTING_POLYGON"
 	| "TRANSACTION_FAILED";
@@ -172,6 +175,12 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	MODEL_INVALID_DISPLAY: 3,
 	MODEL_VERSION_FEATURE: 3,
 	MODEL_SUSPICIOUS_VALUE: 3,
+	// Entity box-UV layouts. A malformed document or two faces sharing a
+	// pixel refuses the request; a newer format version is the only entity
+	// code that exits 5 because guessing it would change the layout.
+	ENTITY_LAYOUT_INVALID: 2,
+	ENTITY_LAYOUT_UNSUPPORTED_VERSION: 5,
+	ENTITY_LAYOUT_OVERLAP: 2,
 	// A selection-scoped write whose read scope matched no pixels.
 	EMPTY_SELECTION: 2,
 	// A polygon whose nonadjacent edges touch or cross (holes unsupported).

@@ -37,7 +37,7 @@ afterEach(async () => {
 });
 
 describe("mcp handshake", () => {
-	test("initialize succeeds and tools/list exposes the twenty-seven tools preserving the original prefix", async () => {
+	test("initialize succeeds and tools/list exposes the twenty-eight tools preserving the original prefix", async () => {
 		const transport = new StdioClientTransport({
 			command: "bun",
 			args: ["src/cli/index.ts", "mcp"],
@@ -58,9 +58,10 @@ describe("mcp handshake", () => {
 				"compare_assets",
 				"style_asset",
 				"pack_asset",
+				"entity_asset",
 			].sort(),
 		);
-		expect(listed.tools).toHaveLength(27);
+		expect(listed.tools).toHaveLength(28);
 		for (const tool of listed.tools) {
 			expect(typeof tool.description).toBe("string");
 			expect(tool.description ?? "").not.toBe("");

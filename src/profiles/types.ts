@@ -5,7 +5,8 @@ export type AssetProfileId =
 	| "minecraft:item"
 	| "minecraft:block"
 	| "minecraft:gui"
-	| "minecraft:particle";
+	| "minecraft:particle"
+	| "minecraft:entity";
 
 export type PredictedAlphaClassification = "solid" | "cutout" | "translucent";
 

@@ -7,7 +7,7 @@ export interface McpToolDefinition {
 }
 
 /**
- * Frozen tool surface: the twenty-seven names in `MCP_TOOL_NAMES`, each with
+ * Frozen tool surface: the twenty-eight names in `MCP_TOOL_NAMES`, each with
  * its final description and input schema. Descriptions state the read/write
  * contract so agents pick batch or grid paths instead of per-pixel calls.
  */
@@ -173,5 +173,11 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 		description:
 			"Create a resource pack project: init writes the project document, the pack root metadata for the pinned release version, a 64x64 placeholder icon, and the assets directory skeleton in one preflighted batch. An occupied target refuses the whole batch and reports every conflicting path; nothing is overwritten. The project document is written once and then read only.",
 		inputSchema: TOOL_INPUT_SCHEMAS.pack_asset,
+	},
+	{
+		name: "entity_asset",
+		description:
+			"Inspect a Minecraft box-UV entity layout, write a template PNG and/or an editable .mcpx with one named region per face (optionally face-colored), or validate a texture's size and report non-transparent pixels outside every face. Builtin player wide/slim layouts plus caller-supplied layout documents; reads only except template outputs.",
+		inputSchema: TOOL_INPUT_SCHEMAS.entity_asset,
 	},
 ];

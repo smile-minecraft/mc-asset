@@ -342,7 +342,8 @@ export function assertMinecraftOutputPath(profile: string, path: string): void {
 		(profile === "minecraft:item" ||
 			profile === "minecraft:block" ||
 			profile === "minecraft:gui" ||
-			profile === "minecraft:particle") &&
+			profile === "minecraft:particle" ||
+			profile === "minecraft:entity") &&
 		!path.toLowerCase().endsWith(".png")
 	) {
 		throw new McAssetError(
