@@ -5,8 +5,9 @@
  * planPackBuild can register them before any byte is written.
  */
 
+import { McAssetError } from "../core/errors.ts";
 import { parseBlockModelStep, parseBlockstateStep } from "./block.ts";
-import { requirePlainAssetName } from "./document.ts";
+import { isJsonObject, requirePlainAssetName } from "./document.ts";
 import type { RecipeStep, RecipeTarget } from "./recipe.ts";
 
 /** The document families a recipe step can write under `assets/`. */
@@ -46,6 +47,30 @@ export function resolveStepItemName(
 }
 
 /**
+ * Run a step parser and make sure a refusal names the step's position in
+ * the target, so a document with several steps says which one failed.
+ */
+function withStepIndex<T>(
+	body: () => T,
+	targetId: string,
+	stepIndex: number,
+): T {
+	try {
+		return body();
+	} catch (error) {
+		if (error instanceof McAssetError) {
+			const details = isJsonObject(error.details) ? error.details : {};
+			throw new McAssetError(error.code, error.message, {
+				...details,
+				targetId,
+				stepIndex,
+			});
+		}
+		throw error;
+	}
+}
+
+/**
  * Enumerate every JSON document one recipe step writes. Paths are relative
  * to the project output directory (`assets/...`), the same shape the
  * duplicate-output checks and the writer use.
@@ -79,7 +104,11 @@ export function collectJsonOutputsForStep(
 		];
 	}
 	if (step.type === "blockModel") {
-		const spec = parseBlockModelStep(step, targetId);
+		const spec = withStepIndex(
+			() => parseBlockModelStep(step, targetId),
+			targetId,
+			stepIndex,
+		);
 		const block = spec.blockId;
 		return [
 			{
@@ -103,7 +132,11 @@ export function collectJsonOutputsForStep(
 		];
 	}
 	if (step.type === "blockstate") {
-		const spec = parseBlockstateStep(step, targetId);
+		const spec = withStepIndex(
+			() => parseBlockstateStep(step, targetId),
+			targetId,
+			stepIndex,
+		);
 		return [
 			{
 				path: `assets/${namespace}/blockstates/${spec.blockId}.json`,

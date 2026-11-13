@@ -71,6 +71,28 @@ const V1_OUTPUT_HASHES: Readonly<Record<string, string>> = {
 		"04af2285b068983229d9b48dd66ba32cfd8a6f002005f5d0386231334733316a",
 };
 
+/**
+ * The bytes `main` 3e358c3 writes for a formatVersion 1
+ * `itemDefinition` whose unknown `type` degenerates to the simple model
+ * document. Pinned so the historical fallback cannot silently become a
+ * refusal again.
+ */
+const V1_FALLBACK_STONE_TEXT = `{
+  "model": {
+    "model": "minecraft:item/stone",
+    "type": "minecraft:model"
+  }
+}
+`;
+
+const V1_FALLBACK_DIRT_TEXT = `{
+  "model": {
+    "model": "minecraft:item/dirt",
+    "type": "minecraft:model"
+  }
+}
+`;
+
 const V1_RECIPE = {
 	formatVersion: 1,
 	id: "v1-pin",
@@ -1071,7 +1093,7 @@ export const BLOCK_MODEL_CASES = [
 		},
 	},
 	{
-		name: "formatVersion 1 refuses the formatVersion 2 steps and node grammar",
+		name: "formatVersion 1 refuses the formatVersion 2 steps",
 		async run() {
 			await withProject(async (projectDir) => {
 				const attempts: Array<{ name: string; steps: unknown[] }> = [
@@ -1091,53 +1113,6 @@ export const BLOCK_MODEL_CASES = [
 							{
 								type: "blockstate",
 								variants: { "": { model: "minecraft:block/stone" } },
-							},
-						],
-					},
-					{
-						name: "v1-composite",
-						steps: [
-							{
-								type: "itemDefinition",
-								definition: {
-									type: "composite",
-									models: ["minecraft:item/stone"],
-								},
-							},
-						],
-					},
-					{
-						name: "v1-nested-case",
-						steps: [
-							{
-								type: "itemDefinition",
-								definition: {
-									type: "select",
-									cases: [
-										{
-											when: ["gui"],
-											model: {
-												type: "model",
-												model: "minecraft:item/stone",
-											},
-										},
-									],
-									fallback: "minecraft:item/stone",
-								},
-							},
-						],
-					},
-					{
-						name: "v1-tints",
-						steps: [
-							{
-								type: "itemDefinition",
-								definition: {
-									type: "select",
-									cases: [],
-									fallback: "minecraft:item/stone",
-									tints: [{ type: "minecraft:constant", value: -1 }],
-								},
 							},
 						],
 					},
@@ -1164,6 +1139,355 @@ export const BLOCK_MODEL_CASES = [
 						`${attempt.name} names the required recipe formatVersion`,
 					);
 				}
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+					"nothing is built",
+				);
+			});
+		},
+	},
+	{
+		name: "formatVersion 1 keeps the historical fallback for unknown item definition types",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "v1-fallback", {
+					formatVersion: 1,
+					id: "v1-fallback",
+					targets: [
+						{
+							id: "stone_item",
+							steps: [
+								{
+									type: "itemDefinition",
+									model: "minecraft:item/stone",
+									definition: { type: "model" },
+								},
+							],
+						},
+						{
+							id: "dirt_item",
+							steps: [
+								{
+									type: "itemDefinition",
+									model: "minecraft:item/dirt",
+									definition: { type: "mystery" },
+								},
+							],
+						},
+					],
+				});
+				await buildFrom(projectDir, "v1-fallback");
+				assert.equal(
+					await textAt(
+						join(projectDir, "pack/assets/aurelian/items/stone_item.json"),
+					),
+					V1_FALLBACK_STONE_TEXT,
+					'the type: "model" definition keeps the main bytes',
+				);
+				const lock = parseLockText(
+					await readFile(join(projectDir, "mc-asset.lock.json"), "utf8"),
+				);
+				assert.equal(
+					lock.outputs["pack/assets/aurelian/items/stone_item.json"]
+						?.outputHash,
+					"6bed2ecb4b4e68535402eae1f8a91242fe76857c3ea8a0c60e6304a4135639ec",
+					"the pinned output hash matches main 3e358c3",
+				);
+				assert.equal(
+					await textAt(
+						join(projectDir, "pack/assets/aurelian/items/dirt_item.json"),
+					),
+					V1_FALLBACK_DIRT_TEXT,
+					"an unknown definition type also falls back to the simple model",
+				);
+			});
+		},
+	},
+	{
+		name: "a blockstate z rotation is rechecked when an own-clean project drops below format 75.0",
+		async run() {
+			await withProject(
+				async (projectDir) => {
+					await writeRecipe(projectDir, "z-rotation", {
+						formatVersion: 2,
+						id: "z-rotation",
+						targets: [
+							{
+								id: "z_block",
+								steps: [
+									{
+										type: "blockstate",
+										variants: {
+											"": { model: "minecraft:block/stone", z: 90 },
+										},
+									},
+								],
+							},
+						],
+					});
+					await buildFrom(projectDir, "z-rotation");
+					const lockPath = join(projectDir, "mc-asset.lock.json");
+					const blockstatePath = join(
+						projectDir,
+						"pack/assets/aurelian/blockstates/z_block.json",
+					);
+					const lockBefore = await bytesAt(lockPath);
+					const blockstateBefore = await bytesAt(blockstatePath);
+					assert.ok(lockBefore, "the 75.0 build wrote a lock");
+					assert.ok(blockstateBefore, "the 75.0 build wrote the blockstate");
+
+					const projectPath = join(projectDir, PROJECT);
+					const project = JSON.parse(
+						await readFile(projectPath, "utf8"),
+					) as Record<string, unknown>;
+					project.minecraftVersion = "1.21.9";
+					project.resourcePackVersion = "69.0";
+					await writeFile(
+						projectPath,
+						`${JSON.stringify(project, null, 2)}\n`,
+						"utf8",
+					);
+
+					const refusal = await refusalOf(async () =>
+						buildFrom(projectDir, "z-rotation"),
+					);
+					assert.equal(refusal.code, "RECIPE_VERSION_UNSUPPORTED");
+					assert.equal(refusal.details?.feature, "blockstateZRotation");
+					assert.equal(refusal.details?.actualFormat, "69.0");
+					assert.deepEqual(
+						await bytesAt(lockPath),
+						lockBefore,
+						"the own-clean lock is unchanged",
+					);
+					assert.deepEqual(
+						await bytesAt(blockstatePath),
+						blockstateBefore,
+						"the own-clean blockstate is unchanged",
+					);
+				},
+				{ minecraftVersion: "1.21.11" },
+			);
+		},
+	},
+	{
+		name: "a dry-run plan checks blockstate version support without writing",
+		async run() {
+			await withProject(async (projectDir) => {
+				const recipePath = await writeRecipe(projectDir, "z-rotation", {
+					formatVersion: 2,
+					id: "z-rotation",
+					targets: [
+						{
+							id: "z_block",
+							steps: [
+								{
+									type: "blockstate",
+									variants: {
+										"": { model: "minecraft:block/stone", z: 90 },
+									},
+								},
+							],
+						},
+					],
+				});
+				const refusal = await refusalOf(async () =>
+					planPackBuild(join(projectDir, PROJECT), {
+						recipe: recipePath,
+						dryRun: true,
+					}),
+				);
+				assert.equal(refusal.code, "RECIPE_VERSION_UNSUPPORTED");
+				assert.equal(refusal.details?.feature, "blockstateZRotation");
+				assert.equal(refusal.details?.actualFormat, "69.0");
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+					"the dry run writes no lock",
+				);
+				const packEntries = await readdir(join(projectDir, "pack"));
+				assert.ok(
+					!packEntries.includes("blockstates"),
+					"the dry run writes no blockstate",
+				);
+			});
+		},
+	},
+	{
+		name: "blockstate model references that are not resource locations are refused in planning",
+		async run() {
+			await withProject(async (projectDir) => {
+				const attempts: Array<{
+					name: string;
+					step: unknown;
+					field: string;
+				}> = [
+					{
+						name: "bad-variant-model",
+						step: {
+							type: "blockstate",
+							variants: { "": { model: "INVALID MODEL" } },
+						},
+						field: "variants.model",
+					},
+					{
+						name: "bad-multipart-model",
+						step: {
+							type: "blockstate",
+							multipart: [{ apply: { model: "aurelian:Block/Stone" } }],
+						},
+						field: "multipart[0].apply.model",
+					},
+				];
+				for (const attempt of attempts) {
+					const recipePath = await writeRecipe(projectDir, attempt.name, {
+						formatVersion: 2,
+						id: attempt.name,
+						targets: [{ id: "bad_block", steps: [attempt.step] }],
+					});
+					const refusal = await refusalOf(async () =>
+						planPackBuild(join(projectDir, PROJECT), {
+							recipe: recipePath,
+						}),
+					);
+					assert.equal(
+						refusal.code,
+						"RECIPE_INVALID",
+						`${attempt.name} is refused`,
+					);
+					assert.equal(refusal.details?.targetId, "bad_block");
+					assert.equal(refusal.details?.stepIndex, 0);
+					assert.equal(
+						refusal.details?.field,
+						attempt.field,
+						`${attempt.name} names the reference field`,
+					);
+					assert.equal(
+						typeof refusal.details?.model,
+						"string",
+						`${attempt.name} names the unusable reference`,
+					);
+				}
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+					"nothing is built",
+				);
+				const packEntries = await readdir(join(projectDir, "pack"));
+				assert.ok(
+					!packEntries.includes("blockstates"),
+					"no blockstate is written",
+				);
+			});
+		},
+	},
+	{
+		name: "blockstate variant keys expand recipe variables",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "key-substitution", {
+					formatVersion: 2,
+					id: "key-substitution",
+					variables: { facing: ["north", "east"] },
+					targets: [
+						{
+							id: "lamp_{facing}",
+							steps: [
+								{
+									type: "blockstate",
+									variants: {
+										"facing={facing}": { model: "minecraft:block/stone" },
+									},
+								},
+							],
+						},
+					],
+				});
+				await buildFrom(projectDir, "key-substitution");
+				const north = JSON.parse(
+					(await textAt(
+						join(
+							projectDir,
+							"pack/assets/aurelian/blockstates/lamp_north.json",
+						),
+					)) ?? "{}",
+				) as { variants?: Record<string, unknown> };
+				const east = JSON.parse(
+					(await textAt(
+						join(projectDir, "pack/assets/aurelian/blockstates/lamp_east.json"),
+					)) ?? "{}",
+				) as { variants?: Record<string, unknown> };
+				assert.deepEqual(Object.keys(north.variants ?? {}), ["facing=north"]);
+				assert.deepEqual(Object.keys(east.variants ?? {}), ["facing=east"]);
+			});
+		},
+	},
+	{
+		name: "a variable used only in a variant key counts as used",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "key-only-variable", {
+					formatVersion: 2,
+					id: "key-only-variable",
+					variables: { facing: ["north"] },
+					targets: [
+						{
+							id: "lamp",
+							steps: [
+								{
+									type: "blockstate",
+									variants: {
+										"facing={facing}": { model: "minecraft:block/stone" },
+									},
+								},
+							],
+						},
+					],
+				});
+				await buildFrom(projectDir, "key-only-variable");
+				const document = JSON.parse(
+					(await textAt(
+						join(projectDir, "pack/assets/aurelian/blockstates/lamp.json"),
+					)) ?? "{}",
+				) as { variants?: Record<string, unknown> };
+				assert.deepEqual(Object.keys(document.variants ?? {}), [
+					"facing=north",
+				]);
+			});
+		},
+	},
+	{
+		name: "variant keys that collapse after substitution are refused",
+		async run() {
+			await withProject(async (projectDir) => {
+				const recipePath = await writeRecipe(projectDir, "key-collision", {
+					formatVersion: 2,
+					id: "key-collision",
+					variables: { direction: ["north"] },
+					targets: [
+						{
+							id: "lamp",
+							steps: [
+								{
+									type: "blockstate",
+									variants: {
+										"facing={direction}": { model: "minecraft:block/stone" },
+										"facing=north": { model: "minecraft:block/cobblestone" },
+									},
+								},
+							],
+						},
+					],
+				});
+				const refusal = await refusalOf(async () =>
+					planPackBuild(join(projectDir, PROJECT), { recipe: recipePath }),
+				);
+				assert.equal(refusal.code, "RECIPE_INVALID");
+				assert.equal(refusal.details?.key, "facing=north");
+				assert.deepEqual(refusal.details?.keys, [
+					"facing={direction}",
+					"facing=north",
+				]);
 				assert.equal(
 					await bytesAt(join(projectDir, "mc-asset.lock.json")),
 					null,

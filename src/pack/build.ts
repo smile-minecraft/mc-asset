@@ -398,6 +398,8 @@ export async function planPackBuild(
 
 	const project = parsePackProjectText(projectText, resolvedDocPath);
 	const projectDir = dirname(resolvedDocPath);
+	const format = normalizePackFormat(project.resourcePackVersion);
+	const modelRules = resolveModelRules(format);
 
 	let recipeFiles: string[] = [];
 	if (options.recipe !== undefined && options.recipe !== "") {
@@ -698,8 +700,6 @@ export async function planPackBuild(
 			};
 			const inputHash = sha256Hex(canonicalCompactJson(normalizedInput));
 
-			const format = normalizePackFormat(project.resourcePackVersion);
-
 			// A target without a source has no image pipeline: its steps are JSON
 			// steps only, and it plans no texture half at all.
 			let texturePlan: TextureOutputPlanInternal | undefined;
@@ -815,6 +815,33 @@ export async function planPackBuild(
 				}
 			}
 
+			// Render every planned document here, before any write: version
+			// gates and reference checks must hold for own-clean outputs and
+			// dry runs too, not only for files about to be rewritten.
+			for (const mp of modelPlans) {
+				try {
+					mp.computedText = buildJsonOutputText(
+						target.id,
+						recipe.formatVersion,
+						target.steps,
+						mp,
+						project.namespace,
+						modelRules,
+						format,
+					);
+				} catch (error) {
+					if (error instanceof McAssetError) {
+						const details = isJsonObject(error.details) ? error.details : {};
+						throw new McAssetError(error.code, error.message, {
+							...details,
+							targetId: target.id,
+							stepIndex: mp.stepIndex,
+						});
+					}
+					throw error;
+				}
+			}
+
 			targetPlans.push({
 				targetId: target.id,
 				recipeId: recipe.id,
@@ -886,7 +913,10 @@ export async function planPackBuild(
 				const model = typeof step.model === "string" ? step.model : undefined;
 				const defaultModel = model ?? `${project.namespace}:item/${item}`;
 				refs = [
-					...buildItemDefinitionDocumentV2(definition, defaultModel).refs,
+					...buildItemDefinitionDocumentV2(definition, defaultModel, {
+						packFormat: format,
+						targetId: tp.targetId,
+					}).refs,
 				];
 			} else {
 				refs = collectItemDefinitionModelRefs(definition);
@@ -937,6 +967,109 @@ function parseGridTextForBuild(text: string): PixelCanvas {
 }
 
 /**
+ * Render one JSON document from the step that planned it. The plan records
+ * the step index and document kind, so two steps that write different
+ * document families never infer the source from a path.
+ *
+ * Planning renders every planned document, own-clean and dry-run targets
+ * included: version gates and model-reference checks must hold for the
+ * whole recipe even when nothing is going to be rewritten.
+ */
+function buildJsonOutputText(
+	targetId: string,
+	recipeFormatVersion: number,
+	steps: readonly RecipeStep[],
+	mp: ModelOutputPlan,
+	projectNamespace: string,
+	rules: ModelRules,
+	packFormat: string,
+): string {
+	const step = steps[mp.stepIndex];
+	if (step === undefined) {
+		throw new McAssetError(
+			"INTERNAL_ERROR",
+			`No step at index ${mp.stepIndex} for planned output '${mp.path}'.`,
+			{ targetId },
+		);
+	}
+	if (mp.kind === "model" && step.type === "model") {
+		const item = resolveStepItemName(step, targetId);
+		if (step.modelSpec !== undefined) {
+			if (!isJsonObject(step.modelSpec)) {
+				throw new McAssetError(
+					"RECIPE_INVALID",
+					`model step modelSpec must be an object for item '${item}'.`,
+					{
+						targetId,
+						stepIndex: mp.stepIndex,
+						item,
+					},
+				);
+			}
+			return canonicalDocumentText(step.modelSpec);
+		}
+		const parent = typeof step.parent === "string" ? step.parent : "generated";
+		const texture =
+			typeof step.texture === "string"
+				? step.texture
+				: `${projectNamespace}:item/${item}`;
+		return canonicalDocumentText(
+			buildParentModel({
+				parent,
+				texture,
+				item,
+				namespace: projectNamespace,
+			}),
+		);
+	}
+	if (mp.kind === "itemDefinition" && step.type === "itemDefinition") {
+		const item = resolveStepItemName(step, targetId);
+		const model = typeof step.model === "string" ? step.model : undefined;
+		const definition = isJsonObject(step.definition)
+			? (step.definition as Record<string, unknown>)
+			: undefined;
+		const defaultModel = model ?? `${projectNamespace}:item/${item}`;
+		if (recipeFormatVersion >= 2) {
+			return canonicalDocumentText(
+				buildItemDefinitionDocumentV2(definition, defaultModel, {
+					packFormat,
+					targetId,
+				}).document,
+			);
+		}
+		return canonicalDocumentText(
+			buildItemDefinitionDocument(definition, defaultModel),
+		);
+	}
+	if (step.type === "blockModel") {
+		const spec = parseBlockModelStep(step, targetId);
+		if (mp.kind === "blockModel") {
+			return buildBlockModelText(spec, rules, targetId);
+		}
+		if (mp.kind === "blockItemModel") {
+			return buildBlockItemModelText(spec, projectNamespace);
+		}
+		if (mp.kind === "itemDefinition") {
+			return buildBlockItemDefinitionText(spec, projectNamespace);
+		}
+	}
+	if (mp.kind === "blockstate" && step.type === "blockstate") {
+		return buildBlockstateText(
+			parseBlockstateStep(step, targetId),
+			rules,
+			targetId,
+		);
+	}
+	throw new McAssetError(
+		"INTERNAL_ERROR",
+		`No matching step for planned output '${mp.path}'.`,
+		{
+			targetId,
+		},
+	);
+}
+
+/**
  * Execute a build plan.
  *
  * Verifies no conflicts, runs safe-output preflights, renders outputs,
@@ -964,12 +1097,6 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 	}
 
 	const projectDir = plan.projectDir ?? process.cwd();
-	const projectNamespace = plan.project?.namespace ?? "";
-	const modelRules = resolveModelRules(
-		plan.project?.resourcePackVersion === undefined
-			? undefined
-			: normalizePackFormat(plan.project.resourcePackVersion),
-	);
 	const targetPlans = (plan.targetPlans ?? []) as TargetPlanInternal[];
 	const targetsToExecute = targetPlans.filter(
 		(tp) =>
@@ -1256,120 +1383,19 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 			if (!mp.needsRewrite) {
 				continue;
 			}
-			try {
-				const text = buildJsonOutputText(tp, mp, projectNamespace, modelRules);
-				mp.computedOutputHash = sha256Hex(new TextEncoder().encode(text));
-				mp.computedText = text;
-				payloads.set(
-					resolve(projectDir, mp.path),
-					new TextEncoder().encode(text),
-				);
-				completedPaths.push(mp.path);
-			} catch (err) {
-				if (err instanceof McAssetError) {
-					const details = isJsonObject(err.details) ? err.details : {};
-					throw new McAssetError(err.code, err.message, {
-						...details,
-						targetId: tp.targetId,
-					});
-				}
-				throw err;
-			}
-		}
-	}
-
-	/**
-	 * Render one JSON document from the step that planned it. The plan
-	 * records the step index and document kind, so two steps that write
-	 * different document families never infer the source from a path.
-	 */
-	function buildJsonOutputText(
-		tp: TargetPlanInternal,
-		mp: ModelOutputPlan,
-		projectNamespace: string,
-		rules: ModelRules,
-	): string {
-		const step = tp.target.steps[mp.stepIndex] as RecipeStep | undefined;
-		if (step === undefined) {
-			throw new McAssetError(
-				"INTERNAL_ERROR",
-				`No step at index ${mp.stepIndex} for planned output '${mp.path}'.`,
-				{ targetId: tp.targetId },
-			);
-		}
-		if (mp.kind === "model" && step.type === "model") {
-			const item = resolveStepItemName(step, tp.targetId);
-			if (step.modelSpec !== undefined) {
-				if (!isJsonObject(step.modelSpec)) {
-					throw new McAssetError(
-						"RECIPE_INVALID",
-						`model step modelSpec must be an object for item '${item}'.`,
-						{
-							targetId: tp.targetId,
-							stepIndex: mp.stepIndex,
-							item,
-						},
-					);
-				}
-				return canonicalDocumentText(step.modelSpec);
-			}
-			const parent =
-				typeof step.parent === "string" ? step.parent : "generated";
-			const texture =
-				typeof step.texture === "string"
-					? step.texture
-					: `${projectNamespace}:item/${item}`;
-			return canonicalDocumentText(
-				buildParentModel({
-					parent,
-					texture,
-					item,
-					namespace: projectNamespace,
-				}),
-			);
-		}
-		if (mp.kind === "itemDefinition" && step.type === "itemDefinition") {
-			const item = resolveStepItemName(step, tp.targetId);
-			const model = typeof step.model === "string" ? step.model : undefined;
-			const definition = isJsonObject(step.definition)
-				? (step.definition as Record<string, unknown>)
-				: undefined;
-			const defaultModel = model ?? `${projectNamespace}:item/${item}`;
-			if (tp.recipeFormatVersion >= 2) {
-				return canonicalDocumentText(
-					buildItemDefinitionDocumentV2(definition, defaultModel).document,
+			const text = mp.computedText;
+			if (text === undefined) {
+				throw new McAssetError(
+					"INTERNAL_ERROR",
+					`Planned output '${mp.path}' has no rendered text.`,
+					{ targetId: tp.targetId, stepIndex: mp.stepIndex },
 				);
 			}
-			return canonicalDocumentText(
-				buildItemDefinitionDocument(definition, defaultModel),
-			);
+			const bytes = new TextEncoder().encode(text);
+			mp.computedOutputHash = sha256Hex(bytes);
+			payloads.set(resolve(projectDir, mp.path), bytes);
+			completedPaths.push(mp.path);
 		}
-		if (step.type === "blockModel") {
-			const spec = parseBlockModelStep(step, tp.targetId);
-			if (mp.kind === "blockModel") {
-				return buildBlockModelText(spec, rules, tp.targetId);
-			}
-			if (mp.kind === "blockItemModel") {
-				return buildBlockItemModelText(spec, projectNamespace);
-			}
-			if (mp.kind === "itemDefinition") {
-				return buildBlockItemDefinitionText(spec, projectNamespace);
-			}
-		}
-		if (mp.kind === "blockstate" && step.type === "blockstate") {
-			return buildBlockstateText(
-				parseBlockstateStep(step, tp.targetId),
-				rules,
-				tp.targetId,
-			);
-		}
-		throw new McAssetError(
-			"INTERNAL_ERROR",
-			`No matching step for planned output '${mp.path}'.`,
-			{
-				targetId: tp.targetId,
-			},
-		);
 	}
 
 	// 3. Write planned targets to disk

@@ -19,6 +19,7 @@ import {
 import { buildModelDocument } from "../model/export.ts";
 import type { ModelSpec } from "../model/types.ts";
 import type { ModelRules } from "../model/versions.ts";
+import { validateResourceLocation } from "../validate/resource-location.ts";
 import {
 	canonicalDocumentText,
 	isJsonObject,
@@ -430,6 +431,9 @@ function translateModelFailure(
 				...details,
 				targetId,
 				stepType,
+				...(typeof details.target === "string"
+					? { actualFormat: details.target }
+					: {}),
 			});
 		}
 		if (error.code.startsWith("MODEL_")) {
@@ -531,6 +535,21 @@ function assertBlockstateEntry(
 			`Blockstate entry at ${field} needs a non-empty model.`,
 		);
 	}
+	const modelFindings = validateResourceLocation(value.model).filter(
+		(finding) => finding.level === "error",
+	);
+	if (modelFindings.length > 0) {
+		throw stepFailure(
+			targetId,
+			"blockstate",
+			`${field}.model`,
+			`Blockstate entry at ${field} has an unusable model reference '${value.model}'.`,
+			{
+				model: value.model,
+				issues: modelFindings.map((finding) => finding.code),
+			},
+		);
+	}
 	if (value.uvlock !== undefined && typeof value.uvlock !== "boolean") {
 		throw stepFailure(
 			targetId,
@@ -574,12 +593,13 @@ export function parseBlockstateStep(
 			);
 		}
 		for (const [key, value] of Object.entries(step.variants)) {
+			const at = key === "" ? "variants" : `variants.${key}`;
 			if (Array.isArray(value)) {
 				for (const [index, entry] of value.entries()) {
-					assertBlockstateEntry(entry, targetId, `variants.${key}[${index}]`);
+					assertBlockstateEntry(entry, targetId, `${at}[${index}]`);
 				}
 			} else {
-				assertBlockstateEntry(value, targetId, `variants.${key}`);
+				assertBlockstateEntry(value, targetId, at);
 			}
 		}
 		return {

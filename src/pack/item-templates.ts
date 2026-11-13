@@ -9,6 +9,12 @@
  */
 
 import { McAssetError } from "../core/errors.ts";
+import {
+	REMOVED_ITEM_TINT_TYPES_FACT,
+	REMOVED_SPECIAL_MODEL_TYPES_FACT,
+	type RemovedTypesAtFormat,
+	removedTypesAtFormat,
+} from "../profiles/versions.ts";
 import { isJsonObject } from "./document.ts";
 
 export type ParentModelPreset = "generated" | "handheld" | "handheld_rod";
@@ -253,6 +259,53 @@ const ITEM_NODE_NAMES: ReadonlySet<string> = new Set([
 	"bundle/selected_item",
 ]);
 
+/** Target version context for the formatVersion 2 node grammar. */
+export interface ItemDefinitionV2Version {
+	/** Target resource-pack format; types removed at or below it are refused. */
+	readonly packFormat: string;
+	/** Target id used in RECIPE_VERSION_UNSUPPORTED details. */
+	readonly targetId?: string | undefined;
+}
+
+interface ItemNodeVersionContext {
+	readonly packFormat: string;
+	readonly targetId: string | undefined;
+	readonly removedSpecialModelTypes: RemovedTypesAtFormat | undefined;
+	readonly removedTintTypes: RemovedTypesAtFormat | undefined;
+}
+
+/**
+ * Refuse a normalized node type the target format no longer has. The client
+ * removed these types outright, so writing them would produce a document
+ * the target silently ignores; the refusal names the first format without
+ * the type and the format the project targets.
+ */
+function assertTypeExistsAtFormat(
+	removed: RemovedTypesAtFormat | undefined,
+	type: string,
+	kind: "special model type" | "tint source",
+	field: string,
+	context: ItemNodeVersionContext,
+): void {
+	if (removed === undefined || !removed.types.has(type)) {
+		return;
+	}
+	const details: Record<string, unknown> = {
+		field,
+		type,
+		since: removed.since,
+		actualFormat: context.packFormat,
+	};
+	if (context.targetId !== undefined) {
+		details.targetId = context.targetId;
+	}
+	throw new McAssetError(
+		"RECIPE_VERSION_UNSUPPORTED",
+		`Item ${kind} '${type}' at ${field} was removed in pack format ${removed.since}; the target uses ${context.packFormat}.`,
+		details,
+	);
+}
+
 /** Resource-location and type-name shapes for model references and node ids. */
 const ITEM_NODE_RESOURCE_LOCATION = /^[a-z0-9_.-]+:[a-z0-9/._-]+$/;
 const ITEM_NODE_PATH = /^[a-z0-9/._-]+$/;
@@ -272,6 +325,28 @@ function assertItemModelReference(value: unknown, field: string): string {
 		throw invalidItemNode(
 			field,
 			`Item model reference at ${field} must be a model resource location.`,
+		);
+	}
+	return value;
+}
+
+/**
+ * A property field defaults only when it is absent. An explicit `null`,
+ * number, array, or object is a type error: silently replacing it with the
+ * default would write a branch the recipe did not ask for.
+ */
+function parseNodeProperty(
+	value: unknown,
+	field: string,
+	fallback: string,
+): string {
+	if (value === undefined) {
+		return fallback;
+	}
+	if (typeof value !== "string" || value.trim() === "") {
+		throw invalidItemNode(
+			`${field}.property`,
+			`Item node property at ${field}.property must be a non-empty string.`,
 		);
 	}
 	return value;
@@ -325,7 +400,11 @@ function normalizeTintType(value: unknown, field: string): string {
 	return `minecraft:${name}`;
 }
 
-function parseTints(value: unknown, field: string): unknown[] {
+function parseTints(
+	value: unknown,
+	field: string,
+	context: ItemNodeVersionContext,
+): unknown[] {
 	if (!Array.isArray(value)) {
 		throw invalidItemNode(field, `"tints" at ${field} must be an array.`);
 	}
@@ -334,9 +413,17 @@ function parseTints(value: unknown, field: string): unknown[] {
 		if (!isJsonObject(entry)) {
 			throw invalidItemNode(at, `Item tint at ${at} must be an object.`);
 		}
+		const type = normalizeTintType(entry.type, `${at}.type`);
+		assertTypeExistsAtFormat(
+			context.removedTintTypes,
+			type,
+			"tint source",
+			`${at}.type`,
+			context,
+		);
 		return {
 			...entry,
-			type: normalizeTintType(entry.type, `${at}.type`),
+			type,
 		};
 	});
 }
@@ -360,6 +447,7 @@ function parseItemModelNode(
 	value: unknown,
 	field: string,
 	refs: string[],
+	context: ItemNodeVersionContext,
 ): Record<string, unknown> {
 	if (typeof value === "string") {
 		const model = assertItemModelReference(value, field);
@@ -386,7 +474,7 @@ function parseItemModelNode(
 				model,
 			};
 			if (value.tints !== undefined) {
-				node.tints = parseTints(value.tints, field);
+				node.tints = parseTints(value.tints, field, context);
 			}
 			return node;
 		}
@@ -401,19 +489,26 @@ function parseItemModelNode(
 			return {
 				type,
 				models: value.models.map((entry, index) =>
-					parseItemModelNode(entry, `${field}.models[${index}]`, refs),
+					parseItemModelNode(entry, `${field}.models[${index}]`, refs, context),
 				),
 			};
 		}
 		case "condition": {
 			const node: Record<string, unknown> = {
 				type,
-				property:
-					typeof value.property === "string"
-						? value.property
-						: "minecraft:damaged",
-				on_true: parseItemModelNode(value.on_true, `${field}.on_true`, refs),
-				on_false: parseItemModelNode(value.on_false, `${field}.on_false`, refs),
+				property: parseNodeProperty(value.property, field, "minecraft:damaged"),
+				on_true: parseItemModelNode(
+					value.on_true,
+					`${field}.on_true`,
+					refs,
+					context,
+				),
+				on_false: parseItemModelNode(
+					value.on_false,
+					`${field}.on_false`,
+					refs,
+					context,
+				),
 			};
 			copyPropertyArguments(node, value, field);
 			return node;
@@ -433,17 +528,23 @@ function parseItemModelNode(
 				assertOnlyMembers(entry, new Set(["when", "model"]), at);
 				return {
 					when: parseSelectWhen(entry.when, `${at}.when`),
-					model: parseItemModelNode(entry.model, `${at}.model`, refs),
+					model: parseItemModelNode(entry.model, `${at}.model`, refs, context),
 				};
 			});
 			const node: Record<string, unknown> = {
 				type,
-				property:
-					typeof value.property === "string"
-						? value.property
-						: "minecraft:display_context",
+				property: parseNodeProperty(
+					value.property,
+					field,
+					"minecraft:display_context",
+				),
 				cases,
-				fallback: parseItemModelNode(value.fallback, `${field}.fallback`, refs),
+				fallback: parseItemModelNode(
+					value.fallback,
+					`${field}.fallback`,
+					refs,
+					context,
+				),
 			};
 			copyPropertyArguments(node, value, field);
 			return node;
@@ -472,17 +573,19 @@ function parseItemModelNode(
 				}
 				return {
 					threshold: entry.threshold,
-					model: parseItemModelNode(entry.model, `${at}.model`, refs),
+					model: parseItemModelNode(entry.model, `${at}.model`, refs, context),
 				};
 			});
 			const node: Record<string, unknown> = {
 				type,
-				property:
-					typeof value.property === "string"
-						? value.property
-						: "minecraft:damage",
+				property: parseNodeProperty(value.property, field, "minecraft:damage"),
 				entries,
-				fallback: parseItemModelNode(value.fallback, `${field}.fallback`, refs),
+				fallback: parseItemModelNode(
+					value.fallback,
+					`${field}.fallback`,
+					refs,
+					context,
+				),
 			};
 			copyPropertyArguments(node, value, field);
 			return node;
@@ -499,6 +602,13 @@ function parseItemModelNode(
 			const rendererType = normalizeSpecialRendererType(
 				value.model.type,
 				`${field}.model.type`,
+			);
+			assertTypeExistsAtFormat(
+				context.removedSpecialModelTypes,
+				rendererType,
+				"special model type",
+				`${field}.model.type`,
+				context,
 			);
 			refs.push(base);
 			return {
@@ -615,11 +725,13 @@ export interface ItemDefinitionModelDocument {
  * planner can refuse dangling references before anything is written. Tint
  * entries keep their subtype fields verbatim: the client jar is the source
  * for the node set, but tint subtype semantics live in the version's
- * registry and are not re-implemented here.
+ * registry and are not re-implemented here. Node and tint types the target
+ * format has removed are refused with RECIPE_VERSION_UNSUPPORTED.
  */
 export function buildItemDefinitionDocumentV2(
 	definition: Record<string, unknown> | undefined,
 	defaultModel: string,
+	version: ItemDefinitionV2Version,
 ): ItemDefinitionModelDocument {
 	if (definition === undefined) {
 		return {
@@ -627,100 +739,19 @@ export function buildItemDefinitionDocumentV2(
 			refs: [defaultModel],
 		};
 	}
+	const context: ItemNodeVersionContext = {
+		packFormat: version.packFormat,
+		targetId: version.targetId,
+		removedSpecialModelTypes: removedTypesAtFormat(
+			REMOVED_SPECIAL_MODEL_TYPES_FACT,
+			version.packFormat,
+		),
+		removedTintTypes: removedTypesAtFormat(
+			REMOVED_ITEM_TINT_TYPES_FACT,
+			version.packFormat,
+		),
+	};
 	const refs: string[] = [];
-	const model = parseItemModelNode(definition, "model", refs);
+	const model = parseItemModelNode(definition, "model", refs, context);
 	return { document: { model }, refs };
-}
-
-function collectRawKeys(value: unknown, key: string, out: string[]): void {
-	if (Array.isArray(value)) {
-		for (const entry of value) {
-			collectRawKeys(entry, key, out);
-		}
-		return;
-	}
-	if (!isJsonObject(value)) {
-		return;
-	}
-	for (const [name, entry] of Object.entries(value)) {
-		if (name === key) {
-			out.push(name);
-		}
-		collectRawKeys(entry, key, out);
-	}
-}
-
-/**
- * Refuse formatVersion 1 definitions that already use the formatVersion 2
- * node grammar. Before this gate the v1 builder silently fell back to a
- * plain model for such input, which wrote a document nobody asked for;
- * the pinned v1 fixtures use only the three flat templates and are
- * unaffected.
- */
-export function assertV1ItemDefinition(
-	definition: unknown,
-	targetId: string,
-): void {
-	if (!isJsonObject(definition)) {
-		return;
-	}
-	const fail = (message: string): never => {
-		throw new McAssetError("RECIPE_INVALID", message, {
-			targetId,
-			field: "definition",
-			requiredFormatVersion: 2,
-		});
-	};
-	const tints: string[] = [];
-	collectRawKeys(definition, "tints", tints);
-	if (tints.length > 0) {
-		fail(
-			`Item definition tints require recipe formatVersion 2 for target '${targetId}'.`,
-		);
-	}
-	const type = definition.type;
-	if (
-		type !== undefined &&
-		type !== "select" &&
-		type !== "condition" &&
-		type !== "range_dispatch"
-	) {
-		fail(
-			`Item definition node '${String(type)}' requires recipe formatVersion 2 for target '${targetId}'.`,
-		);
-	}
-	const requireStrings = (values: unknown[], field: string): void => {
-		for (const value of values) {
-			if (value === undefined) {
-				continue;
-			}
-			if (typeof value !== "string") {
-				fail(
-					`Nested item model nodes require recipe formatVersion 2 for target '${targetId}' (${field}).`,
-				);
-			}
-		}
-	};
-	if (type === "select") {
-		const cases = Array.isArray(definition.cases) ? definition.cases : [];
-		for (const entry of cases) {
-			if (isJsonObject(entry)) {
-				requireStrings([entry.model], "select case");
-			}
-		}
-		requireStrings([definition.fallback], "select fallback");
-	} else if (type === "condition") {
-		requireStrings(
-			[definition.on_true, definition.on_false],
-			"condition branch",
-		);
-	} else if (type === "range_dispatch") {
-		const entries = Array.isArray(definition.entries) ? definition.entries : [];
-		for (const entry of entries) {
-			if (isJsonObject(entry)) {
-				requireStrings([entry.model], "range entry");
-			}
-		}
-		requireStrings([definition.fallback], "range fallback");
-	}
 }
