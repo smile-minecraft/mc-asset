@@ -594,50 +594,41 @@ export const PACK_MCMETA_CASES: PackMcmetaCase[] = [
 			});
 		},
 	},
-	// ─── Coverage: overlays the scan leaves uninterpreted ─────────────────
+	// ─── Overlays are applied, not left uninterpreted ─────────────────────
 	{
-		name: "mcmeta coverage: an overlay covering the target records a skip and its warning",
+		name: "mcmeta coverage: an overlay covering the target is applied, so coverage stays complete",
 		run: async (check) => {
 			await withPackDir(async (dir) => {
 				await writeBase(dir);
 				await writeOverlayDir(dir, "overlay_1");
 				await writeMcmeta(dir, {
-					pack: { description: "t", min_format: 90, max_format: 99 },
+					pack: { description: "t", min_format: 15, max_format: 99 },
 					overlays: {
 						entries: [
-							{ directory: "overlay_1", min_format: 90, max_format: 99 },
+							{ directory: "overlay_1", min_format: 65, max_format: 99 },
 						],
 					},
 				});
-				const report = await scanPack(dir, {});
-				const skips = overlaySkips(report);
-				check.equal(skips.length, 1, "one overlay skip");
-				check.equal(skips[0]?.reason, "overlay-not-interpreted", "skip reason");
+				const report = await scanPack(dir, { packFormat: "75.0" });
 				check.equal(
-					skips[0]?.target,
-					"overlay_1",
-					"skip target is the directory",
+					overlaySkips(report).length,
+					0,
+					"an applied overlay costs no coverage",
 				);
 				check.equal(
-					skips[0]?.kind,
-					"overlay",
-					"the skip carries its own kind, apart from the version and model skips",
+					overlayWarnings(report, "overlay_1").length,
+					0,
+					"an applied overlay raises no coverage warning",
+				);
+				check.equal(
+					findingsOf(report, "PACK_COVERAGE_SKIPPED").length,
+					0,
+					"nothing is left uninterpreted",
 				);
 				check.equal(
 					report.coverage.status,
-					"partial",
-					"coverage lowers to partial",
-				);
-				const warnings = overlayWarnings(report, "overlay_1");
-				check.equal(warnings.length, 1, "every skip carries one warning");
-				check.equal(
-					warnings[0]?.level,
-					"warning",
-					"the coverage warning stays a warning",
-				);
-				check.ok(
-					warnings[0]?.message.includes("not interpreted"),
-					"the warning says the overlay was not interpreted",
+					"complete",
+					"the overlay content was read",
 				);
 				check.equal(
 					findingsOf(report, "PACK_MCMETA_SUSPICIOUS").length,
@@ -647,7 +638,7 @@ export const PACK_MCMETA_CASES: PackMcmetaCase[] = [
 				check.equal(
 					report.verdict,
 					"pass",
-					"coverage alone never fails the verdict",
+					"an applied overlay never fails the verdict",
 				);
 			});
 		},
@@ -676,6 +667,151 @@ export const PACK_MCMETA_CASES: PackMcmetaCase[] = [
 					overlayWarnings(report, "overlay_1").length,
 					0,
 					"and raises no coverage warning",
+				);
+			});
+		},
+	},
+	{
+		name: "mcmeta overlay: a model overridden by the overlay is read for an in-range target only",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/gem.json",
+					modelJson({ textures: { layer0: "testpack:item/base_missing" } }),
+				);
+				await writePackFile(
+					dir,
+					"overlay_high/assets/testpack/models/item/gem.json",
+					modelJson({ textures: { layer0: "testpack:item/gem" } }),
+				);
+				await writePackFile(
+					dir,
+					"overlay_high/assets/testpack/textures/item/gem.png",
+					makePngBytes(),
+				);
+				await writeMcmeta(dir, {
+					pack: { description: "t", min_format: 15, max_format: 99 },
+					overlays: {
+						entries: [
+							{ directory: "overlay_high", min_format: 65, max_format: 99 },
+						],
+					},
+				});
+				const inside = await scanPack(dir, { packFormat: "75.0" });
+				check.deepEqual(
+					inside.findings.filter((finding) => finding.level === "error"),
+					[],
+					"the overlay model names a texture that exists, so nothing is missing",
+				);
+				check.equal(
+					inside.coverage.status,
+					"complete",
+					"the merged tree is read whole",
+				);
+				const outside = await scanPack(dir, { packFormat: "55.0" });
+				const missing = findingsOf(outside, "PACK_MISSING_TEXTURE");
+				check.equal(
+					missing.length,
+					1,
+					"below the overlay range the base model is the one the game loads",
+				);
+				check.ok(
+					missing[0]?.message.includes(
+						"assets/testpack/textures/item/base_missing.png",
+					),
+					"the base model's missing texture is reported",
+				);
+			});
+		},
+	},
+	{
+		name: "mcmeta overlay: one refused entry drops the whole overlay block, so no overlay is applied",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/gem.json",
+					modelJson({ textures: { layer0: "testpack:item/base_missing" } }),
+				);
+				await writePackFile(
+					dir,
+					"overlay_high/assets/testpack/models/item/gem.json",
+					modelJson({ textures: { layer0: "testpack:item/gem" } }),
+				);
+				await writePackFile(
+					dir,
+					"overlay_high/assets/testpack/textures/item/gem.png",
+					makePngBytes(),
+				);
+				await writeMcmeta(dir, {
+					pack: { description: "t", min_format: 15, max_format: 99 },
+					overlays: {
+						entries: [
+							{ directory: "overlay_high", min_format: 65, max_format: 99 },
+							{ directory: "overlay_bad", min_format: 90, max_format: 20 },
+						],
+					},
+				});
+				const report = await scanPack(dir, { packFormat: "75.0" });
+				check.equal(
+					findingsOf(report, "PACK_MCMETA_INVALID").length,
+					1,
+					"the refused entry is reported once",
+				);
+				const missing = findingsOf(report, "PACK_MISSING_TEXTURE");
+				check.equal(
+					missing.length,
+					1,
+					"the game drops every overlay, so the base model is what it loads",
+				);
+				check.ok(
+					missing[0]?.message.includes(
+						"assets/testpack/textures/item/base_missing.png",
+					),
+				);
+			});
+		},
+	},
+	{
+		name: "mcmeta overlay: an entry the codec cannot read drops the whole overlay block",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/testpack/models/item/gem.json",
+					modelJson({ textures: { layer0: "testpack:item/base_missing" } }),
+				);
+				await writePackFile(
+					dir,
+					"overlay_high/assets/testpack/models/item/gem.json",
+					modelJson({ textures: { layer0: "testpack:item/gem" } }),
+				);
+				await writePackFile(
+					dir,
+					"overlay_high/assets/testpack/textures/item/gem.png",
+					makePngBytes(),
+				);
+				await writeMcmeta(dir, {
+					pack: { description: "t", min_format: 15, max_format: 99 },
+					overlays: {
+						entries: [
+							{ directory: "overlay_high", min_format: 65, max_format: 99 },
+							"overlay_bad",
+						],
+					},
+				});
+				const report = await scanPack(dir, { packFormat: "75.0" });
+				const missing = findingsOf(report, "PACK_MISSING_TEXTURE");
+				check.equal(
+					missing.length,
+					1,
+					"the unreadable entry drops the block, so the base model is loaded",
+				);
+				check.ok(
+					missing[0]?.message.includes(
+						"assets/testpack/textures/item/base_missing.png",
+					),
 				);
 			});
 		},
@@ -843,8 +979,8 @@ export const PACK_MCMETA_CASES: PackMcmetaCase[] = [
 				check.equal(report.verdict, "pass", "the pack passes");
 				check.equal(
 					overlaySkips(report).length,
-					1,
-					"the overlay is still reported as skipped",
+					0,
+					"the applied overlay is not reported as skipped",
 				);
 			});
 		},
@@ -911,8 +1047,8 @@ export const PACK_MCMETA_CASES: PackMcmetaCase[] = [
 				check.equal(report.verdict, "pass", "the pack passes");
 				check.equal(
 					overlaySkips(report).length,
-					1,
-					"only the overlay that covers the target is skipped",
+					0,
+					"the covering overlay is applied, so no overlay is skipped",
 				);
 			});
 		},

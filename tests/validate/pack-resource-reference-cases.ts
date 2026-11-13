@@ -6,9 +6,10 @@ import { makePngBytes, writePackFile } from "./pack-fixtures.ts";
 import type { PackCaseCheck } from "./pack-model-cases.ts";
 
 /**
- * Equipment, particle and font reference cases. Every texture a reference
- * names is a real PNG, so a texture that is found is also not an orphan;
- * that makes "found" observable even where no error would be raised.
+ * Equipment, particle, font, sound, post-effect and waypoint-style
+ * reference cases. Every texture a reference names is a real PNG, so a
+ * texture that is found is also not an orphan; that makes "found"
+ * observable even where no error would be raised.
  */
 
 export interface PackResourceReferenceCase {
@@ -71,6 +72,7 @@ function isOrphan(report: PackReport, textureRel: string): boolean {
 }
 
 const V75 = { packFormat: "75.0" };
+const V971 = { packFormat: "97.1" };
 const EQUIPMENT_DIR = "assets/testpack/textures/entity/equipment";
 
 function wingsDoc(texture: string): unknown {
@@ -366,6 +368,158 @@ export const PACK_RESOURCE_REFERENCE_CASES: PackResourceReferenceCase[] = [
 						finding.message.includes("trim-overrides-not-interpreted"),
 					),
 					"the skip must also surface as a warning",
+				);
+			});
+		},
+	},
+	{
+		name: "equipment: a trim_overrides texture at 97.1 is a trim pattern asset checked per trim layer",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/equipment/gear.json", {
+					layers: {
+						humanoid: [{ texture: "testpack:gear" }],
+						humanoid_leggings: [{ texture: "testpack:gear" }],
+					},
+					trim_overrides: [
+						{
+							when: { material: "minecraft:gold" },
+							texture: "testpack:trim",
+						},
+					],
+				});
+				await png(dir, `${EQUIPMENT_DIR}/humanoid/gear.png`);
+				await png(dir, `${EQUIPMENT_DIR}/humanoid_leggings/gear.png`);
+				const missing = await scanPack(dir, V971);
+				const broken = findingsOf(missing, "PACK_BROKEN_REFERENCE");
+				check.equal(broken.length, 2, "one miss per trim-rendered layer");
+				check.ok(
+					broken.every((finding) => finding.level === "error"),
+					"a missing trim texture is an error",
+				);
+				check.ok(
+					broken.some((finding) =>
+						finding.message.includes(
+							"assets/testpack/textures/trims/entity/humanoid/trim.png",
+						),
+					),
+				);
+				check.ok(
+					broken.some((finding) =>
+						finding.message.includes(
+							"assets/testpack/textures/trims/entity/humanoid_leggings/trim.png",
+						),
+					),
+				);
+				check.equal(findingsOf(missing, "PACK_MISSING_TEXTURE").length, 0);
+				check.equal(missing.verdict, "fail");
+				await png(
+					dir,
+					"assets/testpack/textures/trims/entity/humanoid/trim.png",
+				);
+				const half = await scanPack(dir, V971);
+				check.equal(findingsOf(half, "PACK_BROKEN_REFERENCE").length, 1);
+				await png(
+					dir,
+					"assets/testpack/textures/trims/entity/humanoid_leggings/trim.png",
+				);
+				const resolved = await scanPack(dir, V971);
+				check.deepEqual(errorsOf(resolved), []);
+				check.equal(
+					isOrphan(
+						resolved,
+						"assets/testpack/textures/trims/entity/humanoid/trim.png",
+					),
+					false,
+					"a referenced trim texture must not be an orphan",
+				);
+			});
+		},
+	},
+	{
+		name: "equipment: a trim_overrides palette resolves under textures/palettes",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/equipment/gear.json", {
+					layers: { humanoid: [{ texture: "testpack:gear" }] },
+					trim_overrides: [
+						{
+							when: { material: "minecraft:gold" },
+							texture: "testpack:trim",
+							palette: "testpack:gold_palette",
+						},
+					],
+				});
+				await png(dir, `${EQUIPMENT_DIR}/humanoid/gear.png`);
+				await png(
+					dir,
+					"assets/testpack/textures/trims/entity/humanoid/trim.png",
+				);
+				const missing = await scanPack(dir, V971);
+				const textureFindings = findingsOf(missing, "PACK_MISSING_TEXTURE");
+				check.equal(textureFindings.length, 1);
+				check.ok(
+					textureFindings[0]?.message.includes(
+						"assets/testpack/textures/palettes/gold_palette.png",
+					),
+					"the message names the palette path",
+				);
+				check.equal(missing.verdict, "fail");
+				await png(dir, "assets/testpack/textures/palettes/gold_palette.png");
+				const resolved = await scanPack(dir, V971);
+				check.deepEqual(errorsOf(resolved), []);
+				check.equal(
+					isOrphan(
+						resolved,
+						"assets/testpack/textures/palettes/gold_palette.png",
+					),
+					false,
+				);
+			});
+		},
+	},
+	{
+		name: "equipment: humanoid_baby never asks for a trim texture, so an override costs no error",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/equipment/baby_gear.json", {
+					layers: { humanoid_baby: [{ texture: "testpack:baby" }] },
+					trim_overrides: [
+						{
+							when: { material: "minecraft:gold" },
+							texture: "testpack:absent_trim",
+						},
+					],
+				});
+				await png(dir, `${EQUIPMENT_DIR}/humanoid_baby/baby.png`);
+				const report = await scanPack(dir, V971);
+				check.deepEqual(errorsOf(report), []);
+				check.equal(report.verdict, "pass");
+				check.equal(report.coverage.status, "complete");
+			});
+		},
+	},
+	{
+		name: "equipment: trim_overrides stays unread just below pack format 97.1",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/equipment/gear.json", {
+					layers: { humanoid: [{ texture: "testpack:gear" }] },
+					trim_overrides: [
+						{
+							when: { material: "minecraft:gold" },
+							texture: "testpack:absent_trim",
+						},
+					],
+				});
+				await png(dir, `${EQUIPMENT_DIR}/humanoid/gear.png`);
+				const report = await scanPack(dir, { packFormat: "97.0" });
+				check.deepEqual(errorsOf(report), []);
+				const skips = skipsOf(report, "trim-overrides-not-interpreted");
+				check.equal(skips.length, 1);
+				check.equal(
+					skips[0]?.target,
+					"assets/testpack/equipment/gear.json#/trim_overrides",
 				);
 			});
 		},
@@ -962,6 +1116,235 @@ export const PACK_RESOURCE_REFERENCE_CASES: PackResourceReferenceCase[] = [
 		},
 	},
 
+	// --- sounds ---
+	{
+		name: "sounds: an event entry with no .ogg is a PACK_MISSING_ASSET naming the event and the path",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/sounds.json", {
+					"testpack:chime": { sounds: ["testpack:chime_one"] },
+				});
+				const report = await scanPack(dir, V75);
+				const missing = findingsOf(report, "PACK_MISSING_ASSET");
+				check.equal(missing.length, 1);
+				check.equal(missing[0]?.level, "error");
+				check.equal(missing[0]?.path, "assets/testpack/sounds.json");
+				check.ok(
+					missing[0]?.message.includes("testpack:chime"),
+					"the message names the event",
+				);
+				check.ok(
+					missing[0]?.message.includes("assets/testpack/sounds/chime_one.ogg"),
+					"the message names the sound file path and extension",
+				);
+				check.equal(report.verdict, "fail");
+			});
+		},
+	},
+	{
+		name: "sounds: a name string and a file entry resolve, and an event entry names no file",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/sounds.json", {
+					"testpack:chime": {
+						sounds: [
+							"testpack:chime_one",
+							{ name: "testpack:chime_two", type: "file" },
+							{ name: "testpack:absent_event", type: "event" },
+						],
+					},
+				});
+				await writePackFile(
+					dir,
+					"assets/testpack/sounds/chime_one.ogg",
+					new Uint8Array([0x4f, 0x67, 0x67, 0x53]),
+				);
+				await writePackFile(
+					dir,
+					"assets/testpack/sounds/chime_two.ogg",
+					new Uint8Array([0x4f, 0x67, 0x67, 0x53]),
+				);
+				const report = await scanPack(dir, V75);
+				check.deepEqual(errorsOf(report), []);
+				check.equal(report.coverage.status, "complete");
+				check.deepEqual(report.coverage.skipped, []);
+				check.equal(report.verdict, "pass");
+			});
+		},
+	},
+	{
+		name: "sounds: an undetermined pack format is a skip, not an error",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/sounds.json", {
+					"testpack:chime": { sounds: ["testpack:absent"] },
+				});
+				const report = await scanPack(dir, {});
+				check.equal(findingsOf(report, "PACK_MISSING_ASSET").length, 0);
+				check.equal(skipsOf(report, "version-not-determined").length, 1);
+				check.equal(report.coverage.status, "partial");
+			});
+		},
+	},
+
+	// --- post effects ---
+	{
+		name: "post_effect: a missing program at 42.0 is a PACK_MISSING_ASSET naming the shader path",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/post_effect/invert.json", {
+					passes: [{ program: "testpack:post/invert" }],
+				});
+				const report = await scanPack(dir, { packFormat: "42.0" });
+				const missing = findingsOf(report, "PACK_MISSING_ASSET");
+				check.equal(missing.length, 1);
+				check.ok(
+					missing[0]?.message.includes(
+						"assets/testpack/shaders/post/invert.json",
+					),
+					"the message names the shader program document",
+				);
+				check.equal(report.verdict, "fail");
+			});
+		},
+	},
+	{
+		name: "post_effect: a program that exists resolves, and shaders stay uninterpreted",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/post_effect/invert.json", {
+					passes: [{ program: "testpack:post/invert" }],
+				});
+				await json(dir, "assets/testpack/shaders/post/invert.json", {
+					vertex: "testpack:post/invert",
+					fragment: "testpack:post/invert",
+				});
+				const report = await scanPack(dir, { packFormat: "42.0" });
+				check.equal(findingsOf(report, "PACK_MISSING_ASSET").length, 0);
+				check.equal(report.coverage.status, "partial");
+				check.ok(
+					report.coverage.skipped.some((skip) =>
+						skip.target.includes("assets/testpack/shaders"),
+					),
+					"the shader documents themselves are still unread",
+				);
+				check.equal(report.verdict, "pass");
+			});
+		},
+	},
+	{
+		name: "post_effect: split shader ids resolve under shaders/ with their own extension",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/post_effect/invert.json", {
+					passes: [
+						{
+							vertex_shader: "testpack:core/quad",
+							fragment_shader: "testpack:post/invert",
+						},
+					],
+				});
+				await writePackFile(
+					dir,
+					"assets/testpack/shaders/core/quad.vsh",
+					"#version 150\n",
+				);
+				const report = await scanPack(dir, V75);
+				const missing = findingsOf(report, "PACK_MISSING_ASSET");
+				check.equal(missing.length, 1);
+				check.ok(
+					missing[0]?.message.includes(
+						"assets/testpack/shaders/post/invert.fsh",
+					),
+					"the message names the fragment shader with .fsh",
+				);
+				check.equal(
+					findingsOf(report, "PACK_MISSING_ASSET")[0]?.path,
+					"assets/testpack/post_effect/invert.json",
+				);
+			});
+		},
+	},
+
+	// --- waypoint styles ---
+	{
+		name: "waypoint_style: a missing sprite is an error naming the locator-bar path",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/waypoint_style/custom.json", {
+					sprites: ["testpack:dot"],
+				});
+				const report = await scanPack(dir, V75);
+				const missing = findingsOf(report, "PACK_MISSING_TEXTURE");
+				check.equal(missing.length, 1);
+				check.ok(
+					missing[0]?.message.includes(
+						"assets/testpack/textures/gui/sprites/hud/locator_bar_dot/dot.png",
+					),
+					"the message inserts the locator-bar prefix",
+				);
+				check.equal(report.verdict, "fail");
+			});
+		},
+	},
+	{
+		name: "waypoint_style: a sprite under the locator-bar directory resolves and is not an orphan",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/waypoint_style/custom.json", {
+					sprites: ["testpack:dot"],
+				});
+				await png(
+					dir,
+					"assets/testpack/textures/gui/sprites/hud/locator_bar_dot/dot.png",
+				);
+				const report = await scanPack(dir, V75);
+				check.deepEqual(errorsOf(report), []);
+				check.equal(report.coverage.status, "complete");
+				check.equal(
+					isOrphan(
+						report,
+						"assets/testpack/textures/gui/sprites/hud/locator_bar_dot/dot.png",
+					),
+					false,
+				);
+				check.equal(report.verdict, "pass");
+			});
+		},
+	},
+	{
+		name: "waypoint_style: a pack that replaces the GUI atlas turns a miss into a skip",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/testpack/waypoint_style/custom.json", {
+					sprites: ["testpack:dot"],
+				});
+				await json(dir, "assets/minecraft/atlases/gui.json", {
+					sources: [],
+				});
+				const report = await scanPack(dir, V75);
+				check.equal(findingsOf(report, "PACK_MISSING_TEXTURE").length, 0);
+				check.deepEqual(errorsOf(report), []);
+				check.equal(report.verdict, "pass");
+				const skips = skipsOf(report, "gui-atlas-customized");
+				check.equal(skips.length, 1);
+				check.ok(
+					skips[0]?.target.startsWith(
+						"assets/testpack/waypoint_style/custom.json",
+					),
+				);
+				check.ok(
+					findingsOf(report, "PACK_COVERAGE_SKIPPED").some(
+						(finding) =>
+							finding.level === "warning" &&
+							finding.message.includes("gui-atlas-customized"),
+					),
+					"the skip must surface as a coverage warning",
+				);
+			});
+		},
+	},
+
 	// --- across the three types ---
 	{
 		name: "references to minecraft: files without a vanilla tree are unresolved warnings",
@@ -1098,6 +1481,59 @@ export const PACK_RESOURCE_REFERENCE_CASES: PackResourceReferenceCase[] = [
 				check.deepEqual(errorsOf(report), []);
 				check.equal(report.coverage.status, "complete");
 				check.deepEqual(report.coverage.skipped, []);
+				check.equal(
+					findingsOf(report, "PACK_ORPHAN_TEXTURE").length,
+					0,
+					"every texture is referenced by a covered source",
+				);
+			});
+		},
+	},
+	{
+		name: "coverage: sounds, post effects and waypoint styles with resolved references stay complete",
+		run: async (check) => {
+			await withDirs(2, async ([dir, vanilla]) => {
+				await json(dir, "assets/testpack/sounds.json", {
+					"testpack:chime": { sounds: [{ name: "testpack:chime" }] },
+				});
+				await writePackFile(
+					dir,
+					"assets/testpack/sounds/chime.ogg",
+					new Uint8Array([0x4f, 0x67, 0x67, 0x53]),
+				);
+				await json(dir, "assets/testpack/post_effect/invert.json", {
+					passes: [
+						{
+							vertex_shader: "minecraft:core/screenquad",
+							fragment_shader: "minecraft:post/invert",
+						},
+					],
+				});
+				await writePackFile(
+					vanilla as string,
+					"assets/minecraft/shaders/core/screenquad.vsh",
+					"#version 150\n",
+				);
+				await writePackFile(
+					vanilla as string,
+					"assets/minecraft/shaders/post/invert.fsh",
+					"#version 150\n",
+				);
+				await json(dir, "assets/testpack/waypoint_style/custom.json", {
+					sprites: ["testpack:dot"],
+				});
+				await png(
+					dir,
+					"assets/testpack/textures/gui/sprites/hud/locator_bar_dot/dot.png",
+				);
+				const report = await scanPack(dir, {
+					...V971,
+					vanillaPath: vanilla as string,
+				});
+				check.deepEqual(errorsOf(report), []);
+				check.equal(report.coverage.status, "complete");
+				check.deepEqual(report.coverage.skipped, []);
+				check.equal(report.verdict, "pass");
 				check.equal(
 					findingsOf(report, "PACK_ORPHAN_TEXTURE").length,
 					0,

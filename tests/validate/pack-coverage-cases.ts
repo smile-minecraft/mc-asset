@@ -64,14 +64,12 @@ export const PACK_COVERAGE_CASES: PackCoverageCase[] = [
 		name: "coverage: an uninterpreted resource type makes coverage partial and names the type",
 		run: async (check) => {
 			await withPackDir(async (dir) => {
-				await writePackFile(dir, "assets/testpack/waypoint_style/x.json", "{}");
+				await writePackFile(dir, "assets/testpack/shaders/a.json", "{}");
 				const report = await scanPack(dir, SCAN_OPTIONS);
 				check.equal(report.coverage.status, "partial");
 				check.ok(
-					skipReasons(report).some((reason) =>
-						reason.includes("waypoint_style"),
-					),
-					"a skip reason must name waypoint_style",
+					skipReasons(report).some((reason) => reason.includes("shaders")),
+					"a skip reason must name shaders",
 				);
 			});
 		},
@@ -98,12 +96,12 @@ export const PACK_COVERAGE_CASES: PackCoverageCase[] = [
 			await withPackDir(async (dir) => {
 				await writeCleanNamespace(dir);
 				await writePackFile(dir, "assets/testpack/lang/en_us.json", "{}");
-				await writePackFile(dir, "assets/testpack/waypoint_style/x.json", "{}");
+				await writePackFile(dir, "assets/testpack/shaders/a.json", "{}");
 				const report = await scanPack(dir, SCAN_OPTIONS);
 				check.equal(report.coverage.status, "partial");
 				const reasons = skipReasons(report);
 				check.equal(reasons.length, 1);
-				check.ok(reasons[0]?.includes("waypoint_style"));
+				check.ok(reasons[0]?.includes("shaders"));
 				check.ok(
 					!JSON.stringify(report.coverage.skipped).includes("lang"),
 					"the inert type must not appear in any skip",
@@ -145,11 +143,11 @@ export const PACK_COVERAGE_CASES: PackCoverageCase[] = [
 		name: "coverage: a file directly under the namespace is reported by its own name",
 		run: async (check) => {
 			await withPackDir(async (dir) => {
-				await writePackFile(dir, "assets/testpack/sounds.json", "{}");
+				await writePackFile(dir, "assets/testpack/mystery.json", "{}");
 				const report = await scanPack(dir, SCAN_OPTIONS);
 				check.equal(report.coverage.status, "partial");
 				check.ok(
-					skipReasons(report).some((reason) => reason.includes("sounds.json")),
+					skipReasons(report).some((reason) => reason.includes("mystery.json")),
 				);
 			});
 		},
@@ -177,11 +175,16 @@ export const PACK_COVERAGE_CASES: PackCoverageCase[] = [
 				"font",
 				"particles",
 				"equipment",
+				"post_effect",
+				"waypoint_style",
+				"sounds.json",
 			]) {
 				check.equal(classifyResourceKind(kind), "checked", kind);
 			}
-			check.equal(classifyResourceKind("lang"), "inert");
-			for (const kind of ["sounds.json", "anything_new"]) {
+			for (const kind of ["lang", "sounds"]) {
+				check.equal(classifyResourceKind(kind), "inert", kind);
+			}
+			for (const kind of ["shaders", "anything_new"]) {
 				check.equal(classifyResourceKind(kind), "uninterpreted", kind);
 			}
 		},
