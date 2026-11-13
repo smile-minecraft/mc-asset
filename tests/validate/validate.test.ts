@@ -259,7 +259,7 @@ describe("validate command in process", () => {
 				"validate",
 				input,
 				"--profile",
-				"minecraft:entity",
+				"minecraft:armor",
 			]);
 			expect(code).toBe(2);
 			expect(stdout + stderr).toContain("INVALID_PROFILE");

@@ -9,6 +9,7 @@ export {
 export {
 	BLOCK_PROFILE,
 	describeAssetProfilePredicted,
+	ENTITY_PROFILE,
 	GENERIC_PROFILE,
 	GUI_PROFILE,
 	getAssetProfile,

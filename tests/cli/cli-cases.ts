@@ -230,7 +230,7 @@ export const CLI_CASES: CliCase[] = [
 		},
 	},
 	{
-		name: "profiles cover generic plus the four minecraft asset profiles",
+		name: "profiles cover generic plus the five minecraft asset profiles",
 		run: (check) => {
 			check.deepEqual(
 				[...SUPPORTED_PROFILES],
@@ -240,6 +240,7 @@ export const CLI_CASES: CliCase[] = [
 					"minecraft:block",
 					"minecraft:gui",
 					"minecraft:particle",
+					"minecraft:entity",
 				],
 				"supported profiles",
 			);

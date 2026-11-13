@@ -8,7 +8,7 @@ import { type AtomicWriteSeams, atomicWriteFile } from "./filesystem.ts";
 export interface OutputTarget {
 	readonly path: string;
 	/** Extension the path must carry (case-insensitive). */
-	readonly extension: ".png" | ".json" | ".mcmeta";
+	readonly extension: ".png" | ".json" | ".mcmeta" | ".mcpx";
 	/** --force semantics: an existing file may be replaced. */
 	readonly allowOverwrite: boolean;
 	/** Binding files: an existing file is always refused, --force or not. */

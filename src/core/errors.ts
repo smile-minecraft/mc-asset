@@ -97,6 +97,9 @@ export type ErrorCode =
 	| "BBMODEL_INVALID_DOCUMENT"
 	| "BBMODEL_INVALID_TEXTURE"
 	| "BBMODEL_MISSING_TEXTURE"
+	| "ENTITY_LAYOUT_INVALID"
+	| "ENTITY_LAYOUT_UNSUPPORTED_VERSION"
+	| "ENTITY_LAYOUT_OVERLAP"
 	| "EMPTY_SELECTION"
 	| "SELF_INTERSECTING_POLYGON"
 	| "TRANSACTION_FAILED";
@@ -188,6 +191,12 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	BBMODEL_INVALID_DOCUMENT: 2,
 	BBMODEL_INVALID_TEXTURE: 2,
 	BBMODEL_MISSING_TEXTURE: 2,
+	// Entity box-UV layouts. A malformed document or two faces sharing a
+	// pixel refuses the request; a newer format version is the only entity
+	// code that exits 5 because guessing it would change the layout.
+	ENTITY_LAYOUT_INVALID: 2,
+	ENTITY_LAYOUT_UNSUPPORTED_VERSION: 5,
+	ENTITY_LAYOUT_OVERLAP: 2,
 	// A selection-scoped write whose read scope matched no pixels.
 	EMPTY_SELECTION: 2,
 	// A polygon whose nonadjacent edges touch or cross (holes unsupported).

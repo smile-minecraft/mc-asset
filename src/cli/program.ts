@@ -14,6 +14,11 @@ import { type AnimateOptions, runAnimate } from "./cmd-animate.ts";
 import { type BuildOptions, runBuild } from "./cmd-build.ts";
 import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
 import { type CompareCliOptions, runCompare } from "./cmd-compare.ts";
+import {
+	type EntityCliOptions,
+	type EntityMode,
+	runEntity,
+} from "./cmd-entity.ts";
 import { type FontCliOptions, runFont } from "./cmd-font.ts";
 import { type GenerateOptions, runGenerate } from "./cmd-generate.ts";
 import { type GuiScaleOptions, runGuiScale } from "./cmd-gui-scale.ts";
@@ -1824,6 +1829,77 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			const code = await runFont(spec, options, globals.json === true, streams);
 			process.exitCode = code;
 		});
+
+	const entity = program
+		.command("entity")
+		.description(
+			"Entity box-UV layouts (the minecraft:entity profile): per-face templates, face inspection, and texture checks.",
+		);
+	const entityLayoutOption = [
+		"--layout <id|path>",
+		"Builtin layout id (player_wide, steve, player_slim, alex) or a layout .json path.",
+		"player_wide",
+	] as const;
+	entity
+		.command("inspect")
+		.description("List every part and face rectangle for a layout.")
+		.option(...entityLayoutOption)
+		.action(async (options: EntityCliOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runEntity(
+				"inspect" as EntityMode,
+				undefined,
+				options,
+				globals.json === true,
+				streams,
+			);
+			process.exitCode = code;
+		});
+	entity
+		.command("template")
+		.description(
+			"Write a face-colored template PNG and/or an editable .mcpx with one named region per face.",
+		)
+		.option(...entityLayoutOption)
+		.option("--output <path>", "Explicit PNG output file path.")
+		.option("--source <path>", "Explicit .mcpx output file path.")
+		.option("--stdout", "Write PNG bytes to stdout.")
+		.option(
+			"--no-fill",
+			"Leave face areas transparent instead of filling them with face colors.",
+		)
+		.option("--force", "Allow overwriting existing output files.")
+		.option("--mkdir", "Create missing parent directories.")
+		.action(async (options: EntityCliOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runEntity(
+				"template" as EntityMode,
+				undefined,
+				options,
+				globals.json === true,
+				streams,
+			);
+			process.exitCode = code;
+		});
+	entity
+		.command("validate <texture>")
+		.description(
+			"Check a texture's size against a layout and report non-transparent pixels outside every face.",
+		)
+		.option(...entityLayoutOption)
+		.action(
+			async (texture: string, options: EntityCliOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				const code = await runEntity(
+					"validate" as EntityMode,
+					texture,
+					options,
+					globals.json === true,
+					streams,
+				);
+				process.exitCode = code;
+			},
+		);
 
 	return program;
 }

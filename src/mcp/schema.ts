@@ -1,14 +1,14 @@
 import { z } from "zod";
 
 /**
- * Frozen MCP tool surface: twenty-nine tools for agent authoring — the
+ * Frozen MCP tool surface: thirty tools for agent authoring — the
  * intake and inspection pair, raster transforms, palette and quantization,
  * the deterministic pixelize pipeline, procedural generation, tiling and
- * preview, animation sheets, single-asset and whole-pack validation, model
- * and `.mcmeta` authoring, style presets and palette export, resource-pack
- * project authoring, particle definition generation, icon fonts, and PNG
- * comparison. `MCP_TOOL_NAMES` below is the registry this count is checked
- * against.
+ * preview, animation sheets, single-asset and whole-pack validation, model,
+ * entity, and `.mcmeta` authoring, style presets and palette export,
+ * resource-pack project authoring, particle definition generation, icon
+ * fonts, and PNG comparison. `MCP_TOOL_NAMES` below is the registry this
+ * count is checked against.
  * The product document once listed `edit_asset` for the batch-edit slot, and
  * §90 wins, so the frozen name is `apply_asset_operations`. The input
  * shapes below are the frozen contract; handler behavior lives in
@@ -45,6 +45,7 @@ export const MCP_TOOL_NAMES = [
 	"pack_asset",
 	"particle_asset",
 	"font_asset",
+	"entity_asset",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -56,6 +57,7 @@ const profileField = z
 		"minecraft:block",
 		"minecraft:gui",
 		"minecraft:particle",
+		"minecraft:entity",
 	])
 	.optional()
 	.describe("Asset profile; omitted means generic.");
@@ -578,6 +580,48 @@ export type CompareAssetsInput = z.infer<
 	z.ZodObject<typeof compareAssetsInput>
 >;
 
+export const ENTITY_MODES = ["template", "inspect", "validate"] as const;
+
+export const entityAssetInput = {
+	mode: z
+		.enum(ENTITY_MODES)
+		.describe(
+			"inspect is read-only; template writes a per-face PNG and/or .mcpx; validate checks a texture against a layout.",
+		),
+	layout: z
+		.union([z.string().min(1), z.record(z.string(), z.unknown())])
+		.optional()
+		.describe(
+			"Builtin layout id (player_wide/steve, player_slim/alex), a layout .json path, or an inline layout document. Defaults to player_wide.",
+		),
+	inputPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe("validate: texture raster path (PNG, JPEG, WebP)."),
+	fill: z
+		.boolean()
+		.optional()
+		.describe(
+			"template: fill each face with its face color; default true. false leaves the face areas transparent.",
+		),
+	outputPngPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"template: explicit .png path. When omitted, the image is returned as a standard image block.",
+		),
+	outputMcpxPath: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"template: explicit .mcpx path. When omitted, the source text is returned in the report.",
+		),
+};
+export type EntityAssetInput = z.infer<z.ZodObject<typeof entityAssetInput>>;
+
 export const mcmetaAssetInput = {
 	mode: z
 		.enum(["animation", "gui"])
@@ -707,6 +751,7 @@ export type FontAssetInput = z.infer<
 export const TOOL_INPUT_SCHEMAS = {
 	optimize_asset: optimizeAssetInput,
 	model_asset: modelAssetInput,
+	entity_asset: entityAssetInput,
 	mcmeta_asset: mcmetaAssetInput,
 	particle_asset: particleAssetInput,
 	compare_assets: compareAssetsInput,

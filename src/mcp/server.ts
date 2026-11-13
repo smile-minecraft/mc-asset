@@ -10,6 +10,7 @@ import {
 	handleCleanupAsset,
 	handleCompareAssets,
 	handleCreateVariants,
+	handleEntityAsset,
 	handleFontAsset,
 	handleGenerateAsset,
 	handleImportAsset,
@@ -285,6 +286,14 @@ export function createMcpServer(): McpServer {
 			inputSchema: TOOL_INPUT_SCHEMAS.font_asset,
 		},
 		handleFontAsset,
+	);
+	server.registerTool(
+		"entity_asset",
+		{
+			description: toolDescription("entity_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.entity_asset,
+		},
+		handleEntityAsset,
 	);
 	return server;
 }
