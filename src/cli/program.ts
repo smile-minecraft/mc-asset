@@ -1689,19 +1689,23 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		"apply",
 		"export",
 		"preview",
+		"import-bbmodel",
+		"export-bbmodel",
 	] as const) {
 		const command = model.command(mode + (mode === "create" ? "" : " <file>"));
-		command
-			.option(
-				"--minecraft-version <v>",
-				"Minecraft version",
-				singleUseOption("--minecraft-version"),
-			)
-			.option(
-				"--resource-pack-version <v>",
-				"Pack version",
-				singleUseOption("--resource-pack-version"),
-			);
+		if (mode !== "export-bbmodel") {
+			command
+				.option(
+					"--minecraft-version <v>",
+					"Minecraft version",
+					singleUseOption("--minecraft-version"),
+				)
+				.option(
+					"--resource-pack-version <v>",
+					"Pack version",
+					singleUseOption("--resource-pack-version"),
+				);
+		}
 		if (
 			mode === "inspect" ||
 			mode === "validate" ||
@@ -1725,6 +1729,28 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 				.option("--binding <file>")
 				.option("--item-output <file>")
 				.option("--blockstate-output <file>");
+		if (mode === "import-bbmodel")
+			command
+				.option("--output <file>", "Model JSON output path.")
+				.option(
+					"--textures <dir>",
+					"Root for embedded PNGs, written under assets/<namespace>/textures/.",
+				)
+				.option("--stdout", "Write the model JSON to stdout.")
+				.option("--force", "Replace an existing output file as a whole.")
+				.option("--mkdir", "Create missing parent directories.");
+		if (mode === "export-bbmodel")
+			command
+				.option("--output <file>", "Blockbench project (.bbmodel) output path.")
+				.option(
+					"--texture <key=path>",
+					"PNG for a texture variable, or for a sprite a face names directly; repeatable.",
+					(value: string, previous: string[]) => [...previous, value],
+					[],
+				)
+				.option("--stdout", "Write the .bbmodel text to stdout.")
+				.option("--force", "Replace an existing output file as a whole.")
+				.option("--mkdir", "Create missing parent directories.");
 		if (mode === "create" || mode === "apply" || mode === "export")
 			command.option("--output <file>").option("--force").option("--mkdir");
 		if (mode === "preview")

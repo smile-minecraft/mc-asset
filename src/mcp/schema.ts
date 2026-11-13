@@ -458,19 +458,23 @@ export const MODEL_MODES = [
 	"apply",
 	"export",
 	"preview",
+	"import-bbmodel",
+	"export-bbmodel",
 ] as const;
 
 export const modelAssetInput = {
 	mode: z
 		.enum(MODEL_MODES)
 		.describe(
-			"inspect and validate are read-only; create and apply produce a model document; export places a model and optional bindings; preview renders a diagnostic three-view PNG.",
+			"inspect and validate are read-only; create and apply produce a model document; export places a model and optional bindings; preview renders a diagnostic three-view PNG; import-bbmodel converts a Blockbench Java Block/Item project into a model and PNG textures; export-bbmodel packs a model and PNGs into a .bbmodel project.",
 		),
 	inputPath: z
 		.string()
 		.min(1)
 		.optional()
-		.describe("Model JSON file for inspect, validate, apply, export."),
+		.describe(
+			"Model JSON file for inspect, validate, apply, export; .bbmodel project for import-bbmodel; model JSON for export-bbmodel.",
+		),
 	spec: modelSpecSchema
 		.optional()
 		.describe("create: explicit model description."),
@@ -511,7 +515,9 @@ export const modelAssetInput = {
 		.string()
 		.min(1)
 		.optional()
-		.describe("Explicit .json path for the model (create, apply, export)."),
+		.describe(
+			"Explicit .json path for the model (create, apply, export, import-bbmodel) or .bbmodel path (export-bbmodel).",
+		),
 	itemOutputPath: z
 		.string()
 		.min(1)
@@ -525,6 +531,19 @@ export const modelAssetInput = {
 		.optional()
 		.describe(
 			"export: explicit .json path for the blockstate (needs binding.blockstate).",
+		),
+	textureOutputDir: z
+		.string()
+		.min(1)
+		.optional()
+		.describe(
+			"import-bbmodel: root directory for embedded PNGs, written under assets/<namespace>/textures/. Without it the PNG bytes are returned inline.",
+		),
+	texturePaths: z
+		.record(z.string().min(1), z.string().min(1))
+		.optional()
+		.describe(
+			"export-bbmodel: PNG path for one texture variable, or for a sprite a face names directly; one entry per texture the model uses that is not an alias.",
 		),
 	size: z
 		.literal(64)

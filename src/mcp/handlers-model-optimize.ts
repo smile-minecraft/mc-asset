@@ -187,6 +187,8 @@ export async function handleModelAsset(
 				"binding",
 				"itemOutputPath",
 				"blockstateOutputPath",
+				"textureOutputDir",
+				"texturePaths",
 			] as const) {
 				if (input[field] !== undefined) {
 					throw new McAssetError(
@@ -255,6 +257,8 @@ export async function handleModelAsset(
 			outputPath: input.outputPath,
 			itemOutputPath: input.itemOutputPath,
 			blockstateOutputPath: input.blockstateOutputPath,
+			textureOutputDir: input.textureOutputDir,
+			texturePaths: input.texturePaths,
 			requireOutput: false,
 		});
 		return textResult(outcome.result);

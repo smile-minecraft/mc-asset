@@ -1,5 +1,6 @@
+import { Buffer } from "node:buffer";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { join, relative, resolve, sep } from "node:path";
+import { extname, join, relative, resolve, sep } from "node:path";
 import type { z } from "zod";
 import { exitCodeForError, McAssetError } from "../core/errors.ts";
 import {
@@ -7,6 +8,7 @@ import {
 	modelOperationSchema,
 	modelSpecSchema,
 } from "../mcp/schema.ts";
+import { exportBbmodel, importBbmodel } from "../model/bbmodel/index.ts";
 import {
 	assertBindingOutputTarget,
 	type BlockstateBindingSpec,
@@ -53,6 +55,7 @@ import {
 	type OutputTarget,
 	type PlannedTarget,
 	planOutputTargets,
+	planOutputTargetsKeepingExtension,
 	writePlannedTargets,
 } from "./safe-output.ts";
 import {
@@ -66,7 +69,9 @@ export type ModelMode =
 	| "create"
 	| "apply"
 	| "export"
-	| "preview";
+	| "preview"
+	| "import-bbmodel"
+	| "export-bbmodel";
 
 export interface ModelCliOptions {
 	pack?: string | undefined;
@@ -82,6 +87,10 @@ export interface ModelCliOptions {
 	stdout?: boolean | undefined;
 	itemOutput?: string | undefined;
 	blockstateOutput?: string | undefined;
+	/** import-bbmodel: root directory for embedded PNGs. */
+	textures?: string | undefined;
+	/** export-bbmodel: repeated key=path pairs, one per texture variable. */
+	texture?: string[] | undefined;
 	force?: boolean | undefined;
 	mkdir?: boolean | undefined;
 }
@@ -124,7 +133,52 @@ export type ModelResult =
 	| ModelInspectReport
 	| ModelValidateReport
 	| ModelEditOutput
+	| ModelImportBbmodelOutput
+	| ModelExportBbmodelOutput
 	| ModelPreviewReport;
+
+/** A conversion note that keeps the result usable; .bbmodel warnings carry no pointer. */
+export interface BbmodelExchangeWarning {
+	readonly code: string;
+	readonly level: "warning";
+	readonly message: string;
+}
+
+/** One texture variable of an imported project, with the file written or the bytes embedded. */
+export interface ImportedBbmodelTexture {
+	readonly key: string;
+	readonly sprite: string;
+	readonly relativePath?: string;
+	readonly output?: string;
+	readonly pngBase64?: string;
+	readonly width?: number;
+	readonly height?: number;
+}
+
+export interface ModelImportBbmodelOutput {
+	readonly command: "model";
+	readonly mode: "import-bbmodel";
+	readonly formatVersion: string;
+	readonly resolution: { readonly width: number; readonly height: number };
+	readonly packFormat?: string;
+	readonly elementCount: number;
+	readonly textureCount: number;
+	readonly warnings: readonly BbmodelExchangeWarning[];
+	readonly output?: string;
+	readonly modelText?: string;
+	readonly textures: readonly ImportedBbmodelTexture[];
+}
+
+export interface ModelExportBbmodelOutput {
+	readonly command: "model";
+	readonly mode: "export-bbmodel";
+	readonly formatVersion: string;
+	readonly elementCount: number;
+	readonly textureCount: number;
+	readonly warnings: readonly BbmodelExchangeWarning[];
+	readonly output?: string;
+	readonly bbmodelText?: string;
+}
 
 export interface ModelRequest {
 	readonly mode: ModelMode;
@@ -141,6 +195,10 @@ export interface ModelRequest {
 	readonly outputPath?: string | undefined;
 	readonly itemOutputPath?: string | undefined;
 	readonly blockstateOutputPath?: string | undefined;
+	/** import-bbmodel: root directory for embedded PNGs. */
+	readonly textureOutputDir?: string | undefined;
+	/** export-bbmodel: Java texture variable to PNG path. */
+	readonly texturePaths?: Readonly<Record<string, string>> | undefined;
 	readonly stdout?: boolean | undefined;
 	readonly force?: boolean | undefined;
 	readonly mkdir?: boolean | undefined;
@@ -173,6 +231,8 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"outputPath",
 		"itemOutputPath",
 		"blockstateOutputPath",
+		"textureOutputDir",
+		"texturePaths",
 		"stdout",
 	],
 	validate: [
@@ -183,6 +243,8 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"outputPath",
 		"itemOutputPath",
 		"blockstateOutputPath",
+		"textureOutputDir",
+		"texturePaths",
 		"stdout",
 	],
 	create: [
@@ -195,6 +257,8 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"dependencyPaths",
 		"itemOutputPath",
 		"blockstateOutputPath",
+		"textureOutputDir",
+		"texturePaths",
 	],
 	apply: [
 		"spec",
@@ -205,6 +269,8 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"dependencyPaths",
 		"itemOutputPath",
 		"blockstateOutputPath",
+		"textureOutputDir",
+		"texturePaths",
 	],
 	export: [
 		"spec",
@@ -212,6 +278,8 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"size",
 		"vanillaPath",
 		"dependencyPaths",
+		"textureOutputDir",
+		"texturePaths",
 		"stdout",
 	],
 	preview: [
@@ -220,6 +288,34 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"binding",
 		"itemOutputPath",
 		"blockstateOutputPath",
+		"textureOutputDir",
+		"texturePaths",
+	],
+	"import-bbmodel": [
+		"spec",
+		"operations",
+		"binding",
+		"size",
+		"packPath",
+		"vanillaPath",
+		"dependencyPaths",
+		"itemOutputPath",
+		"blockstateOutputPath",
+		"texturePaths",
+	],
+	"export-bbmodel": [
+		"spec",
+		"operations",
+		"binding",
+		"size",
+		"packPath",
+		"vanillaPath",
+		"dependencyPaths",
+		"itemOutputPath",
+		"blockstateOutputPath",
+		"textureOutputDir",
+		"minecraftVersion",
+		"resourcePackVersion",
 	],
 };
 
@@ -281,14 +377,17 @@ function sourcePathsOf(request: ModelRequest): string[] {
 			paths.push(ref.path);
 		}
 	}
+	if (request.texturePaths !== undefined) {
+		paths.push(...Object.values(request.texturePaths));
+	}
 	return paths;
 }
 
-function requireInput(request: ModelRequest): string {
+function requireInput(request: ModelRequest, label = "model"): string {
 	if (request.inputPath === undefined) {
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
-			`${request.mode} needs a model file.`,
+			`${request.mode} needs a ${label} file.`,
 			{ field: "inputPath" },
 		);
 	}
@@ -470,20 +569,32 @@ async function readBoundedFile(
 	}
 }
 
-function decodeUtf8(bytes: Uint8Array, label: string): string {
+function decodeUtf8(
+	bytes: Uint8Array,
+	label: string,
+	code:
+		| "MODEL_INVALID_JSON"
+		| "BBMODEL_INVALID_DOCUMENT" = "MODEL_INVALID_JSON",
+): string {
 	try {
 		return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
 	} catch {
-		throw new McAssetError(
-			"MODEL_INVALID_JSON",
-			`${label} is not valid UTF-8.`,
-			{ reason: "encoding" },
-		);
+		throw new McAssetError(code, `${label} is not valid UTF-8.`, {
+			reason: "encoding",
+		});
 	}
 }
 
 async function readModelText(path: string): Promise<string> {
 	return decodeUtf8(await readBoundedFile(path, "Model"), "Model");
+}
+
+async function readBbmodelText(path: string): Promise<string> {
+	return decodeUtf8(
+		await readBoundedFile(path, "Project"),
+		"Project",
+		"BBMODEL_INVALID_DOCUMENT",
+	);
 }
 
 /** Loads a JSON document from a path, stdin ("-"), or the inline value. */
@@ -1081,6 +1192,241 @@ async function runExport(request: ModelRequest): Promise<ModelOutcome> {
 	});
 }
 
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+	if (left.length !== right.length) return false;
+	for (const [index, value] of left.entries()) {
+		if (value !== right[index]) return false;
+	}
+	return true;
+}
+
+function exchangeWarnings(
+	warnings: readonly { code: string; message: string }[],
+): BbmodelExchangeWarning[] {
+	return warnings.map((warning) => ({
+		code: warning.code,
+		level: "warning" as const,
+		message: warning.message,
+	}));
+}
+
+/** import-bbmodel: project text in, Java model JSON plus one PNG per embedded texture out. */
+async function runImportBbmodel(request: ModelRequest): Promise<ModelOutcome> {
+	const inputPath = requireInput(request, "project");
+	const output = outputChoice(request);
+	const target = resolveVersionTarget(versionFlags(request));
+	const projectText = await readBbmodelText(inputPath);
+	const imported = importBbmodel(
+		projectText,
+		target.packFormat === undefined ? {} : { packFormat: target.packFormat },
+	);
+	const warnings = [...imported.warnings];
+	const embedded = imported.textures.filter(
+		(texture) => texture.png !== undefined,
+	);
+	const textureRoot = request.textureOutputDir;
+	const placeable = embedded.filter(
+		(texture) => texture.relativePath !== undefined,
+	);
+	if (
+		request.requireOutput &&
+		placeable.length > 0 &&
+		textureRoot === undefined
+	) {
+		throw new McAssetError(
+			"OUTPUT_REQUIRED",
+			"A project with embedded textures needs --textures <dir>.",
+		);
+	}
+
+	interface TextureWrite {
+		readonly path: string;
+		readonly png: Uint8Array;
+		readonly keys: string[];
+	}
+	const writes: TextureWrite[] = [];
+	const writeByPath = new Map<string, TextureWrite>();
+	const writtenPathByKey = new Map<string, string>();
+	if (textureRoot !== undefined) {
+		for (const texture of embedded) {
+			if (texture.relativePath === undefined) {
+				warnings.push({
+					code: "BBMODEL_TEXTURE_UNPLACED",
+					message: `Texture ${texture.key} is an alias with embedded data; it has no PNG path.`,
+				});
+				continue;
+			}
+			const path = join(textureRoot, texture.relativePath);
+			const existing = writeByPath.get(path);
+			if (existing === undefined) {
+				const write: TextureWrite = {
+					path,
+					png: texture.png as Uint8Array,
+					keys: [texture.key],
+				};
+				writeByPath.set(path, write);
+				writes.push(write);
+			} else if (bytesEqual(existing.png, texture.png as Uint8Array)) {
+				existing.keys.push(texture.key);
+			} else {
+				throw new McAssetError(
+					"ARGUMENT_CONFLICT",
+					`Two embedded textures map to ${texture.relativePath} with different bytes.`,
+					{ path: texture.relativePath },
+				);
+			}
+		}
+		for (const write of writes) {
+			for (const key of write.keys) writtenPathByKey.set(key, write.path);
+		}
+	}
+
+	const planned = await planTargets(
+		request,
+		output.path === undefined
+			? []
+			: [
+					{
+						path: output.path,
+						extension: ".json" as const,
+						allowOverwrite: request.force === true,
+					},
+				],
+	);
+	const plannedTextures =
+		textureRoot === undefined
+			? []
+			: await planOutputTargets(
+					writes.map((write) => ({
+						path: write.path,
+						extension: ".png" as const,
+						allowOverwrite: request.force === true,
+					})),
+					{
+						inputs: sourcePathsOf(request),
+						mkdir: request.mkdir === true,
+						allowedRoot: textureRoot,
+					},
+				);
+	const payloads = new Map<string, string | Uint8Array>();
+	if (output.path !== undefined) payloads.set(output.path, imported.modelText);
+	for (const write of writes) payloads.set(write.path, write.png);
+	const written = new Set<string>();
+	for (const path of await writePlannedTargets(planned, payloads, {
+		mkdir: request.mkdir === true,
+	})) {
+		written.add(path);
+	}
+	for (const path of await writePlannedTargets(plannedTextures, payloads, {
+		mkdir: request.mkdir === true,
+	})) {
+		written.add(path);
+	}
+
+	const embed = request.requireOutput !== true && output.path === undefined;
+	const elementCount = imported.spec.elements?.length ?? 0;
+	const result: ModelImportBbmodelOutput = {
+		command: "model",
+		mode: "import-bbmodel",
+		formatVersion: imported.formatVersion,
+		resolution: imported.resolution,
+		...(imported.packFormat === undefined
+			? {}
+			: { packFormat: imported.packFormat }),
+		elementCount,
+		textureCount: imported.textures.length,
+		warnings: exchangeWarnings(warnings),
+		...(output.path !== undefined && written.has(output.path)
+			? { output: output.path }
+			: {}),
+		...(embed ? { modelText: imported.modelText } : {}),
+		textures: imported.textures.map((texture) => {
+			const texturePath = writtenPathByKey.get(texture.key);
+			return {
+				key: texture.key,
+				sprite: texture.sprite,
+				...(texture.relativePath === undefined
+					? {}
+					: { relativePath: texture.relativePath }),
+				...(texture.width === undefined ? {} : { width: texture.width }),
+				...(texture.height === undefined ? {} : { height: texture.height }),
+				...(texturePath !== undefined && written.has(texturePath)
+					? { output: texturePath }
+					: {}),
+				...(embed && textureRoot === undefined && texture.png !== undefined
+					? { pngBase64: Buffer.from(texture.png).toString("base64") }
+					: {}),
+			};
+		}),
+	};
+	return {
+		result,
+		failed: false,
+		artifact: output.stdout
+			? new TextEncoder().encode(imported.modelText)
+			: undefined,
+	};
+}
+
+/** export-bbmodel: Java model JSON plus explicit texture PNGs in, one .bbmodel out. */
+async function runExportBbmodel(request: ModelRequest): Promise<ModelOutcome> {
+	const inputPath = requireInput(request);
+	const output = outputChoice(request);
+	if (
+		output.path !== undefined &&
+		extname(output.path).toLowerCase() !== ".bbmodel"
+	) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			`Output path must end with .bbmodel: ${output.path}.`,
+			{ field: "outputPath", path: output.path },
+		);
+	}
+	const texturePaths = request.texturePaths ?? {};
+	const planned = await planOutputTargetsKeepingExtension(
+		output.path === undefined
+			? []
+			: [{ path: output.path, allowOverwrite: request.force === true }],
+		{
+			inputs: sourcePathsOf(request),
+			mkdir: request.mkdir === true,
+		},
+	);
+	const textureBytes = new Map<string, Uint8Array>();
+	for (const [key, path] of Object.entries(texturePaths)) {
+		textureBytes.set(key, await readBoundedFile(path, "Texture"));
+	}
+	const exported = exportBbmodel(await readModelText(inputPath), textureBytes);
+	const written =
+		planned.length === 0 || output.path === undefined
+			? []
+			: await writePlannedTargets(
+					planned,
+					new Map([[output.path, exported.text]]),
+					{ mkdir: request.mkdir === true },
+				);
+	const embed = request.requireOutput !== true && output.path === undefined;
+	const result: ModelExportBbmodelOutput = {
+		command: "model",
+		mode: "export-bbmodel",
+		formatVersion: exported.formatVersion,
+		elementCount: exported.elementCount,
+		textureCount: exported.textureCount,
+		warnings: exchangeWarnings(exported.warnings),
+		...(output.path !== undefined && written.includes(output.path)
+			? { output: output.path }
+			: {}),
+		...(embed ? { bbmodelText: exported.text } : {}),
+	};
+	return {
+		result,
+		failed: false,
+		artifact: output.stdout
+			? new TextEncoder().encode(exported.text)
+			: undefined,
+	};
+}
+
 /**
  * Shared model pipeline for the CLI and the MCP tool. Order: refused fields,
  * then the mode's required inputs, then output rules, then paths (planOutputTargets),
@@ -1103,6 +1449,10 @@ export async function runModelRequest(
 			return runExport(request);
 		case "preview":
 			return runPreview(request);
+		case "import-bbmodel":
+			return runImportBbmodel(request);
+		case "export-bbmodel":
+			return runExportBbmodel(request);
 	}
 }
 
@@ -1157,6 +1507,52 @@ function editLines(result: ModelEditOutput): string[] {
 	return lines;
 }
 
+function bbmodelLines(
+	result: ModelImportBbmodelOutput | ModelExportBbmodelOutput,
+): string[] {
+	const lines = [
+		`ok model ${result.mode} elements=${String(result.elementCount)} textures=${String(result.textureCount)}`,
+	];
+	if (result.output !== undefined) lines.push(`output=${result.output}`);
+	if (result.mode === "import-bbmodel") {
+		for (const texture of result.textures) {
+			if (texture.output !== undefined) lines.push(`texture=${texture.output}`);
+		}
+	}
+	for (const warning of result.warnings) {
+		lines.push(`warning [${warning.code}] ${warning.message}`);
+	}
+	return lines;
+}
+
+function textureOption(
+	values: readonly string[] | undefined,
+): Readonly<Record<string, string>> | undefined {
+	if (values === undefined || values.length === 0) return undefined;
+	const paths: Record<string, string> = {};
+	for (const value of values) {
+		const separator = value.indexOf("=");
+		const key = separator < 0 ? "" : value.slice(0, separator);
+		const path = separator < 0 ? "" : value.slice(separator + 1);
+		if (key === "" || path === "") {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				`--texture expects <key>=<png path>: ${value}.`,
+				{ field: "texture" },
+			);
+		}
+		if (Object.hasOwn(paths, key)) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				`Two --texture entries name ${key}.`,
+				{ key },
+			);
+		}
+		paths[key] = path;
+	}
+	return paths;
+}
+
 function failureSummary(
 	report: ModelInspectReport | ModelValidateReport,
 ): string {
@@ -1199,6 +1595,8 @@ export async function runModel(
 			outputPath: options.output,
 			itemOutputPath: options.itemOutput,
 			blockstateOutputPath: options.blockstateOutput,
+			textureOutputDir: options.textures,
+			texturePaths: textureOption(options.texture),
 			size: options.size === undefined ? undefined : Number(options.size),
 			stdout: options.stdout,
 			force: options.force,
@@ -1230,6 +1628,11 @@ export async function runModel(
 			emitEnvelope(successEnvelope(outcome.result), streams, route);
 		} else if ("mode" in outcome.result && outcome.result.mode === "preview") {
 			emitLog(reportLines(outcome.result).join("\n"), streams, route);
+		} else if (
+			outcome.result.mode === "import-bbmodel" ||
+			outcome.result.mode === "export-bbmodel"
+		) {
+			emitLog(bbmodelLines(outcome.result).join("\n"), streams, route);
 		} else if ("verdict" in outcome.result) {
 			emitLog(reportLines(outcome.result).join("\n"), streams, route);
 		} else {
