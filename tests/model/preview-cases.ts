@@ -28,14 +28,14 @@ import type {
 import { renderModelPreview } from "../../src/model/preview/render.ts";
 import type { CaseCheck, ModelCase } from "./json-document-cases.ts";
 
-const PREVIEW_PATH = "assets/demo/models/item/cube.json";
-const STONE_REL = "assets/demo/textures/stone.png";
-const RED_REL = "assets/demo/textures/red.png";
-const GREEN_REL = "assets/demo/textures/green.png";
-const BLUE_REL = "assets/demo/textures/blue.png";
-const YELLOW_REL = "assets/demo/textures/yellow.png";
-const MAGENTA_REL = "assets/demo/textures/magenta.png";
-const CYAN_REL = "assets/demo/textures/cyan.png";
+export const PREVIEW_PATH = "assets/demo/models/item/cube.json";
+export const STONE_REL = "assets/demo/textures/stone.png";
+export const RED_REL = "assets/demo/textures/red.png";
+export const GREEN_REL = "assets/demo/textures/green.png";
+export const BLUE_REL = "assets/demo/textures/blue.png";
+export const YELLOW_REL = "assets/demo/textures/yellow.png";
+export const MAGENTA_REL = "assets/demo/textures/magenta.png";
+export const CYAN_REL = "assets/demo/textures/cyan.png";
 const MIX_REL = "assets/demo/textures/mix.png";
 const BLACK_REL = "assets/demo/textures/black.png";
 const GRAY_REL = "assets/demo/textures/gray.png";
@@ -48,11 +48,11 @@ const MAGENTA: readonly [number, number, number, number] = [255, 0, 255, 255];
 
 const encoder = new TextEncoder();
 
-function sha256(value: Uint8Array | string): string {
+export function sha256(value: Uint8Array | string): string {
 	return createHash("sha256").update(value).digest("hex");
 }
 
-interface PixelBox {
+export interface PixelBox {
 	readonly minX: number;
 	readonly minY: number;
 	readonly maxX: number;
@@ -63,7 +63,7 @@ interface PixelBox {
 }
 
 /** The non-transparent bounding box inside one panel. */
-function panelBox(
+export function panelBox(
 	flat: Uint8Array,
 	width: number,
 	x0: number,
@@ -99,7 +99,7 @@ function panelBox(
 }
 
 /** Every opaque colour inside one panel, as r,g,b strings. */
-function panelColors(
+export function panelColors(
 	flat: Uint8Array,
 	width: number,
 	x0: number,
@@ -118,7 +118,7 @@ function panelColors(
 	return [...colors].sort();
 }
 
-function solidPng(r: number, g: number, b: number, a = 255): Uint8Array {
+export function solidPng(r: number, g: number, b: number, a = 255): Uint8Array {
 	const size = 16;
 	const canvas = createCanvas(size, size);
 	const layer = addLayer(canvas, { id: "base" });
@@ -133,7 +133,7 @@ function solidPng(r: number, g: number, b: number, a = 255): Uint8Array {
 	return encodePng(canvas);
 }
 
-function splitPng(): Uint8Array {
+export function splitPng(): Uint8Array {
 	const size = 16;
 	const canvas = createCanvas(size, size);
 	const layer = addLayer(canvas, { id: "base" });
@@ -152,7 +152,51 @@ function splitPng(): Uint8Array {
 	return encodePng(canvas);
 }
 
-function memoryContext(
+/** 16x16 texture: an opaque band across the top `rows` texels, transparent below. */
+export function bandPng(r: number, g: number, b: number, rows = 4): Uint8Array {
+	const size = 16;
+	const canvas = createCanvas(size, size);
+	const layer = addLayer(canvas, { id: "base" });
+	const pixels = new Uint8Array(size * size * 4);
+	for (let y = 0; y < size; y += 1) {
+		for (let x = 0; x < size; x += 1) {
+			const o = (y * size + x) * 4;
+			const inside = y < rows;
+			pixels[o] = inside ? r : 0;
+			pixels[o + 1] = inside ? g : 0;
+			pixels[o + 2] = inside ? b : 0;
+			pixels[o + 3] = inside ? 255 : 0;
+		}
+	}
+	replaceLayerPixels(canvas, layer.id, pixels);
+	return encodePng(canvas);
+}
+
+/**
+ * 16x16 texture: a four-row band, blue on the left half and cyan on the right,
+ * transparent below. The two colours make a horizontal mirror visible.
+ */
+export function twoToneBandPng(rows = 4): Uint8Array {
+	const size = 16;
+	const canvas = createCanvas(size, size);
+	const layer = addLayer(canvas, { id: "base" });
+	const pixels = new Uint8Array(size * size * 4);
+	for (let y = 0; y < size; y += 1) {
+		for (let x = 0; x < size; x += 1) {
+			if (y >= rows) continue;
+			const o = (y * size + x) * 4;
+			const left = x < 8;
+			pixels[o] = 0;
+			pixels[o + 1] = left ? 0 : 255;
+			pixels[o + 2] = 255;
+			pixels[o + 3] = 255;
+		}
+	}
+	replaceLayerPixels(canvas, layer.id, pixels);
+	return encodePng(canvas);
+}
+
+export function memoryContext(
 	files: Record<string, Uint8Array>,
 ): ModelResolutionContext {
 	const layer: ModelResolutionLayer = {
@@ -165,7 +209,7 @@ function memoryContext(
 	return { layers: [layer], hasVanilla: false };
 }
 
-function flatOf(png: Uint8Array): {
+export function flatOf(png: Uint8Array): {
 	flat: Uint8Array;
 	width: number;
 	height: number;
@@ -178,7 +222,7 @@ function flatOf(png: Uint8Array): {
 	};
 }
 
-function at(
+export function at(
 	flat: Uint8Array,
 	width: number,
 	x: number,
@@ -193,7 +237,7 @@ function at(
 	];
 }
 
-function assertRgba(
+export function assertRgba(
 	check: CaseCheck,
 	flat: Uint8Array,
 	width: number,
@@ -210,7 +254,7 @@ function assertRgba(
 	);
 }
 
-function assertTransparent(
+export function assertTransparent(
 	check: CaseCheck,
 	flat: Uint8Array,
 	width: number,
@@ -222,7 +266,7 @@ function assertTransparent(
 	check.equal(got[3], 0, `${message} at ${x},${y}: alpha ${got[3]}`);
 }
 
-function fullCubeFaces(texture: string): Record<string, unknown> {
+export function fullCubeFaces(texture: string): Record<string, unknown> {
 	return {
 		north: { texture },
 		south: { texture },
@@ -233,7 +277,7 @@ function fullCubeFaces(texture: string): Record<string, unknown> {
 	};
 }
 
-function cubeModel(
+export function cubeModel(
 	texture: string,
 	from: readonly number[] = [0, 0, 0],
 	to: readonly number[] = [16, 16, 16],
@@ -294,7 +338,7 @@ const SHRINE_PATH = join(
 	"../../docs/assets/showcase/model-shrine.json",
 );
 
-function coloredCubeModel(): string {
+export function coloredCubeModel(): string {
 	return JSON.stringify({
 		textures: {
 			n: "demo:red",
@@ -321,7 +365,7 @@ function coloredCubeModel(): string {
 	});
 }
 
-function coloredCubeContext(): ModelResolutionContext {
+export function coloredCubeContext(): ModelResolutionContext {
 	return memoryContext({
 		[RED_REL]: solidPng(255, 0, 0),
 		[GREEN_REL]: solidPng(0, 255, 0),
@@ -371,7 +415,7 @@ function translucentModel(elements: readonly unknown[]): string {
 	});
 }
 
-async function withTempRoot(
+export async function withTempRoot(
 	body: (root: string) => Promise<void>,
 ): Promise<void> {
 	const root = await mkdtemp(join(tmpdir(), "model-preview-"));
@@ -382,7 +426,7 @@ async function withTempRoot(
 	}
 }
 
-async function makePack(
+export async function makePack(
 	root: string,
 	textureBytes: Uint8Array,
 	modelText: string,

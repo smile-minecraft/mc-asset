@@ -1,3 +1,4 @@
+import { isBuiltinModel } from "../profiles/builtin-models.ts";
 import { decideUnresolvedVariable } from "../validate/reference-graph.ts";
 import type { ResolutionSource } from "../validate/resource-context.ts";
 import { validateResourceLocation } from "../validate/resource-location.ts";
@@ -59,6 +60,12 @@ export interface ModelTextureResolution {
 		| "external";
 	readonly source?: ResolutionSource;
 	readonly via: readonly string[];
+}
+/** One texture after the whole parent-chain inheritance, with its resolution. */
+export interface ModelEffectiveTexture {
+	readonly name: string;
+	readonly forceTranslucent?: boolean;
+	readonly resolution: ModelTextureResolution;
 }
 export interface ModelFaceView {
 	readonly face: Direction;
@@ -163,6 +170,18 @@ export interface ModelAnalyzeOptions {
 	readonly modelId?: string | undefined;
 	readonly context?: ModelResolutionContext | undefined;
 	readonly path: string;
+	/**
+	 * Treat a parent reference written without a namespace as `minecraft:`
+	 * when it names a builtin template.
+	 *
+	 * Every Minecraft resource location defaults to the `minecraft` namespace
+	 * (`ResourceLocation.parse("item/generated")`), and the 1.21.4 vanilla
+	 * `item/handheld.json` itself writes `"parent": "item/generated"`. The
+	 * inspect and validate reports keep their historical `unresolved` result
+	 * for that spelling, so only the preview asks for the alias and reads the
+	 * builtin template's `display` / `gui_light` from it.
+	 */
+	readonly builtinParentAliases?: boolean | undefined;
 }
 
 function member(node: JsonNode, key: string): JsonNode | undefined {
@@ -339,9 +358,12 @@ function addResolutionFinding(
 async function analyze(
 	text: string,
 	options: ModelAnalyzeOptions,
+	collectEffectiveTextures = false,
 ): Promise<{
 	root: JsonNode;
 	report: ModelInspectReport;
+	builtinTerminus?: string;
+	effectiveTextures: readonly ModelEffectiveTexture[];
 }> {
 	const root = parseJsonDocument(text);
 	const rules = resolveModelRules(options.packFormat);
@@ -377,17 +399,26 @@ async function analyze(
 			: { status: "complete", reason: "no-parent" };
 	let parentReport: ModelInspectReport["parent"];
 	const parentChain: ModelParentLink[] = [];
+	let builtinTerminus: string | undefined;
 	const documents: ModelDocument[] = [own];
 	const seen = new Set<string>([own.id]);
 	let nextParent = ownParent;
 	for (let depth = 0; nextParent !== undefined; depth += 1) {
 		const pointer = depth === 0 ? "/parent" : "";
 		const resolution = resolveModelReference(context, nextParent);
+		const builtinAlias =
+			options.builtinParentAliases === true &&
+			!nextParent.includes(":") &&
+			isBuiltinModel(`minecraft:${nextParent}`) &&
+			(resolution.status === "unresolved" || resolution.status === "missing");
 		if (depth === 0) {
 			parentReport = {
 				value: nextParent,
-				status:
-					resolution.status === "case-mismatch" ? "missing" : resolution.status,
+				status: builtinAlias
+					? "builtin"
+					: resolution.status === "case-mismatch"
+						? "missing"
+						: resolution.status,
 				...(resolution.source === undefined
 					? {}
 					: { source: resolution.source }),
@@ -396,7 +427,10 @@ async function analyze(
 					: { target: resolution.target }),
 			};
 		}
-		if (resolution.status === "builtin") {
+		if (resolution.status === "builtin" || builtinAlias) {
+			builtinTerminus = builtinAlias
+				? `minecraft:${nextParent}`
+				: (resolution.target ?? nextParent);
 			parentTermination = { status: "complete", reason: "builtin" };
 			break;
 		}
@@ -688,6 +722,37 @@ async function analyze(
 			);
 	}
 	textureReports.sort((a, b) => byteCompare(a.name, b.name));
+	const ownResolutions = new Map<string, ModelTextureResolution>(
+		textureReports.map((entry) => [entry.name, entry.resolution]),
+	);
+	// `inspectModelWithBuiltinTerminus` reads the effective texture map the
+	// generated-item layer synthesis needs: the first definition in the own ->
+	// parent chain wins, exactly like the game, and `#variable` chains are
+	// resolved through the same maps. Public `inspectModel` skips this work so
+	// its report keeps its historical shape and findings.
+	const effectiveTextures: ModelEffectiveTexture[] = [];
+	if (collectEffectiveTextures) {
+		const effectiveNames = new Set<string>();
+		for (const map of textureMaps) {
+			for (const [name, entry] of map) {
+				if (effectiveNames.has(name)) continue;
+				effectiveNames.add(name);
+				const resolution =
+					ownResolutions.get(name) ??
+					(entry.invalidReference || entry.value === undefined
+						? { status: "missing" as const, via: [] }
+						: resolveTextureValue(`#${name}`, jsonPointer(["textures", name])));
+				effectiveTextures.push({
+					name,
+					...(entry.forceTranslucent === undefined
+						? {}
+						: { forceTranslucent: entry.forceTranslucent }),
+					resolution,
+				});
+			}
+		}
+		effectiveTextures.sort((a, b) => byteCompare(a.name, b.name));
+	}
 
 	let elementsSource: ModelInspectReport["elementsSource"] = { from: "none" };
 	let effectiveElements: JsonNode | undefined;
@@ -968,7 +1033,12 @@ async function analyze(
 			textureCount: textureReports.length,
 		},
 	};
-	return { root, report };
+	return {
+		root,
+		report,
+		...(builtinTerminus === undefined ? {} : { builtinTerminus }),
+		effectiveTextures,
+	};
 }
 
 export async function inspectModel(
@@ -977,6 +1047,46 @@ export async function inspectModel(
 ): Promise<ModelInspectReport> {
 	return (await analyze(text, options)).report;
 }
+
+/**
+ * `inspectModel` plus the builtin template id that terminated the parent
+ * chain and the effective textures of the whole chain.
+ *
+ * `ModelInspectReport.parentChain` records only parents with a file to read,
+ * so a chain that ends at a builtin template (`minecraft:builtin/generated`,
+ * `minecraft:item/generated`, ...) keeps the historical report shape without
+ * the terminating id. The preview needs that id to continue the vanilla
+ * `display` / `gui_light` inheritance through the builtin templates, so it is
+ * returned beside the report. A chain that stops at a missing, unresolved or
+ * cyclic parent has no terminus: the game could not know where the chain
+ * continues either, so the preview must not guess.
+ *
+ * `effectiveTextures` applies the own -> parent override order to every
+ * texture variable and resolves `#variable` chains through the same maps, so
+ * the generated-item layer synthesis can read a layer a parent declares. The
+ * public `inspectModel` report keeps its own-texture `textures` and
+ * `inheritedTextures` shape and does not resolve the inherited entries.
+ */
+export async function inspectModelWithBuiltinTerminus(
+	text: string,
+	options: ModelAnalyzeOptions,
+): Promise<{
+	readonly report: ModelInspectReport;
+	readonly builtinTerminus?: string;
+	readonly effectiveTextures: readonly ModelEffectiveTexture[];
+}> {
+	const { report, builtinTerminus, effectiveTextures } = await analyze(
+		text,
+		options,
+		true,
+	);
+	return {
+		report,
+		...(builtinTerminus === undefined ? {} : { builtinTerminus }),
+		effectiveTextures,
+	};
+}
+
 export async function validateModel(
 	text: string,
 	options: ModelAnalyzeOptions,

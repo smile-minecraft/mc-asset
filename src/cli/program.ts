@@ -1799,6 +1799,22 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 					"--view-direction <direction>",
 					"Isometric camera: south-east (default), south-west, north-west, or north-east.",
 				)
+				.option(
+					"--display <slot>",
+					"Game display slot: gui, firstperson_righthand, thirdperson_righthand, head, ground, or fixed.",
+				)
+				.option(
+					"--lighting",
+					"Apply the fixed per-face shade factors selected by gui_light.",
+				)
+				.option(
+					"--tint <color>",
+					"#RRGGBB colour for every face that declares tintindex.",
+				)
+				.option(
+					"--tints <json>",
+					"Inline JSON object mapping tintindex to #RRGGBB; exclusive with --tint.",
+				)
 				.option("--output <file>")
 				.option("--force")
 				.option("--mkdir");

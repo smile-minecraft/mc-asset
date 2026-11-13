@@ -6,12 +6,29 @@ import {
 import { McAssetError } from "../../core/errors.ts";
 import { decodePng, encodePng, flattenCanvas } from "../../io/png.ts";
 import {
-	inspectModel,
+	inspectModelWithBuiltinTerminus,
 	type ModelCoverage,
+	type ModelElementView,
 	type ModelFaceView,
 } from "../inspect.ts";
 import { textureResourcePath } from "../references.ts";
 import { DIRECTIONS, type Direction, type Vec3 } from "../types.ts";
+import {
+	builtinDisplaySource,
+	builtinGuiLight,
+	type DisplayTransformSource,
+	displayTransformFor,
+	formatTintColor,
+	type LightingMode,
+	PREVIEW_DISPLAY_SLOTS,
+	type PreviewDisplaySlot,
+	type RgbTint,
+} from "./display.ts";
+import {
+	isGeneratedItemTemplate,
+	isItemLayerName,
+	itemLayerElements,
+} from "./item-layers.ts";
 import {
 	autoUv,
 	checkerColor,
@@ -72,16 +89,35 @@ export type {
  * pass, per pixel, from far to near. Without a `view` option the geometry
  * renderer also produces the three-view layout, so a rotated element shows up
  * in all three panels; with `view: { kind: "isometric" }` it renders one square
- * 2:1 isometric panel for the requested camera direction.
+ * 2:1 isometric panel for the requested camera direction; with `display` it
+ * renders one square panel through the game display slot's transform and
+ * optionally applies the fixed face shading and a tint colour.
+ *
+ * A recipe-built item model has no `elements` at all: it is a `parent` plus
+ * `layer0` .. `layer4` textures, and the client generates its flat geometry
+ * from them. When a display slot, lighting or a tint is requested and the
+ * resolved parent chain ends at one of the four builtin generated-item
+ * templates, the preview resolves the effective layer textures of the whole
+ * chain, generates the same layer planes (`item-layers.ts`) and sends them
+ * through the geometry renderer, so a two-dimensional item is drawn and its
+ * `display` rotation, scale and translation are visible. Without one of those
+ * options such a model keeps its historical fully transparent image, because
+ * that is what the compatibility renderer produced before item layers
+ * existed. A chain with no generated terminus gets no invented planes; the
+ * report lists the ungenerated geometry in `coverage.skipped`.
  *
  * The report stays honest: anything not faithfully rendered is listed in
  * `coverage.skipped` (including a panel the content is clipped by), every
- * texture problem also raises a warning, and `unapplied` states that display
- * transforms and game lighting are not applied. The geometry renderer adds
- * `tintindex` when the model uses it; the compatibility renderer keeps its
- * historical `display` / `lighting` list so its reports stay byte-identical.
- * This is a diagnostic view, not a game renderer, and it never rewrites the
- * model.
+ * texture problem also raises a warning, and `unapplied` names the steps this
+ * diagnostic view still does not apply: display transforms or lighting when
+ * not requested, uncoloured `tintindex` faces, ambient occlusion, world light,
+ * shadows, perspective projection, the per-slot camera rig, left-hand
+ * mirroring, the GUI item shader lighting (the fixed factors come from
+ * block-face shading), the hand, head, item-frame and dropped-item poses, and
+ * the 1 px edge quads of generated item layers.
+ * The compatibility renderer keeps its historical `display` / `lighting` list
+ * so its reports stay byte-identical. This is a diagnostic view, not a game
+ * renderer, and it never rewrites the model.
  */
 
 function isSupportedSize(value: unknown): value is ModelPreviewSize {
@@ -145,6 +181,100 @@ function unappliedSteps(faces: readonly ModelFaceView[]): string[] {
 }
 
 /**
+ * The extra pose each display slot adds in the game on top of the model
+ * transform: the hand, the head, the dropped item and the item frame all
+ * have their own camera or anchor that this diagnostic view does not model.
+ */
+const DISPLAY_POSE_UNAPPLIED: Readonly<
+	Record<PreviewDisplaySlot, readonly string[]>
+> = {
+	gui: [],
+	firstperson_righthand: ["first-person-hand-pose"],
+	thirdperson_righthand: ["third-person-hand-pose"],
+	head: ["head-pose"],
+	ground: ["dropped-item-pose"],
+	fixed: ["item-frame-pose"],
+};
+
+/**
+ * The honest gap list once a display slot, lighting or a tint is requested.
+ * The first two entries keep the historical meaning of the report; the rest
+ * name what this diagnostic renderer still does not simulate. The strings
+ * never claim the image matches the game client.
+ */
+function previewUnapplied(input: {
+	readonly elements: readonly ModelElementView[];
+	readonly display: PreviewDisplaySlot | undefined;
+	readonly displayApplied: boolean;
+	readonly lighting: boolean;
+	readonly guiLight: "front" | "side";
+	readonly uncoloredFaces: number;
+	/** True when the flat planes of a recipe-built item model were drawn. */
+	readonly generatedItemPlanes: boolean;
+}): string[] {
+	const steps: string[] = [];
+	if (input.display === undefined) steps.push("display");
+	if (!input.lighting) steps.push("lighting");
+	if (input.uncoloredFaces > 0) steps.push("tintindex");
+	steps.push(
+		"ambient-occlusion",
+		"world-lightmap",
+		"shadows",
+		"perspective-projection",
+	);
+	if (input.generatedItemPlanes) {
+		// `ItemModelGenerator` also builds 1 px edge quads around the opaque
+		// outline of every layer; the preview draws the front plane only.
+		steps.push("generated-item-edge-quads");
+	}
+	if (input.display !== undefined) {
+		steps.push("camera-rig", "left-hand-mirroring");
+		steps.push(...DISPLAY_POSE_UNAPPLIED[input.display]);
+		if (!input.displayApplied) steps.push("display-slot-missing");
+	}
+	if (input.lighting) {
+		steps.push(
+			input.guiLight === "front"
+				? "flat-item-lighting-variation"
+				: "dominant-axis-shading",
+			"gui-item-shader-lighting",
+		);
+	}
+	if (
+		input.elements.some(
+			(element) =>
+				element.shade === false || element.shadeDirectionOverride !== undefined,
+		)
+	) {
+		steps.push("element-shade");
+	}
+	if (input.elements.some((element) => (element.lightEmission ?? 0) > 0)) {
+		steps.push("light-emission");
+	}
+	return steps;
+}
+
+/** Report tint colours in index order, so object key order cannot vary. */
+function sortedTints(
+	tints: Readonly<Record<string, RgbTint>>,
+): Record<string, string> {
+	const entries = Object.entries(tints).map(([key, value]) => ({
+		index: Number(key),
+		color: value,
+	}));
+	entries.sort((a, b) => a.index - b.index);
+	const result: Record<string, string> = {};
+	for (const entry of entries) {
+		// Key the report by the canonical decimal spelling: "02" and "0x10"
+		// name the same tint index as "2" and "16", and a plain object only
+		// enumerates integer-like keys in ascending order. Keeping the written
+		// spelling would let insertion order decide the report's order.
+		result[String(entry.index)] = formatTintColor(entry.color);
+	}
+	return result;
+}
+
+/**
  * Render the diagnostic preview PNG plus its report. The compatibility
  * renderer and the geometry renderer share the inspection result, the decoded
  * texture cache and the report shape; anything not faithfully rendered is
@@ -162,8 +292,38 @@ export async function renderModelPreview(
 		);
 	}
 	const size = options.size;
-	const view: ModelPreviewView = options.view ?? { kind: "three-view" };
-	const inspection = await inspectModel(text, {
+	if (
+		options.display !== undefined &&
+		!(PREVIEW_DISPLAY_SLOTS as readonly string[]).includes(options.display)
+	) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			`display must be one of ${PREVIEW_DISPLAY_SLOTS.join(", ")}: ${String(options.display)}.`,
+			{ field: "display", display: options.display },
+		);
+	}
+	if (options.display !== undefined && options.view !== undefined) {
+		throw new McAssetError(
+			"ARGUMENT_CONFLICT",
+			"display cannot be combined with view.",
+		);
+	}
+	const view: ModelPreviewView =
+		options.display === undefined
+			? (options.view ?? { kind: "three-view" })
+			: { kind: "display", slot: options.display };
+	// The layer generation, display pose, lighting and tints are the only
+	// reasons to look through a namespace-less builtin parent or to
+	// synthesise geometry. A caller that passes none of them must keep the
+	// historical resolution exactly: `parent: "item/generated"` stays an
+	// unresolved parent and `#missing` stays `external`, so both the PNG and
+	// the report bytes are unchanged from before the preview features.
+	const newPreviewOptions =
+		options.display !== undefined ||
+		options.lighting === true ||
+		options.tint !== undefined ||
+		options.tints !== undefined;
+	const inspectionResult = await inspectModelWithBuiltinTerminus(text, {
 		path: options.path,
 		...(options.modelId === undefined ? {} : { modelId: options.modelId }),
 		...(options.packFormat === undefined
@@ -173,7 +333,14 @@ export async function renderModelPreview(
 			? {}
 			: { minecraftVersion: options.minecraftVersion }),
 		...(options.context === undefined ? {} : { context: options.context }),
+		// A model file may write `"parent": "item/generated"`; Minecraft reads
+		// that as `minecraft:item/generated`. Only the preview follows the
+		// default namespace into the builtin template table, so the inspect and
+		// validate reports keep their existing result for that spelling.
+		builtinParentAliases: newPreviewOptions,
 	});
+	const inspection = inspectionResult.report;
+	const builtinTerminus = inspectionResult.builtinTerminus;
 
 	const skipped: {
 		kind: string;
@@ -182,6 +349,75 @@ export async function renderModelPreview(
 		detail?: string;
 	}[] = [];
 	const warnings: ModelPreviewWarning[] = [];
+
+	const inspectionDisplay =
+		options.display === undefined
+			? undefined
+			: inspection.display.find((entry) => entry.position === options.display);
+	let displaySource: DisplayTransformSource | undefined = inspectionDisplay;
+	let displayFrom = inspectionDisplay?.from;
+	if (
+		options.display !== undefined &&
+		displaySource === undefined &&
+		builtinTerminus !== undefined
+	) {
+		const builtin = builtinDisplaySource(builtinTerminus, options.display);
+		if (builtin !== undefined) {
+			displaySource = builtin.source;
+			displayFrom = builtin.from;
+		}
+	}
+	const display =
+		options.display === undefined
+			? undefined
+			: displayTransformFor(options.display, displaySource, displayFrom);
+	const guiLight =
+		inspection.properties.guiLight ??
+		(builtinTerminus === undefined
+			? undefined
+			: builtinGuiLight(builtinTerminus)) ??
+		"side";
+	const lightingMode: LightingMode | undefined =
+		options.lighting === true
+			? guiLight === "front"
+				? "flat"
+				: "directional"
+			: undefined;
+	if (options.tint !== undefined && options.tints !== undefined) {
+		throw new McAssetError(
+			"ARGUMENT_CONFLICT",
+			"Use only one of tint or tints.",
+			{ field: "tints", mode: "preview" },
+		);
+	}
+	const tintByIndex = new Map<number, RgbTint>();
+	if (options.tints !== undefined) {
+		for (const [key, value] of Object.entries(options.tints)) {
+			const index = Number(key);
+			if (!Number.isSafeInteger(index) || index < 0) {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					`tints keys must be non-negative integers: ${key}.`,
+					{ field: "tints", key },
+				);
+			}
+			if (tintByIndex.has(index)) {
+				throw new McAssetError(
+					"ARGUMENT_CONFLICT",
+					`tints names tintindex ${index} twice.`,
+					{ field: "tints", index },
+				);
+			}
+			tintByIndex.set(index, value);
+		}
+	}
+	const tint =
+		options.tint === undefined && options.tints === undefined
+			? undefined
+			: {
+					...(options.tint === undefined ? {} : { color: options.tint }),
+					byIndex: tintByIndex,
+				};
 
 	const translucentVars = new Set<string>();
 	for (const entry of inspection.textures) {
@@ -218,11 +454,57 @@ export async function renderModelPreview(
 		readonly maxXFixed: number;
 		readonly maxYFixed: number;
 		readonly maxZFixed: number;
-		readonly element: (typeof inspection.elements)[number];
+		readonly element: ModelElementView;
+	}
+
+	// A recipe-built item model is `parent` plus `textures.layer0` with no
+	// `elements` of its own; the client generates its flat geometry from the
+	// layer textures. The preview synthesises those planes only when one of
+	// the preview features that motivate them is requested *and* the parent
+	// chain ends at one of the four builtin templates that make the game
+	// generate geometry. A chain that stops at a missing, cyclic, unreadable
+	// or non-generated builtin parent has no such terminus; guessing a plane
+	// from `layer0` would draw an item the game never builds. A caller that
+	// passes none of the new options keeps the historical fully transparent
+	// image and report. A model that declares `elements` itself — even an
+	// empty array — keeps them; generation only applies when the chain has no
+	// elements at all.
+	const noElements = inspection.elementsSource.from === "none";
+	const generatedItemTemplate =
+		builtinTerminus !== undefined && isGeneratedItemTemplate(builtinTerminus);
+	const effectiveLayers = inspectionResult.effectiveTextures.filter((texture) =>
+		isItemLayerName(texture.name),
+	);
+	const generatedLayers =
+		noElements && newPreviewOptions && generatedItemTemplate
+			? itemLayerElements(effectiveLayers)
+			: [];
+	const elements: readonly ModelElementView[] = [
+		...inspection.elements,
+		...generatedLayers,
+	];
+	if (noElements && newPreviewOptions && !generatedItemTemplate) {
+		addSkip(
+			skipped,
+			"generated-item-layer",
+			"no-generated-template",
+			options.path,
+			"The parent chain does not end at a builtin generated-item template, so no layer planes were synthesised.",
+		);
+	}
+	// The generator reads the effective texture map, so a layer a parent
+	// declares is generated too. Carry its `force_translucent` flag into the
+	// translucent scan, or the generated plane would blend as if opaque.
+	if (generatedLayers.length > 0) {
+		for (const texture of effectiveLayers) {
+			if (texture.forceTranslucent === true) {
+				translucentVars.add(texture.name);
+			}
+		}
 	}
 
 	const drawn: DrawnElement[] = [];
-	for (const element of inspection.elements) {
+	for (const element of elements) {
 		const target = `elements[${element.index}]`;
 		const coords = [
 			element.from[0],
@@ -303,19 +585,23 @@ export async function renderModelPreview(
 		}
 	}
 
-	const faceFor = (
-		element: (typeof inspection.elements)[number],
-		face: Direction,
-	) => element.faces.find((entry) => entry.face === face);
+	const faceFor = (element: ModelElementView, face: Direction) =>
+		element.faces.find((entry) => entry.face === face);
 
 	// The compatibility renderer covers three axis-aligned faces per element
 	// and cannot rotate a part or blend a translucent one. Any rotation, and
 	// any partially transparent face that renderer would draw, switches the
 	// whole model to the geometry renderer. Faces the compatibility renderer
 	// never draws (south, west, down) do not change its output, so they do not
-	// switch it.
+	// switch it. Generated item planes have only a south face, so they always
+	// take the geometry renderer.
 	let needsGeometry =
 		view.kind === "isometric" ||
+		view.kind === "display" ||
+		options.lighting === true ||
+		options.tint !== undefined ||
+		options.tints !== undefined ||
+		generatedLayers.length > 0 ||
 		drawn.some((entry) => entry.element.rotation !== undefined);
 	if (!needsGeometry) {
 		outer: for (const entry of drawn) {
@@ -339,32 +625,42 @@ export async function renderModelPreview(
 		}
 	}
 
-	const allFaces = inspection.elements.flatMap((element) => element.faces);
+	const allFaces = elements.flatMap((element) => element.faces);
 	// The compatibility renderer keeps its historical report, byte for byte:
 	// `tintindex` is only listed when the geometry renderer runs, which is the
 	// path a new view, a rotated element or a visible translucent face takes.
-	const unapplied = needsGeometry
-		? unappliedSteps(allFaces)
-		: ["display", "lighting"];
+	let unapplied: string[] = ["display", "lighting"];
+	if (needsGeometry) {
+		unapplied = newPreviewOptions ? [] : unappliedSteps(allFaces);
+	}
 
 	let image: { readonly width: number; readonly height: number };
 	let panels: readonly ModelPreviewPanel[];
 	let range: ModelPreviewRange;
 	let flat: Uint8Array;
+	let tintedFaces = 0;
+	let uncoloredFaces = 0;
 
 	if (needsGeometry) {
+		const generatedElements = new Set<ModelElementView>(generatedLayers);
 		const scene = await renderPreviewScene({
 			elements: drawn.map((entry) => ({
 				index: entry.index,
 				element: entry.element,
 				min: [entry.minXFixed, entry.minYFixed, entry.minZFixed],
 				max: [entry.maxXFixed, entry.maxYFixed, entry.maxZFixed],
+				...(generatedElements.has(entry.element) ? { cullBackface: true } : {}),
 			})),
 			view,
 			size,
 			loadTexture: (resolvedTo) =>
 				decodedTexture(textureResourcePath(resolvedTo)),
 			isForceTranslucent,
+			...(display === undefined ? {} : { display }),
+			...(lightingMode === undefined
+				? {}
+				: { lighting: { mode: lightingMode } }),
+			...(tint === undefined ? {} : { tint }),
 		});
 		for (const skip of scene.skipped) {
 			addSkip(skipped, skip.kind, skip.reason, skip.target, skip.detail);
@@ -377,10 +673,35 @@ export async function renderModelPreview(
 				warning.message,
 			);
 		}
+		if (newPreviewOptions) {
+			unapplied = previewUnapplied({
+				elements,
+				display: options.display,
+				displayApplied: displaySource !== undefined,
+				lighting: options.lighting === true,
+				guiLight,
+				uncoloredFaces: scene.uncoloredFaces,
+				generatedItemPlanes: generatedLayers.length > 0,
+			});
+			if (
+				(options.tint !== undefined || options.tints !== undefined) &&
+				scene.tintedFaces === 0 &&
+				scene.uncoloredFaces === 0
+			) {
+				addPreviewWarning(
+					warnings,
+					"MODEL_PREVIEW_TINT_UNUSED",
+					"tintindex",
+					"Tint colours were given but no face declares tintindex.",
+				);
+			}
+		}
 		image = { width: scene.width, height: scene.height };
 		panels = scene.panels;
 		range = scene.range;
 		flat = scene.pixels;
+		tintedFaces = scene.tintedFaces;
+		uncoloredFaces = scene.uncoloredFaces;
 	} else {
 		const imageWidth = size * 3;
 		const imageHeight = size;
@@ -732,6 +1053,36 @@ export async function renderModelPreview(
 			...(view.kind === "isometric"
 				? { view: { kind: "isometric" as const, direction: view.direction } }
 				: {}),
+			...(display === undefined || options.display === undefined
+				? {}
+				: {
+						display: {
+							slot: options.display,
+							...(displayFrom === undefined ? {} : { from: displayFrom }),
+							rotation: display.rotation,
+							translation: display.translation,
+							scale: display.scale,
+							applied: displaySource !== undefined,
+							clamped: display.clamped,
+						},
+					}),
+			...(lightingMode === undefined
+				? {}
+				: { lighting: { mode: lightingMode, guiLight } }),
+			...(tint === undefined
+				? {}
+				: {
+						tint: {
+							...(options.tint === undefined
+								? {}
+								: { color: formatTintColor(options.tint) }),
+							...(options.tints === undefined
+								? {}
+								: { tints: sortedTints(options.tints) }),
+							appliedFaces: tintedFaces,
+							uncoloredFaces,
+						},
+					}),
 		},
 		png: encodePng(canvas),
 	};

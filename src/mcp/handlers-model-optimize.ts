@@ -210,6 +210,10 @@ export async function handleModelAsset(
 				size: input.size,
 				view: input.view,
 				viewDirection: input.viewDirection,
+				display: input.display,
+				lighting: input.lighting,
+				tint: input.tint,
+				tints: input.tints,
 				outputPath: input.outputPngPath,
 				stdout: !hasOutput,
 				force: false,
@@ -238,15 +242,45 @@ export async function handleModelAsset(
 				],
 			};
 		}
-		if (
-			input.size !== undefined ||
-			input.outputPngPath !== undefined ||
-			input.view !== undefined ||
-			input.viewDirection !== undefined
-		) {
+		const legacyPreviewFields = [
+			["size", input.size],
+			["view", input.view],
+			["viewDirection", input.viewDirection],
+			["outputPngPath", input.outputPngPath],
+		] as const;
+		const newPreviewFields = [
+			["display", input.display],
+			["lighting", input.lighting],
+			["tint", input.tint],
+			["tints", input.tints],
+		] as const;
+		const legacyPresent = legacyPreviewFields.some(
+			([, value]) => value !== undefined,
+		);
+		const newPresent = newPreviewFields.some(
+			([, value]) => value !== undefined,
+		);
+		if (!newPresent && legacyPresent) {
+			// Existing callers keep the exact historical message, including
+			// when only one of the four fields was supplied.
 			throw new McAssetError(
 				"INVALID_ARGUMENT",
 				`size, view, viewDirection, and outputPngPath are only accepted by preview, not ${input.mode}.`,
+				{ mode: input.mode },
+			);
+		}
+		if (newPresent) {
+			const previewOnly = [...legacyPreviewFields, ...newPreviewFields]
+				.filter(([, value]) => value !== undefined)
+				.map(([field]) => field);
+			const last = previewOnly[previewOnly.length - 1] as string;
+			const list =
+				previewOnly.length === 1
+					? last
+					: `${previewOnly.slice(0, -1).join(", ")}, and ${last}`;
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				`${list} ${previewOnly.length === 1 ? "is" : "are"} only accepted by preview, not ${input.mode}.`,
 				{ mode: input.mode },
 			);
 		}

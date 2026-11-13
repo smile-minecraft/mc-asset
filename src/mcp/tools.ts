@@ -153,7 +153,7 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 	{
 		name: "model_asset",
 		description:
-			"Inspect, validate, create, apply, export, or preview Java models, or exchange a Blockbench Java Block/Item project: import-bbmodel returns model JSON plus PNG textures, export-bbmodel packs a model and PNGs into .bbmodel. Preview renders a diagnostic three-view PNG, or one isometric panel when view is isometric and viewDirection picks the camera; it never writes without outputPath and never claims game rendering.",
+			"Inspect, validate, create, apply, export, or preview Java models, or exchange a Blockbench Java Block/Item project: import-bbmodel returns model JSON plus PNG textures, export-bbmodel packs a model and PNGs into .bbmodel. Preview renders a diagnostic three-view PNG, one isometric panel when view is isometric and viewDirection picks the camera, or one panel for a game display slot (gui, firstperson_righthand, thirdperson_righthand, head, ground, fixed) with that display transform applied; lighting applies the fixed per-face shade factors selected by gui_light and tint/tints multiply tintindex faces by a caller colour. It still omits ambient occlusion, world light, shadows and the game's hand/head/frame poses, never writes without outputPath and never claims game rendering.",
 		inputSchema: TOOL_INPUT_SCHEMAS.model_asset,
 	},
 	{

@@ -5,6 +5,7 @@ import {
 	divRound,
 	type FixedVec3,
 	IDENTITY_MAT3,
+	isometricYawMatrix,
 	type Mat3,
 	multiplyMat3,
 	type ProjectedPoint,
@@ -24,6 +25,17 @@ import {
 import type { ModelElementView, ModelFaceView } from "../inspect.ts";
 import type { ModelCoverageSkip } from "../structure.ts";
 import { DIRECTIONS, type Direction, type FaceRotation } from "../types.ts";
+import {
+	applyDisplayTransform,
+	type DisplayTransform,
+	displayMirrorsFaces,
+	type LightingMode,
+	projectDisplay,
+	type RgbTint,
+	SHADE_SCALE,
+	shadeAndTintTexture,
+	shadeForNormal,
+} from "./display.ts";
 import {
 	autoUv,
 	checkerTexture,
@@ -47,10 +59,15 @@ import type {
  * axis first) around its origin. Each declared face becomes a textured quad
  * with four world corners, the texture rectangle from `uv` or the vanilla
  * auto-UV, and the face rotation applied as a permutation of the texture
- * corners. Faces are never culled by their normal and are never culled by
- * `cullface`: an orthographic or isometric projection keeps the depth order,
- * so a z-buffer resolves hidden faces and both sides of a zero-thickness
- * plane stay visible, matching how Minecraft draws model quads.
+ * corners. Authored faces are never culled by their normal and are never
+ * culled by `cullface`: an orthographic or isometric projection keeps the
+ * depth order, so a z-buffer resolves hidden faces and both sides of a
+ * zero-thickness plane stay visible, matching how Minecraft draws model
+ * quads. The synthesised generated-item layers are the exception: their two
+ * faces are the front and back of one sprite, so they set `cullBackface` and
+ * only the side facing the panel camera is drawn or collected. Blending both
+ * sides would composite the same texel twice and make a half-transparent
+ * layer opaque.
  *
  * Opaque faces are drawn first in document order (element order, then
  * DIRECTIONS order) and win depth ties like the three-view compatibility
@@ -68,10 +85,13 @@ import type {
  *
  * All coordinates stay integer: corners are in 1/256 model units, the
  * projection and viewport rounding come from `src/model/geometry/`, and the
- * placement of every panel is a pure function of the transformed bounds.
- * Model coordinates are quantized to that grid (from/to and origin to 1/256
- * unit), and angles are quantized to milli-degrees, which is the resolution
- * the rotation tables carry.
+ * placement of the three-view and isometric panels is a pure function of the
+ * transformed bounds. The display panel pins the model centre to the panel
+ * centre and frames the model's un-transformed size, so the display
+ * translation and scale stay visible instead of being cancelled by a
+ * fit-to-content camera. Model coordinates are quantized to that grid
+ * (from/to and origin to 1/256 unit), and angles are quantized to
+ * milli-degrees, which is the resolution the rotation tables carry.
  */
 
 const UNIT = 256;
@@ -82,6 +102,14 @@ export interface PreviewSceneElement {
 	/** Element box in 1/256 model units, before rotation. */
 	readonly min: FixedVec3;
 	readonly max: FixedVec3;
+	/**
+	 * Drop the faces whose transformed normal points away from the panel
+	 * camera. Only the synthesised generated-item layers set this: their two
+	 * faces are the two sides of one sprite, and blending both would composite
+	 * the same texel twice. Authored elements keep the historical double-sided
+	 * behaviour.
+	 */
+	readonly cullBackface?: boolean;
 }
 
 export interface PreviewSceneOptions {
@@ -92,6 +120,17 @@ export interface PreviewSceneOptions {
 	readonly loadTexture: (rel: string) => Promise<DecodedTexture | undefined>;
 	/** True when the face texture variable declares `force_translucent`. */
 	readonly isForceTranslucent: (face: ModelFaceView) => boolean;
+	/** Apply one resolved display slot to the whole model. */
+	readonly display?: DisplayTransform | undefined;
+	/** Fixed face shading; undefined keeps the flat unlit colours. */
+	readonly lighting?: { readonly mode: LightingMode } | undefined;
+	/** Face tints by `tintindex`; `color` is the single-colour form. */
+	readonly tint?:
+		| {
+				readonly color?: RgbTint | undefined;
+				readonly byIndex: ReadonlyMap<number, RgbTint>;
+		  }
+		| undefined;
 }
 
 export interface PreviewSceneResult {
@@ -102,6 +141,10 @@ export interface PreviewSceneResult {
 	readonly range: ModelPreviewRange;
 	readonly skipped: readonly ModelCoverageSkip[];
 	readonly warnings: readonly ModelPreviewWarning[];
+	/** Faces that declared `tintindex` and received a colour. */
+	readonly tintedFaces: number;
+	/** Faces that declared `tintindex` but had no colour for it. */
+	readonly uncoloredFaces: number;
 }
 
 type ElementRotation = NonNullable<ModelElementView["rotation"]>;
@@ -112,9 +155,12 @@ interface ElementBox {
 	/** Element box before rotation, in 1/256 model units. */
 	readonly localMin: FixedVec3;
 	readonly localMax: FixedVec3;
+	/** Corners after the element rotation, before the display transform. */
+	readonly baseCorners: readonly FixedVec3[];
 	readonly worldCorners: readonly FixedVec3[];
 	readonly matrix: Mat3 | undefined;
 	readonly origin: FixedVec3;
+	readonly cullBackface: boolean;
 }
 
 interface SceneFace {
@@ -125,6 +171,14 @@ interface SceneFace {
 	/** Undefined means the fixed checkerboard. */
 	readonly texture: DecodedTexture | undefined;
 	readonly translucent: boolean;
+	/** Shade factor in thousandths, from the final face normal. */
+	readonly shade: number;
+	/** Outward normal after the element and display transforms. */
+	readonly normal: FixedVec3;
+	/** Drop this face when the normal points away from the panel camera. */
+	readonly cullBackface: boolean;
+	/** Resolved tint, when the face declares `tintindex` and a colour exists. */
+	readonly tint: RgbTint | undefined;
 }
 
 /** One translucent fragment: the pixel it covers, its depth and sampled colour. */
@@ -394,6 +448,28 @@ function faceRotation(face: Direction, rotation: FaceRotation): FaceRotation {
 	return rotation;
 }
 
+/**
+ * Outward normal of the transformed face, from two edges. The corner order
+ * of {@link faceCorners} runs clockwise seen from outside, so the cross
+ * product of the third and first edges points outward. Only the dominant
+ * axis is used for shading, so the magnitude never needs normalising.
+ */
+function faceNormal(points: readonly FixedVec3[]): FixedVec3 {
+	const first = points[0];
+	const second = points[1];
+	const fourth = points[3];
+	if (first === undefined || second === undefined || fourth === undefined) {
+		return [0, 0, 0];
+	}
+	const ax = (fourth[0] as number) - (first[0] as number);
+	const ay = (fourth[1] as number) - (first[1] as number);
+	const az = (fourth[2] as number) - (first[2] as number);
+	const bx = (second[0] as number) - (first[0] as number);
+	const by = (second[1] as number) - (first[1] as number);
+	const bz = (second[2] as number) - (first[2] as number);
+	return [ay * bz - az * by, az * bx - ax * bz, ax * by - ay * bx];
+}
+
 function projectionFor(
 	view: ModelPreviewView,
 	panel: ModelPreviewPanel["name"],
@@ -401,8 +477,38 @@ function projectionFor(
 	if (view.kind === "isometric") {
 		return (point) => projectIsometric(point, view.direction);
 	}
+	if (view.kind === "display") {
+		return projectDisplay;
+	}
 	return (point) =>
 		projectOrthographic(panel as "front" | "right" | "top", point);
+}
+
+/**
+ * Whether a face normal points toward the camera of one panel.
+ *
+ * The camera sits on +z for the display panel, on -z / +x / +y for the
+ * front / right / top orthographic panels, and in the positive octant (rotated
+ * by the view's yaw) for an isometric panel with depth = x + y + z. A normal
+ * exactly perpendicular to the view axis returns false, matching the `<= 0`
+ * rule: a face seen edge-on covers no pixel anyway.
+ */
+function faceFacesCamera(
+	normal: FixedVec3,
+	view: ModelPreviewView,
+	panel: ModelPreviewPanel["name"],
+): boolean {
+	if (view.kind === "display") return (normal[2] as number) > 0;
+	if (view.kind === "isometric") {
+		const rotated = applyMat3(isometricYawMatrix(view.direction), normal);
+		return (
+			(rotated[0] as number) + (rotated[1] as number) + (rotated[2] as number) >
+			0
+		);
+	}
+	if (panel === "front") return (normal[2] as number) < 0;
+	if (panel === "right") return (normal[0] as number) > 0;
+	return (normal[1] as number) > 0;
 }
 
 function panelListFor(
@@ -411,6 +517,9 @@ function panelListFor(
 ): ModelPreviewPanel[] {
 	if (view.kind === "isometric") {
 		return [{ name: "isometric", x: 0, y: 0, width: size, height: size }];
+	}
+	if (view.kind === "display") {
+		return [{ name: "display", x: 0, y: 0, width: size, height: size }];
 	}
 	return (["front", "right", "top"] as const).map((name, index) => ({
 		name,
@@ -422,15 +531,17 @@ function panelListFor(
 }
 
 function imageWidthFor(view: ModelPreviewView, size: ModelPreviewSize): number {
-	return view.kind === "isometric" ? size : size * 3;
+	return view.kind === "three-view" ? size * 3 : size;
 }
 
 export async function renderPreviewScene(
 	options: PreviewSceneOptions,
 ): Promise<PreviewSceneResult> {
-	const { elements, view, size } = options;
+	const { elements, view, size, display } = options;
 	const skipped: ModelCoverageSkip[] = [];
 	const warnings: ModelPreviewWarning[] = [];
+	let tintedFaces = 0;
+	let uncoloredFaces = 0;
 
 	const addSkip = (
 		kind: string,
@@ -490,24 +601,35 @@ export async function renderPreviewScene(
 						fixedPoint(rotation.origin[1]),
 						fixedPoint(rotation.origin[2]),
 					];
-		const worldCorners = cubeCorners(entry.min, entry.max).map((corner) =>
+		const baseCorners = cubeCorners(entry.min, entry.max).map((corner) =>
 			transformPoint(corner, matrix, origin),
+		);
+		const worldCorners = baseCorners.map((corner) =>
+			display === undefined ? corner : applyDisplayTransform(corner, display),
 		);
 		boxes.push({
 			element: entry.element,
 			localMin: entry.min,
 			localMax: entry.max,
+			baseCorners,
 			worldCorners,
 			matrix,
 			origin,
+			cullBackface: entry.cullBackface === true,
 		});
 	}
 
+	const baseBounds = boundsOf(boxes.flatMap((box) => box.baseCorners));
 	const worldBounds = boundsOf(boxes.flatMap((box) => box.worldCorners));
 	const worldExtent = Math.max(
 		(worldBounds.max[0] as number) - (worldBounds.min[0] as number),
 		(worldBounds.max[1] as number) - (worldBounds.min[1] as number),
 		(worldBounds.max[2] as number) - (worldBounds.min[2] as number),
+	);
+	const baseExtent = Math.max(
+		(baseBounds.max[0] as number) - (baseBounds.min[0] as number),
+		(baseBounds.max[1] as number) - (baseBounds.min[1] as number),
+		(baseBounds.max[2] as number) - (baseBounds.min[2] as number),
 	);
 	const margin = Math.max(1, Math.floor(size / 16));
 	const available = size - 2 * margin;
@@ -541,11 +663,38 @@ export async function renderPreviewScene(
 				);
 			const rotation = faceRotation(face, faceView.rotation);
 			const corners = faceCorners(face, box.localMin, box.localMax).map(
-				(corner) => ({
-					...corner,
-					point: transformPoint(corner.point, box.matrix, box.origin),
-				}),
+				(corner) => {
+					const transformed = transformPoint(
+						corner.point,
+						box.matrix,
+						box.origin,
+					);
+					return {
+						...corner,
+						point:
+							display === undefined
+								? transformed
+								: applyDisplayTransform(transformed, display),
+					};
+				},
 			);
+			let normal = faceNormal(corners.map((corner) => corner.point));
+			if (display !== undefined && displayMirrorsFaces(display)) {
+				normal = [-normal[0], -normal[1], -normal[2]];
+			}
+			const shade =
+				options.lighting === undefined
+					? SHADE_SCALE
+					: shadeForNormal(normal, options.lighting.mode);
+			const tint =
+				faceView.tintindex === undefined
+					? undefined
+					: (options.tint?.byIndex.get(faceView.tintindex) ??
+						options.tint?.color);
+			if (faceView.tintindex !== undefined) {
+				if (tint === undefined) uncoloredFaces += 1;
+				else tintedFaces += 1;
+			}
 
 			let texture: DecodedTexture | undefined;
 			const status = faceView.textureResolution.status;
@@ -591,6 +740,10 @@ export async function renderPreviewScene(
 				}),
 				texture,
 				translucent,
+				shade,
+				normal,
+				cullBackface: box.cullBackface,
+				tint,
 			});
 		}
 	}
@@ -626,6 +779,16 @@ export async function renderPreviewScene(
 				? Math.max(1, Math.floor((available * SUBPIXEL * UNIT) / extent))
 				: SUBPIXEL;
 		pixelsPerUnit = isometricScale / SUBPIXEL;
+	} else if (view.kind === "display") {
+		// The display camera does not refit to the transformed bounds: the
+		// model is framed once from its un-transformed size (times 7/4 so any
+		// rotation of the box still fits). Rotation, scale and translation all
+		// stay visible, but none of them changes the camera scale: the same
+		// model keeps one pixels-per-unit across poses, so two display values
+		// can be compared. A translation that pushes the model out of the
+		// panel is reported as clipped instead of shrinking the camera to fit.
+		const frameExtent = baseExtent > 0 ? Math.ceil((baseExtent * 7) / 4) : 1;
+		pixelsPerUnit = Math.max(1, Math.floor((available * UNIT) / frameExtent));
 	} else {
 		pixelsPerUnit =
 			worldExtent > 0
@@ -644,6 +807,7 @@ export async function renderPreviewScene(
 		const bounds = boundsOf(
 			projected.map((point) => [point.x, point.y, point.depth]),
 		);
+		const displayView = view.kind === "display";
 		const scale =
 			view.kind === "isometric" ? isometricScale : pixelsPerUnit * SUBPIXEL;
 		const spanX = Math.floor(
@@ -652,12 +816,25 @@ export async function renderPreviewScene(
 		const spanY = Math.floor(
 			(((bounds.max[1] as number) - (bounds.min[1] as number)) * scale) / UNIT,
 		);
-		const offsetX = Math.floor((size * SUBPIXEL - spanX) / 2);
-		const offsetY = Math.floor((size * SUBPIXEL - spanY) / 2);
+		const offsetX = displayView
+			? Math.floor((size * SUBPIXEL) / 2)
+			: Math.floor((size * SUBPIXEL - spanX) / 2);
+		const offsetY = displayView
+			? Math.floor((size * SUBPIXEL) / 2)
+			: Math.floor((size * SUBPIXEL - spanY) / 2);
 		// The scale never drops below the one-pixel-per-unit floor, so a large
-		// model can project wider than its panel. Say so instead of drawing the
-		// cut image and reporting complete coverage.
-		if (spanX > size * SUBPIXEL || spanY > size * SUBPIXEL) {
+		// model can project wider than its panel. The display camera is fixed
+		// at the pivot instead of centring on the content, so a translation
+		// can move the model off any edge. Say so instead of drawing the cut
+		// image and reporting complete coverage.
+		const half = (size * SUBPIXEL) / 2;
+		const clipped = displayView
+			? Math.floor(((bounds.min[0] as number) * scale) / UNIT) < -half ||
+				Math.ceil(((bounds.max[0] as number) * scale) / UNIT) > half ||
+				Math.floor(((bounds.min[1] as number) * scale) / UNIT) < -half ||
+				Math.ceil(((bounds.max[1] as number) * scale) / UNIT) > half
+			: spanX > size * SUBPIXEL || spanY > size * SUBPIXEL;
+		if (clipped) {
 			addSkip(
 				"content",
 				"clipped",
@@ -699,17 +876,43 @@ export async function renderPreviewScene(
 				return { x: sub.x, y: sub.y, z: sub.z, u, v };
 			});
 
-		const sourceOf = (face: SceneFace): RasterSource =>
-			face.texture === undefined
-				? { texture: checkerFor() }
-				: { texture: face.texture };
+		const variantCache = new Map<RgbaTexture, Map<string, RgbaTexture>>();
+		const variantFor = (
+			texture: RgbaTexture,
+			tint: RgbTint | undefined,
+			shade: number,
+		): RgbaTexture => {
+			if (shade === SHADE_SCALE && tint === undefined) return texture;
+			const key = `${shade}:${tint === undefined ? "-" : `${tint[0]},${tint[1]},${tint[2]}`}`;
+			let variants = variantCache.get(texture);
+			if (variants === undefined) {
+				variants = new Map<string, RgbaTexture>();
+				variantCache.set(texture, variants);
+			}
+			let variant = variants.get(key);
+			if (variant === undefined) {
+				variant = shadeAndTintTexture(texture, tint, shade);
+				variants.set(key, variant);
+			}
+			return variant;
+		};
+
+		const sourceOf = (face: SceneFace): RasterSource => ({
+			texture: variantFor(face.texture ?? checkerFor(), face.tint, face.shade),
+		});
 
 		for (const face of faces) {
 			if (face.translucent) continue;
+			if (
+				face.cullBackface &&
+				!faceFacesCamera(face.normal, view, panel.name)
+			) {
+				continue;
+			}
 			const vertices = verticesOf(
 				face,
-				bounds.min[0] as number,
-				bounds.min[1] as number,
+				displayView ? 0 : (bounds.min[0] as number),
+				displayView ? 0 : (bounds.min[1] as number),
 			);
 			rasterizeQuad(
 				target,
@@ -731,10 +934,16 @@ export async function renderPreviewScene(
 		const opaqueDepth = target.depth;
 		for (const face of faces) {
 			if (!face.translucent) continue;
+			if (
+				face.cullBackface &&
+				!faceFacesCamera(face.normal, view, panel.name)
+			) {
+				continue;
+			}
 			const vertices = verticesOf(
 				face,
-				bounds.min[0] as number,
-				bounds.min[1] as number,
+				displayView ? 0 : (bounds.min[0] as number),
+				displayView ? 0 : (bounds.min[1] as number),
 			);
 			rasterizeQuadFragments(
 				size,
@@ -782,5 +991,7 @@ export async function renderPreviewScene(
 		},
 		skipped,
 		warnings,
+		tintedFaces,
+		uncoloredFaces,
 	};
 }

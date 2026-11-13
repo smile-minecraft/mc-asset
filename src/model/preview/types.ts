@@ -2,12 +2,18 @@ import type { ModelResolutionContext } from "../context.ts";
 import type { IsometricDirection } from "../geometry/index.ts";
 import type { ModelCoverage, ModelVersionInfo } from "../inspect.ts";
 import type { Vec3 } from "../types.ts";
+import type { LightingMode, PreviewDisplaySlot, RgbTint } from "./display.ts";
 
 /** Panel edge sizes `model preview` accepts; the three-view image is size*3 wide and size high. */
 export type ModelPreviewSize = 64 | 128 | 256;
 
 /** Square panels of the output image; panels are laid out horizontally in order. */
-export type ModelPreviewPanelName = "front" | "right" | "top" | "isometric";
+export type ModelPreviewPanelName =
+	| "front"
+	| "right"
+	| "top"
+	| "isometric"
+	| "display";
 
 /** One square panel of the output image. */
 export interface ModelPreviewPanel {
@@ -33,12 +39,14 @@ export interface ModelPreviewRange {
 /** Which view the caller asked for. `undefined` in options is the three-view. */
 export type ModelPreviewView =
 	| { readonly kind: "three-view" }
-	| { readonly kind: "isometric"; readonly direction: IsometricDirection };
+	| { readonly kind: "isometric"; readonly direction: IsometricDirection }
+	| { readonly kind: "display"; readonly slot: PreviewDisplaySlot };
 
 export type ModelPreviewWarningCode =
 	| "MODEL_PREVIEW_TEXTURE_MISSING"
 	| "MODEL_PREVIEW_TEXTURE_UNRESOLVED"
-	| "MODEL_PREVIEW_TEXTURE_UNDECODABLE";
+	| "MODEL_PREVIEW_TEXTURE_UNDECODABLE"
+	| "MODEL_PREVIEW_TINT_UNUSED";
 
 export interface ModelPreviewWarning {
 	readonly code: ModelPreviewWarningCode;
@@ -67,6 +75,30 @@ export interface ModelPreviewReport {
 		readonly kind: "isometric";
 		readonly direction: IsometricDirection;
 	};
+	/** Present only when `--display` / `display` picked a slot. */
+	readonly display?: {
+		readonly slot: PreviewDisplaySlot;
+		readonly from?: string;
+		readonly rotation: Vec3;
+		readonly translation: Vec3;
+		readonly scale: Vec3;
+		/** False when no model in the parent chain defines the slot; identity was used. */
+		readonly applied: boolean;
+		/** True when the game's clamp changed the authored translation or scale. */
+		readonly clamped: boolean;
+	};
+	/** Present only when lighting was requested. */
+	readonly lighting?: {
+		readonly mode: LightingMode;
+		readonly guiLight: "front" | "side";
+	};
+	/** Present only when a tint colour was requested. */
+	readonly tint?: {
+		readonly color?: string;
+		readonly tints?: Readonly<Record<string, string>>;
+		readonly appliedFaces: number;
+		readonly uncoloredFaces: number;
+	};
 }
 
 export interface ModelPreviewOptions {
@@ -78,6 +110,14 @@ export interface ModelPreviewOptions {
 	readonly size: ModelPreviewSize;
 	/** Undefined keeps the three-view; its output is unchanged. */
 	readonly view?: ModelPreviewView | undefined;
+	/** Apply one game display slot and view the model through its camera. */
+	readonly display?: PreviewDisplaySlot | undefined;
+	/** Apply the fixed per-face shade factors selected by `gui_light`. */
+	readonly lighting?: boolean | undefined;
+	/** One colour for every face that declares `tintindex`. */
+	readonly tint?: RgbTint | undefined;
+	/** Explicit colour per `tintindex`; indices without an entry stay untinted. */
+	readonly tints?: Readonly<Record<string, RgbTint>> | undefined;
 }
 
 export interface ModelPreviewResult {

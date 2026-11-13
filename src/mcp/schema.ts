@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { ISOMETRIC_DIRECTIONS } from "../model/geometry/index.ts";
+import { PREVIEW_DISPLAY_SLOTS } from "../model/preview/display.ts";
 
 /**
  * Frozen MCP tool surface: thirty-one tools for agent authoring — the
@@ -571,6 +572,31 @@ export const modelAssetInput = {
 		.optional()
 		.describe(
 			"preview only: isometric camera direction (default south-east); refused when view is three-view.",
+		),
+	display: z
+		.enum(PREVIEW_DISPLAY_SLOTS)
+		.optional()
+		.describe(
+			"preview only: apply one game display slot and view it through the diagnostic camera; refused with view.",
+		),
+	lighting: z
+		.boolean()
+		.optional()
+		.describe(
+			"preview only: apply fixed per-face shade factors selected by gui_light (front: uniform; side: up 1.0, north/south 0.8, east/west 0.6, down 0.5).",
+		),
+	tint: z
+		.string()
+		.regex(/^#?[0-9a-fA-F]{6}$/)
+		.optional()
+		.describe(
+			"preview only: #RRGGBB colour for every face that declares tintindex.",
+		),
+	tints: z
+		.record(z.string().regex(/^\d+$/), z.string().regex(/^#?[0-9a-fA-F]{6}$/))
+		.optional()
+		.describe(
+			"preview only: colour per tintindex; indices without an entry stay untinted.",
 		),
 	outputPngPath: z
 		.string()
