@@ -21,6 +21,12 @@ import { divRound, SUBPIXEL } from "./fixed.ts";
  * later draw wins. Depth is only advanced for pixels that are drawn, so a
  * transparent fragment cannot hide what is behind it.
  *
+ * `blend: "alpha"` does not change the depth rule: a blended fragment still
+ * advances the depth buffer for the pixels it covers. Callers must therefore
+ * draw opaque geometry first and translucent geometry afterwards, ordered
+ * from far to near; a translucent fragment drawn before an opaque surface
+ * behind it stores its own depth and hides that surface from the z-buffer.
+ *
  * Texture sampling is nearest neighbour with clamp-to-edge wrapping; out of
  * range coordinates clamp. Coordinates on the screen are expected to stay
  * below 2**17 subpixel units so the edge functions stay exact.
@@ -81,7 +87,9 @@ export interface RasterOptions {
 	/**
 	 * `replace` copies the fragment RGBA verbatim; `alpha` composes the colour
 	 * over the current pixel with integer straight-alpha src-over (the same
-	 * straight-alpha convention the canvas and PNG layers use). Defaults to
+	 * straight-alpha convention the canvas and PNG layers use). A blended
+	 * fragment still advances the depth buffer, so draw opaque geometry first,
+	 * then translucent geometry from far to near. Defaults to
 	 * `replace`.
 	 */
 	readonly blend?: "replace" | "alpha";
@@ -93,6 +101,21 @@ export interface RasterOptions {
 }
 
 const TEXEL_UNIT = 256;
+
+/**
+ * Triangle areas above 2**28 can push `weight * attribute` past 2**53 for a
+ * 4096-texel texture (u below 2**20) or an Int32 depth, so the interpolation
+ * switches to BigInt above this limit. At or below it the u and v numerators
+ * stay below 3 * 2**48 and plain Number arithmetic is exact.
+ */
+const BIGINT_AREA_LIMIT = 268_435_456;
+
+/** Round `value / divisor` to the nearest integer, ties away from zero; the divisor must be positive. */
+function divRoundBigInt(value: bigint, divisor: bigint): number {
+	const half = divisor / 2n;
+	if (value >= 0n) return Number((value + half) / divisor);
+	return Number(-((-value + half) / divisor));
+}
 
 function edgeFunction(
 	ax: number,
@@ -228,6 +251,8 @@ export function rasterizeTriangle(
 	const minY = Math.floor(Math.min(a.y, b.y, c.y) / SUBPIXEL);
 	const maxY = Math.floor((Math.max(a.y, b.y, c.y) - 1) / SUBPIXEL);
 	if (target.width <= 0 || target.height <= 0) return;
+	const useBigInt = area > BIGINT_AREA_LIMIT;
+	const bigArea = useBigInt ? BigInt(area) : 0n;
 	const left = Math.max(0, minX);
 	const right = Math.min(target.width - 1, maxX);
 	const top = Math.max(0, minY);
@@ -252,12 +277,36 @@ export function rasterizeTriangle(
 			if (weightB === 0 && !includeCa) continue;
 			if (weightC === 0 && !includeAb) continue;
 
-			const u = divRound(weightA * a.u + weightB * b.u + weightC * c.u, area);
-			const v = divRound(weightA * a.v + weightB * b.v + weightC * c.v, area);
-			const depth = divRound(
-				weightA * a.z + weightB * b.z + weightC * c.z,
-				area,
-			);
+			let u: number;
+			let v: number;
+			let depth: number;
+			if (useBigInt) {
+				const weightABig = BigInt(weightA);
+				const weightBBig = BigInt(weightB);
+				const weightCBig = BigInt(weightC);
+				u = divRoundBigInt(
+					weightABig * BigInt(a.u) +
+						weightBBig * BigInt(b.u) +
+						weightCBig * BigInt(c.u),
+					bigArea,
+				);
+				v = divRoundBigInt(
+					weightABig * BigInt(a.v) +
+						weightBBig * BigInt(b.v) +
+						weightCBig * BigInt(c.v),
+					bigArea,
+				);
+				depth = divRoundBigInt(
+					weightABig * BigInt(a.z) +
+						weightBBig * BigInt(b.z) +
+						weightCBig * BigInt(c.z),
+					bigArea,
+				);
+			} else {
+				u = divRound(weightA * a.u + weightB * b.u + weightC * c.u, area);
+				v = divRound(weightA * a.v + weightB * b.v + weightC * c.v, area);
+				depth = divRound(weightA * a.z + weightB * b.z + weightC * c.z, area);
+			}
 
 			const fragment = sample(source, u, v);
 			if (cutout && fragment[3] === 0) continue;

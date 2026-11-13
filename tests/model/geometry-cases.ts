@@ -1,5 +1,6 @@
 import {
 	applyMat3,
+	arbitraryAngleMatrix,
 	createRasterTarget,
 	type FixedVec3,
 	IDENTITY_MAT3,
@@ -277,6 +278,34 @@ export const GEOMETRY_CASES: ModelCase[] = [
 							`${entry.axis} ${entry.milliDegrees} corner ${index} axis ${axis}: expected ${wanted} +/- 1, got ${got}`,
 						);
 					}
+				}
+			}
+		},
+	},
+	{
+		name: "multi-axis rotations do not commute, and multiplyMat3 applies b first",
+		run(check) {
+			const x90 = sixteenthTurnMatrix("x", 4);
+			const y90 = sixteenthTurnMatrix("y", 4);
+			const v = corner(0, UNIT, 0);
+			check.deepEqual(applyMat3(x90, v), [0, 0, UNIT]);
+			check.deepEqual(applyMat3(y90, applyMat3(x90, v)), [UNIT, 0, 0]);
+			check.deepEqual(applyMat3(multiplyMat3(y90, x90), v), [UNIT, 0, 0]);
+			check.deepEqual(applyMat3(multiplyMat3(x90, y90), v), [0, 0, UNIT]);
+		},
+	},
+	{
+		name: "projections and arbitrary-angle matrices never produce negative zero",
+		run(check) {
+			const front = projectOrthographic("front", corner(0, 0, 0));
+			check.ok(Object.is(front.x, 0), "front x is +0");
+			check.ok(Object.is(front.y, 0), "front y is +0");
+			check.ok(Object.is(front.depth, 0), "front depth is +0");
+			const matrix = arbitraryAngleMatrix("y", 180000);
+			for (let index = 0; index < matrix.length; index += 1) {
+				const entry = matrix[index] as number;
+				if (entry === 0) {
+					check.ok(Object.is(entry, 0), `matrix entry ${index} is -0`);
 				}
 			}
 		},
@@ -624,6 +653,83 @@ export const GEOMETRY_CASES: ModelCase[] = [
 			check.equal(target.pixels.length, 8 * 8 * 4);
 			check.ok(target.pixels.every((byte) => byte === 0));
 			check.ok(target.depth.every((cell) => cell === -2147483648));
+		},
+	},
+	{
+		name: "interpolation stays exact for large coordinates and a 4096-wide texture",
+		run(check) {
+			const width = 4096;
+			const pixels = new Uint8Array(width * 4);
+			// Only texels 1011 (red) and 1012 (green) are set; the huge texture is
+			// otherwise empty, so the test needs no large allocation.
+			pixels[1011 * 4] = 255;
+			pixels[1011 * 4 + 3] = 255;
+			pixels[1012 * 4 + 1] = 255;
+			pixels[1012 * 4 + 3] = 255;
+			const texture: RgbaTexture = { width, height: 1, pixels };
+			const vertices = [
+				{ x: -131071, y: -131001, z: 100, u: 486316, v: 0 },
+				{ x: 131000, y: -131071, z: 100, u: 54, v: 0 },
+				{ x: 0, y: 130990, z: 100, u: 275046, v: 0 },
+			] as const;
+			const target = createRasterTarget(1, 1);
+			rasterizeTriangle(target, vertices[0], vertices[1], vertices[2], {
+				texture,
+			});
+			// weight * u products reach past 2**53 here, so the interpolation must
+			// take the exact path and land on texel 1011, not 1012.
+			check.equal(target.pixels[0], 255, "red channel from texel 1011");
+			check.equal(target.pixels[1], 0, "no green channel from texel 1012");
+			check.equal(target.pixels[2], 0);
+			check.equal(target.pixels[3], 255);
+		},
+	},
+	{
+		name: "translucent geometry drawn before opaque geometry is hidden by the depth buffer",
+		run(check) {
+			const far = [
+				{ x: 0, y: 0, z: 10, u: 0, v: 0 },
+				{ x: 64 * SUBPIXEL, y: 0, z: 10, u: 0, v: 0 },
+				{ x: 0, y: 64 * SUBPIXEL, z: 10, u: 0, v: 0 },
+			] as const;
+			const near = [
+				{ x: 0, y: 0, z: 20, u: 0, v: 0 },
+				{ x: 64 * SUBPIXEL, y: 0, z: 20, u: 0, v: 0 },
+				{ x: 0, y: 64 * SUBPIXEL, z: 20, u: 0, v: 0 },
+			] as const;
+			// Documented order: opaque far first, then translucent near on top.
+			const correct = createRasterTarget(1, 1);
+			rasterizeTriangle(correct, far[0], far[1], far[2], {
+				color: [0, 0, 255, 255],
+			});
+			rasterizeTriangle(
+				correct,
+				near[0],
+				near[1],
+				near[2],
+				{ color: [255, 0, 0, 128] },
+				{ blend: "alpha" },
+			);
+			// srcWeight = 128 * 255 = 32640, dstWeight = 255 * 127 = 32385,
+			// outAlphaScaled = 65025: red = 128, blue = 127, alpha = 255.
+			check.deepEqual(Array.from(correct.pixels), [128, 0, 127, 255]);
+			// Reversed order: the translucent fragment stores depth 20 first, so the
+			// opaque fragment behind it (depth 10) loses the depth test and never
+			// paints; this is why callers must order opaque before translucent.
+			const reversed = createRasterTarget(1, 1);
+			rasterizeTriangle(
+				reversed,
+				near[0],
+				near[1],
+				near[2],
+				{ color: [255, 0, 0, 128] },
+				{ blend: "alpha" },
+			);
+			rasterizeTriangle(reversed, far[0], far[1], far[2], {
+				color: [0, 0, 255, 255],
+			});
+			check.deepEqual(Array.from(reversed.pixels), [255, 0, 0, 128]);
+			check.equal(reversed.depth[0], 20);
 		},
 	},
 	{

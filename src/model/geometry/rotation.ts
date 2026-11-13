@@ -38,10 +38,11 @@ const TURN_SIN16 = [
  * These are the integer Q16 values `round(65536 * sin(k * pi / 512))`, taken
  * from the double precision sine and rounded to the nearest integer.
  * Regenerating them from a 256-entry sine table with a step of 90/256 degrees
- * yields exactly this list; linear interpolation between two entries stays
- * within 1 unit in the last place for every angle (measured 1.08 LSB at the
- * sampled points over a full turn), so the interpolated sine only differs
- * from the ideal rounded value by about a unit in the last place.
+ * yields exactly this list; linear interpolation between two entries peaks at
+ * 1.20 LSB error over a milli-degree sweep of the whole circle (worst case
+ * 1.198919 LSB at 69.775 degrees; 1.08 LSB at a 0.1 degree sampling step), so
+ * the interpolated sine can differ from the ideal rounded value by slightly
+ * more than one unit in the last place.
  */
 const QUARTER_SINE_LUT = [
 	0, 402, 804, 1206, 1608, 2010, 2412, 2814, 3216, 3617, 4019, 4420, 4821, 5222,
@@ -94,7 +95,8 @@ function sinQuarterLut(residualMillidegrees: number): number {
  * The value is only ever used internally; callers receive matrices. The sine
  * comes from the lookup table with linear interpolation, the cosine is the
  * sine shifted by one quarter turn, so both carry the same error budget
- * (measured 1.08 unit in the last place over a full turn).
+ * (measured 1.20 LSB peak over a milli-degree sweep, 1.08 LSB at 0.1 degree
+ * sampling).
  */
 function sinCosArbitrary(milliDegrees: number): { cos: number; sin: number } {
 	const turn = normalizeMillidegrees(milliDegrees);
@@ -114,13 +116,15 @@ function nz(value: number): number {
 }
 
 function axisMatrix(axis: RotationAxis, cosine: number, sine: number): Mat3 {
+	const cos = nz(cosine);
+	const sin = nz(sine);
 	if (axis === "x") {
-		return [TRIG_ONE, 0, 0, 0, cosine, nz(-sine), 0, sine, cosine];
+		return [TRIG_ONE, 0, 0, 0, cos, nz(-sin), 0, sin, cos];
 	}
 	if (axis === "y") {
-		return [cosine, 0, sine, 0, TRIG_ONE, 0, nz(-sine), 0, cosine];
+		return [cos, 0, sin, 0, TRIG_ONE, 0, nz(-sin), 0, cos];
 	}
-	return [cosine, nz(-sine), 0, sine, cosine, 0, 0, 0, TRIG_ONE];
+	return [cos, nz(-sin), 0, sin, cos, 0, 0, 0, TRIG_ONE];
 }
 
 /**

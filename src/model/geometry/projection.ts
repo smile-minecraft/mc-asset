@@ -3,6 +3,11 @@ import type { FixedVec3, Mat3 } from "./matrix.ts";
 import { applyMat3 } from "./matrix.ts";
 import { sixteenthTurnMatrix } from "./rotation.ts";
 
+/** Avoid negative zeros, so projected points compare equal to hand-written zeros. */
+function nz(value: number): number {
+	return value === 0 ? 0 : value;
+}
+
 export interface ProjectedPoint {
 	/** Screen x in 1/256 model units; positive goes to the right. */
 	readonly x: number;
@@ -33,12 +38,12 @@ export function projectOrthographic(
 ): ProjectedPoint {
 	const [x, y, z] = v;
 	if (view === "front") {
-		return { x: -x, y: -y, depth: -z };
+		return { x: nz(-x), y: nz(-y), depth: nz(-z) };
 	}
 	if (view === "right") {
-		return { x: -z, y: -y, depth: x };
+		return { x: nz(-z), y: nz(-y), depth: nz(x) };
 	}
-	return { x, y: z, depth: y };
+	return { x: nz(x), y: nz(z), depth: nz(y) };
 }
 
 /**
@@ -83,7 +88,11 @@ export function projectIsometric(
 	direction: IsometricDirection = "south-east",
 ): ProjectedPoint {
 	const [x, y, z] = applyMat3(isometricYawMatrix(direction), v);
-	return { x: 2 * (x - z), y: x + z - 2 * y, depth: x + y + z };
+	return {
+		x: nz(2 * (x - z)),
+		y: nz(x + z - 2 * y),
+		depth: nz(x + y + z),
+	};
 }
 
 /**

@@ -59,7 +59,7 @@ function productAt(a: Mat3, b: Mat3, row: number, col: number): number {
 	);
 }
 
-/** Multiply two Q16 matrices. The result is `a` followed by `b`. */
+/** Multiply two Q16 matrices (a * b). Because applyMat3 treats vectors as columns, applying multiplyMat3(a, b) to a vector applies b first, then a: applyMat3(multiplyMat3(a, b), v) === applyMat3(a, applyMat3(b, v)). */
 export function multiplyMat3(a: Mat3, b: Mat3): Mat3 {
 	return [
 		productAt(a, b, 0, 0),

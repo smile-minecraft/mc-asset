@@ -8,10 +8,18 @@
  *
  * A step of `FIXED_UNIT` equals exactly the model file step of 1/16 of one
  * unit (a 1/256 nudge), matching how model coordinates are described by the
- * game. Coordinates are meant to stay below 2**17 subpixel units (8192 px) so
- * every intermediate stays below 2**53 and the arithmetic is exact; each edge
- * function is then at most 2**34 and the texture interpolation stays below
- * 2**48.
+ * game. Coordinates are meant to stay with an absolute value below 2**17
+ * subpixel units (8192 px): differences then stay below 2**18, each product
+ * in an edge function stays below 2**36 and the edge function itself stays
+ * below 2**37, so coverage arithmetic is exact in doubles.
+ *
+ * Interpolation multiplies each weight (at most the triangle area) by a
+ * vertex attribute: below 2**20 for a texture coordinate of a 4096-texel
+ * texture at 1/256 texel, or any Int32 for a depth. `raster.ts` divides the
+ * interpolated numerator with a Number `divRound` while the area is at most
+ * 2**28 — then the u and v numerators stay below 3 * 2**48, far under
+ * 2**53 — and with a BigInt `divRoundBigInt` above it, which stays exact for
+ * any Int32 depth.
  *
  * `TRIG_ONE` is the integer that stands for 1.0 in every sine and cosine
  * value. A power of two keeps the division in `divRound` exact in binary
