@@ -75,10 +75,12 @@ const EXTENSION_BY_KIND: Readonly<
 
 /** One file a step produces, with the bytes fixed before any write. */
 export interface GeneratedOutput {
-	/** Path relative to the project output directory, e.g. `assets/ns/...`. */
+	/** Path relative to its anchor: the output directory or the project root. */
 	readonly relativePath: string;
 	readonly kind: GeneratedOutputKind;
 	readonly extension: ".png" | ".json" | ".mcpx";
+	/** `pack` anchors below the output directory, `project` below the project root. */
+	readonly scope: "pack" | "project";
 	readonly bytes: Uint8Array;
 }
 
@@ -86,11 +88,13 @@ function generatedOutput(
 	relativePath: string,
 	kind: GeneratedOutputKind,
 	bytes: Uint8Array,
+	scope: "pack" | "project" = "pack",
 ): GeneratedOutput {
 	return {
 		relativePath,
 		kind,
 		extension: EXTENSION_BY_KIND[kind],
+		scope,
 		bytes,
 	};
 }
@@ -100,6 +104,8 @@ export interface GeneratedInput {
 	/** Declared reference, never an absolute path. */
 	readonly ref: string;
 	readonly sha256: string;
+	/** Absolute path of the file, for the write preflight's alias check. */
+	readonly filePath?: string | undefined;
 }
 
 /** Everything one generator-backed step plans. */
@@ -648,6 +654,7 @@ async function loadFontIcon(
 		input: {
 			ref: `font-icon:${icon.name}`,
 			sha256: sha256Hex(bytes),
+			filePath: path,
 		},
 	};
 }
@@ -734,15 +741,19 @@ async function planFontStep(
 			),
 		);
 	}
+	// The icon-to-character table is project documentation, not a pack asset:
+	// it lands under the project root so no client reads it and no pack scan
+	// has to interpret it.
 	const tablePath =
 		step.table === undefined
-			? `assets/${spec.namespace}/font/${spec.id}.table.json`
+			? `font/${spec.id}.table.json`
 			: declaredOutputPath(step.table, "table", context, ".json");
 	outputs.push(
 		generatedOutput(
 			tablePath,
 			"fontTable",
 			TEXT_ENCODER.encode(plan.tableText),
+			"project",
 		),
 	);
 	return { outputs, inputs };
@@ -805,6 +816,7 @@ async function planParticleStep(
 	const inputs: GeneratedInput[] = loaded.inputFiles.map((file) => ({
 		ref: `particle-frame:${basename(file)}`,
 		sha256: sha256Hex(new Uint8Array(readFileSync(file))),
+		filePath: file,
 	}));
 	const outputs: GeneratedOutput[] = [
 		generatedOutput(

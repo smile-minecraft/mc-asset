@@ -157,6 +157,7 @@ export interface GeneratedOutputPlan {
 	readonly path: string;
 	readonly kind: GeneratedOutputKind;
 	readonly extension: ".png" | ".json" | ".mcpx";
+	readonly scope: "pack" | "project";
 	readonly stepIndex: number;
 	readonly bytes: Uint8Array;
 	readonly outputHash: string;
@@ -183,6 +184,8 @@ export interface TargetPlanInternal {
 	readonly mcmetaPlan?: McmetaPlanInternal | undefined;
 	readonly modelPlans?: readonly ModelOutputPlan[] | undefined;
 	readonly generatedPlans?: readonly GeneratedOutputPlan[] | undefined;
+	/** Absolute input files generator steps read, for the write preflight. */
+	readonly generatedInputPaths?: readonly string[] | undefined;
 }
 
 export interface PackBuildPlan {
@@ -724,6 +727,7 @@ export async function planPackBuild(
 			// refused step plans nothing at all.
 			const generatedPlans: GeneratedOutputPlan[] = [];
 			const stepInputs: GeneratedInput[] = [];
+			const generatedInputPaths: string[] = [];
 			for (const [stepIndex, step] of target.steps.entries()) {
 				if (!GENERATED_STEP_TYPES.has(step.type)) {
 					continue;
@@ -737,11 +741,20 @@ export async function planPackBuild(
 					recipeDir: dirname(recipeFile),
 				});
 				stepInputs.push(...planned.inputs);
+				for (const input of planned.inputs) {
+					if (input.filePath !== undefined) {
+						generatedInputPaths.push(input.filePath);
+					}
+				}
 				for (const output of planned.outputs) {
 					generatedPlans.push({
-						path: `${project.outputDir}/${output.relativePath}`,
+						path:
+							output.scope === "project"
+								? output.relativePath
+								: `${project.outputDir}/${output.relativePath}`,
 						kind: output.kind,
 						extension: output.extension,
+						scope: output.scope,
 						stepIndex,
 						bytes: output.bytes,
 						outputHash: sha256Hex(output.bytes),
@@ -913,7 +926,9 @@ export async function planPackBuild(
 			// the target input hash is final. Registration here also applies
 			// the duplicate-output rule across every planned family.
 			for (const gp of generatedPlans) {
-				assertOutputInsideOutputDir(gp.path, target, project.outputDir);
+				if (gp.scope === "pack") {
+					assertOutputInsideOutputDir(gp.path, target, project.outputDir);
+				}
 				registerOutput(gp.path);
 				const classified = classifyOutput(
 					join(projectDir, gp.path),
@@ -949,6 +964,7 @@ export async function planPackBuild(
 				mcmetaPlan,
 				modelPlans,
 				generatedPlans,
+				generatedInputPaths,
 			});
 		}
 	}
@@ -1246,11 +1262,12 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 	}
 
 	const inputFiles = [
-		...new Set(
-			targetsToExecute
+		...new Set([
+			...targetsToExecute
 				.map((tp) => tp.sourceFilePath)
 				.filter((p): p is string => p !== undefined),
-		),
+			...targetPlans.flatMap((tp) => tp.generatedInputPaths ?? []),
+		]),
 	];
 
 	const plannedTargets = await planOutputTargets(outputTargets, {

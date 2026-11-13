@@ -799,21 +799,25 @@ export const GENERATED_RECIPE_CASES: readonly GeneratedCase[] = [
 				const cases: Array<{
 					path: string;
 					kind: string;
+					scope: "pack" | "project";
 					expected: Uint8Array | string;
 				}> = [
 					{
 						path: `assets/${NAMESPACE}/font/icons.json`,
 						kind: "fontDefinition",
+						scope: "pack",
 						expected: plan.definitionText,
 					},
 					{
 						path: `assets/${NAMESPACE}/textures/font/icons.png`,
 						kind: "fontAtlas",
+						scope: "pack",
 						expected: plan.atlases[0]?.atlas.png as Uint8Array,
 					},
 					{
-						path: `assets/${NAMESPACE}/font/icons.table.json`,
+						path: "font/icons.table.json",
 						kind: "fontTable",
+						scope: "project",
 						expected: plan.tableText,
 					},
 				];
@@ -821,7 +825,11 @@ export const GENERATED_RECIPE_CASES: readonly GeneratedCase[] = [
 					await readFile(join(projectDir, "mc-asset.lock.json"), "utf8"),
 				);
 				for (const entry of cases) {
-					const bytes = await bytesAt(onDisk(projectDir, entry.path));
+					const bytes = await bytesAt(
+						entry.scope === "project"
+							? join(projectDir, entry.path)
+							: onDisk(projectDir, entry.path),
+					);
 					assert.ok(bytes, `${entry.path} exists`);
 					assert.equal(
 						sha256(bytes),
@@ -832,8 +840,10 @@ export const GENERATED_RECIPE_CASES: readonly GeneratedCase[] = [
 						),
 						`${entry.path} is the standalone font plan's bytes`,
 					);
+					const lockKey =
+						entry.scope === "project" ? entry.path : `pack/${entry.path}`;
 					assert.equal(
-						lock.outputs[`pack/${entry.path}`]?.kind,
+						lock.outputs[lockKey]?.kind,
 						entry.kind,
 						`${entry.path} is locked as ${entry.kind}`,
 					);
@@ -901,10 +911,13 @@ TTTTTTTT
 					`assets/${NAMESPACE}/font/icons.json`,
 					`assets/${NAMESPACE}/textures/font/icons_h4a4.png`,
 					`assets/${NAMESPACE}/textures/font/icons_h8a8.png`,
-					`assets/${NAMESPACE}/font/icons.table.json`,
 				]) {
 					assert.ok(await bytesAt(onDisk(projectDir, path)), `${path} exists`);
 				}
+				assert.ok(
+					await bytesAt(join(projectDir, "font/icons.table.json")),
+					"the table sits at the project root",
+				);
 			});
 		},
 	},
@@ -974,8 +987,8 @@ TTTTTTTT
 				);
 				const executed = await build(projectDir);
 				assert.deepEqual([...executed.completed].sort(), [
+					"font/icons.table.json",
 					`pack/assets/${NAMESPACE}/font/icons.json`,
-					`pack/assets/${NAMESPACE}/font/icons.table.json`,
 					`pack/assets/${NAMESPACE}/textures/font/icons.png`,
 				]);
 			});
@@ -998,7 +1011,7 @@ TTTTTTTT
 				await writeRecipe(projectDir, "font", recipe);
 				await build(projectDir);
 				assert.ok(
-					await bytesAt(onDisk(projectDir, "docs/icons.table.json")),
+					await bytesAt(join(projectDir, "docs/icons.table.json")),
 					"the table lands at the declared path",
 				);
 			});

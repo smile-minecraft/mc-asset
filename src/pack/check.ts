@@ -63,6 +63,25 @@ function inferCategoryFromFilename(filename: string): string {
 	return "generic";
 }
 
+/**
+ * Style measurement covers the two painted sprite families its presets were
+ * written for: item and block textures under `textures/item/` and
+ * `textures/block/`. Category overrides are item categories, and the level,
+ * highlight, outline, and light rules describe hand-painted icon art.
+ * Entity, equipment, font, and particle textures are still decoded and
+ * reference-checked by the pack scan; judging a machine-generated 64x32
+ * armor sheet or a bitmap atlas by icon rules only adds noise.
+ */
+function isStyleMeasuredTexture(rel: string): boolean {
+	const segments = rel.split("/");
+	return (
+		segments.length > 4 &&
+		segments[0] === "assets" &&
+		segments[2] === "textures" &&
+		(segments[3] === "item" || segments[3] === "block")
+	);
+}
+
 /** Check a pack project and summarize what to fix first. */
 export async function checkResourcePack(
 	input: PackCheckInput,
@@ -195,6 +214,9 @@ export async function checkResourcePack(
 					} else if (st.isFile() && name.toLowerCase().endsWith(".png")) {
 						textureCount += 1;
 						const rel = relative(packDir, full).replace(/\\/g, "/");
+						if (!isStyleMeasuredTexture(rel)) {
+							continue;
+						}
 						const bytes = readFileSync(full);
 						const decoded = decodePng(new Uint8Array(bytes));
 						const category = inferCategoryFromFilename(name);
