@@ -1,6 +1,10 @@
 import { McAssetError } from "../core/errors.ts";
-import { CANVAS_MAX_EDGE, CANVAS_MIN_EDGE } from "../core/validate.ts";
-import { boxUvFaces } from "./box-uv.ts";
+import {
+	CANVAS_MAX_EDGE,
+	CANVAS_MIN_EDGE,
+	MAX_REGION_COUNT,
+} from "../core/validate.ts";
+import { boxUvFaces, ENTITY_FACE_NAMES } from "./box-uv.ts";
 import type {
 	EntityFace,
 	EntityLayout,
@@ -11,7 +15,7 @@ import type {
 
 export const ENTITY_LAYOUT_FORMAT = "mc-asset/entity-layout";
 export const ENTITY_LAYOUT_VERSION = 1;
-/** Enough for every vanilla mob and still bounded before any allocation. */
+/** Absolute cap; the region cap (one region per face) binds first. */
 export const MAX_ENTITY_PARTS = 512;
 
 const PART_ID = /^[A-Za-z0-9_.-]+$/;
@@ -197,6 +201,16 @@ export function parseEntityLayoutDocument(
 		invalid(
 			`Entity layout holds ${value.parts.length} parts; the limit is ${MAX_ENTITY_PARTS}.`,
 			{ field: "parts", limit: MAX_ENTITY_PARTS },
+		);
+	}
+	// One region per face, and the canvas region limit is lower than the part
+	// limit, so a layout that passes the part cap can still be unrenderable.
+	// Refuse it here instead of letting `template` fail later.
+	const regionCount = value.parts.length * ENTITY_FACE_NAMES.length;
+	if (regionCount > MAX_REGION_COUNT) {
+		invalid(
+			`Entity layout has ${value.parts.length} parts and needs ${regionCount} regions (one per face); the canvas limit is ${MAX_REGION_COUNT}.`,
+			{ field: "parts", requiredRegions: regionCount, limit: MAX_REGION_COUNT },
 		);
 	}
 	const seen = new Set<string>();

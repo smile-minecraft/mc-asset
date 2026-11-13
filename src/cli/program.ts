@@ -66,10 +66,6 @@ export interface StubOptions {
 
 const STUB_ARTIFACT_PREFIX = "stub-ok";
 
-/** Every command that takes `--profile` documents the same set. */
-const ASSET_PROFILE_HELP =
-	"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle, minecraft:entity).";
-
 /**
  * Reject a repeated version flag at parse time: commander keeps the last
  * value silently, but the version contract treats repetition as
@@ -274,7 +270,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			"Target the input path (implies output+force semantics).",
 		)
 		.option("--input <path>", "Input path used with --in-place.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(async (options: StubOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
 			const code = await runStub(options, globals.json === true, realStreams());
@@ -287,7 +286,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.description(
 			"Analyze an image and print a read-only report (predicted classification, never effective).",
 		)
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.option(
 			"--minecraft-version <version>",
 			"Target Minecraft version (release 1.19.3 through 26.3).",
@@ -320,7 +322,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.description(
 			"Validate an asset file and print a read-only verdict (exit 3 when the asset fails).",
 		)
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.option(
 			"--minecraft-version <version>",
 			"Target Minecraft version (release 1.19.3 through 26.3).",
@@ -423,7 +428,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			"Write the PNG back to the input path (implies force for that target).",
 		)
 		.option("--input <path>", "Input path used with --in-place.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.option(
 			"--operations <path>",
 			'Batch operations JSON file ("-" reads stdin).',
@@ -454,7 +462,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			"Write the PNG back to the input path (implies force for that target).",
 		)
 		.option("--input <path>", "Input path used with --in-place.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.option(
 			"--operations <path>",
 			'Batch operations JSON file ("-" reads stdin).',
@@ -499,7 +510,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			"Rewrite the input in its own kind (implies force for that target).",
 		)
 		.option("--input <path>", "Input path used with --in-place.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.option(
 			"--selection <scope>",
 			"Rejected with geometry (ARGUMENT_CONFLICT).",
@@ -542,7 +556,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--force", "Allow overwriting an existing output file.")
 		.option("--mkdir", "Create missing parent directories.")
 		.option("--input <path>", "Input path used with --in-place.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(
 			async (input: string, options: GuiScaleOptions, command: Command) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -585,7 +602,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			"Rewrite the input in its own kind (implies force for that target).",
 		)
 		.option("--input <path>", "Input path used with --in-place.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.option(
 			"--selection <scope>",
 			"Scope pixel writes (rect:<x>,<y>,<w>,<h>, region:<id>, alpha:, color:, connected:, or a JSON expression starting with {).",
@@ -623,7 +643,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			"Rewrite the input in its own kind (implies force for that target).",
 		)
 		.option("--input <path>", "Input path used with --in-place.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.option(
 			"--selection <scope>",
 			"Scope pixel writes (rect:<x>,<y>,<w>,<h>, region:<id>, alpha:, color:, connected:, or a JSON expression starting with {).",
@@ -654,7 +677,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--mkdir", "Rejected: reports take no file flags.")
 		.option("--in-place", "Rejected: reports take no file flags.")
 		.option("--input <path>", "Rejected: reports take no file flags.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(
 			async (image: string, options: PaletteOptions, command: Command) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -678,7 +704,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--mkdir", "Rejected: reports take no file flags.")
 		.option("--in-place", "Rejected: reports take no file flags.")
 		.option("--input <path>", "Rejected: reports take no file flags.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(
 			async (image: string, options: PaletteOptions, command: Command) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -706,7 +735,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--mkdir", "Rejected: reports take no file flags.")
 		.option("--in-place", "Rejected: reports take no file flags.")
 		.option("--input <path>", "Rejected: reports take no file flags.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(async (options: MaterialOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
 			const code = await runMaterial(
@@ -728,7 +760,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--mkdir", "Rejected: reports take no file flags.")
 		.option("--in-place", "Rejected: reports take no file flags.")
 		.option("--input <path>", "Rejected: reports take no file flags.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(
 			async (name: string, options: MaterialOptions, command: Command) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -1013,7 +1048,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			"Rewrite the input .mcpx (implies force for that target).",
 		)
 		.option("--input <path>", "Input path used with --in-place.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.option(
 			"--selection <scope>",
 			"Scope pixel writes (rect:<x>,<y>,<w>,<h>, region:<id>, alpha:, color:, connected:, or a JSON expression starting with {).",
@@ -1045,7 +1083,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			"Rewrite the input .mcpx with the new source (implies force for that target).",
 		)
 		.option("--input <path>", "Input path used with --in-place.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.option(
 			"--operations <path>",
 			'Batch operations JSON file ("-" reads stdin).',
@@ -1085,7 +1126,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			"Write the PNG back to the input path (implies force for that target).",
 		)
 		.option("--input <path>", "Input path used with --in-place.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.option(
 			"--selection <scope>",
 			"Rejected with pixelize (ARGUMENT_CONFLICT).",
@@ -1129,7 +1173,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--output <path>", "Rejected on variant (ARGUMENT_CONFLICT).")
 		.option("--force", "Allow overwriting existing variant files.")
 		.option("--mkdir", "Create missing parent directories.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(
 			async (source: string, options: VariantOptions, command: Command) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -1162,7 +1209,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--force", "Allow overwriting an existing output file.")
 		.option("--mkdir", "Create missing parent directories.")
 		.option("--input <path>", "Input path aliasing the positional input.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(async (input: string, options: TileOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
 			const code = await runTile(
@@ -1190,7 +1240,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--source <path>", "Write the editable .mcpx source file.")
 		.option("--force", "Allow overwriting an existing output file.")
 		.option("--mkdir", "Create missing parent directories.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(
 			async (pattern: string, options: GenerateOptions, command: Command) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -1239,7 +1292,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--force", "Allow overwriting an existing output file.")
 		.option("--mkdir", "Create missing parent directories.")
 		.option("--input <path>", "Input path aliasing the positional input.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(
 			async (input: string, options: PreviewOptions, command: Command) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -1268,7 +1324,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--stdout", "Write PNG bytes to stdout.")
 		.option("--force", "Allow overwriting an existing output file.")
 		.option("--mkdir", "Create missing parent directories.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(async (options: AnimateOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
 			const code = await runAnimate(
@@ -1306,7 +1365,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		)
 		.option("--force", "Allow overwriting an existing output file.")
 		.option("--mkdir", "Create missing parent directories.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(
 			async (input: string, options: AnimateOptions, command: Command) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -1338,7 +1400,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		)
 		.option("--force", "Allow overwriting existing frame files.")
 		.option("--mkdir", "Create missing parent directories.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(
 			async (sheet: string, options: AnimateOptions, command: Command) => {
 				const globals = command.optsWithGlobals<{ json?: boolean }>();
@@ -1361,7 +1426,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--output <path>", "Rejected on reorder (ARGUMENT_CONFLICT).")
 		.option("--force", "Allow overwriting existing frame files.")
 		.option("--mkdir", "Create missing parent directories.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(async (options: AnimateOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
 			const code = await runAnimate(
@@ -1386,7 +1454,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--output <path>", "Rejected on resize (ARGUMENT_CONFLICT).")
 		.option("--force", "Allow overwriting existing frame files.")
 		.option("--mkdir", "Create missing parent directories.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(async (options: AnimateOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
 			const code = await runAnimate(
@@ -1411,7 +1482,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--output-dir <path>", "Rejected: reports take no file flags.")
 		.option("--force", "Rejected: reports take no file flags.")
 		.option("--mkdir", "Rejected: reports take no file flags.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(async (options: AnimateOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
 			const code = await runAnimate(
@@ -1438,7 +1512,10 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 		.option("--output-dir <path>", "Rejected: reports take no file flags.")
 		.option("--force", "Rejected: reports take no file flags.")
 		.option("--mkdir", "Rejected: reports take no file flags.")
-		.option("--profile <name>", ASSET_PROFILE_HELP)
+		.option(
+			"--profile <name>",
+			"Asset profile (generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle).",
+		)
 		.action(async (options: AnimateOptions, command: Command) => {
 			const globals = command.optsWithGlobals<{ json?: boolean }>();
 			const code = await runAnimate(
@@ -1678,7 +1755,7 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 	const entity = program
 		.command("entity")
 		.description(
-			"Entity box-UV layouts: per-face templates, face inspection, and texture checks.",
+			"Entity box-UV layouts (the minecraft:entity profile): per-face templates, face inspection, and texture checks.",
 		);
 	const entityLayoutOption = [
 		"--layout <id|path>",

@@ -22,7 +22,6 @@ function part(
 	layer: "base" | "overlay",
 	origin: readonly [number, number, number],
 	pivot: readonly [number, number, number],
-	mirror = false,
 ): EntityPartDocument {
 	return {
 		id,
@@ -31,14 +30,15 @@ function part(
 		layer,
 		origin,
 		pivot,
-		...(mirror ? { mirror: true } : {}),
 	};
 }
 
 /**
  * The vanilla player model. Arm width is 4 for the wide (classic) model and
- * 3 for the slim model; everything else is shared, including the mirrored
- * left arm and left leg UVs used by the 64x64 skin format.
+ * 3 for the slim model; everything else is shared. The 64x64 skin format gives
+ * the left arm and left leg their own UV regions, so those parts are not
+ * mirrored: `ModelPlayer` builds every left limb with a fresh `ModelRenderer`
+ * at its own offset, unlike the shared-region biped mobs.
  */
 function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 	const wide = armWidth === 4;
@@ -90,7 +90,6 @@ function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 				"base",
 				[4, 12, -2],
 				[5, 22, 0],
-				true,
 			),
 			part(
 				"left_arm_overlay",
@@ -99,7 +98,6 @@ function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 				"overlay",
 				[4, 12, -2],
 				[5, 22, 0],
-				true,
 			),
 			part("right_leg", [4, 12, 4], [0, 16], "base", [-4, 0, -2], [-2, 12, 0]),
 			part(
@@ -110,15 +108,7 @@ function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 				[-4, 0, -2],
 				[-2, 12, 0],
 			),
-			part(
-				"left_leg",
-				[4, 12, 4],
-				[16, 48],
-				"base",
-				[0, 0, -2],
-				[2, 12, 0],
-				true,
-			),
+			part("left_leg", [4, 12, 4], [16, 48], "base", [0, 0, -2], [2, 12, 0]),
 			part(
 				"left_leg_overlay",
 				[4, 12, 4],
@@ -126,7 +116,6 @@ function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 				"overlay",
 				[0, 0, -2],
 				[2, 12, 0],
-				true,
 			),
 		],
 	};

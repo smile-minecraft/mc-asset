@@ -12,6 +12,18 @@ export const SUPPORTED_PROFILES = [
 
 export type SupportedProfile = (typeof SUPPORTED_PROFILES)[number];
 
+/**
+ * The INVALID_PROFILE message is frozen byte-for-byte: `minecraft:entity`
+ * is accepted as a pure addition and does not widen the printed list.
+ */
+const PRINTED_SUPPORTED_PROFILES = [
+	"generic",
+	"minecraft:item",
+	"minecraft:block",
+	"minecraft:gui",
+	"minecraft:particle",
+] as const;
+
 function isSupportedProfile(value: string): value is SupportedProfile {
 	return (SUPPORTED_PROFILES as readonly string[]).includes(value);
 }
@@ -26,6 +38,6 @@ export function parseProfile(value: string | undefined): SupportedProfile {
 	}
 	throw new McAssetError(
 		"INVALID_PROFILE",
-		`Unknown profile "${value}". Supported: ${SUPPORTED_PROFILES.join(", ")}.`,
+		`Unknown profile "${value}". Supported: ${PRINTED_SUPPORTED_PROFILES.join(", ")}.`,
 	);
 }

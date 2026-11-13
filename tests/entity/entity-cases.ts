@@ -1,11 +1,12 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { OutputStreams } from "../../src/cli/channels.ts";
 import { runEntity } from "../../src/cli/cmd-entity.ts";
 import { parseProfile } from "../../src/cli/profiles.ts";
+import { buildProgram } from "../../src/cli/program.ts";
 import {
 	addLayer,
 	createCanvas,
@@ -117,12 +118,21 @@ const RIGHT_ARM: ExpectedPart = {
 };
 
 const LEFT_ARM: ExpectedPart = {
-	top: { rect: [36, 48, 4, 4], uv: [36, 52, 40, 48] },
-	bottom: { rect: [40, 48, 4, 4], uv: [40, 48, 44, 52] },
-	right: { rect: [40, 52, 4, 12], uv: [44, 52, 40, 64] },
-	front: { rect: [36, 52, 4, 12], uv: [40, 52, 36, 64] },
-	left: { rect: [32, 52, 4, 12], uv: [36, 52, 32, 64] },
-	back: { rect: [44, 52, 4, 12], uv: [48, 52, 44, 64] },
+	top: { rect: [36, 48, 4, 4], uv: [40, 52, 36, 48] },
+	bottom: { rect: [40, 48, 4, 4], uv: [44, 48, 40, 52] },
+	right: { rect: [32, 52, 4, 12], uv: [32, 52, 36, 64] },
+	front: { rect: [36, 52, 4, 12], uv: [36, 52, 40, 64] },
+	left: { rect: [40, 52, 4, 12], uv: [40, 52, 44, 64] },
+	back: { rect: [44, 52, 4, 12], uv: [44, 52, 48, 64] },
+};
+
+const LEFT_ARM_OVERLAY: ExpectedPart = {
+	top: { rect: [52, 48, 4, 4], uv: [56, 52, 52, 48] },
+	bottom: { rect: [56, 48, 4, 4], uv: [60, 48, 56, 52] },
+	right: { rect: [48, 52, 4, 12], uv: [48, 52, 52, 64] },
+	front: { rect: [52, 52, 4, 12], uv: [52, 52, 56, 64] },
+	left: { rect: [56, 52, 4, 12], uv: [56, 52, 60, 64] },
+	back: { rect: [60, 52, 4, 12], uv: [60, 52, 64, 64] },
 };
 
 const RIGHT_LEG: ExpectedPart = {
@@ -135,13 +145,77 @@ const RIGHT_LEG: ExpectedPart = {
 };
 
 const LEFT_LEG: ExpectedPart = {
-	top: { rect: [20, 48, 4, 4], uv: [20, 52, 24, 48] },
-	bottom: { rect: [24, 48, 4, 4], uv: [24, 48, 28, 52] },
-	right: { rect: [24, 52, 4, 12], uv: [28, 52, 24, 64] },
-	front: { rect: [20, 52, 4, 12], uv: [24, 52, 20, 64] },
-	left: { rect: [16, 52, 4, 12], uv: [20, 52, 16, 64] },
-	back: { rect: [28, 52, 4, 12], uv: [32, 52, 28, 64] },
+	top: { rect: [20, 48, 4, 4], uv: [24, 52, 20, 48] },
+	bottom: { rect: [24, 48, 4, 4], uv: [28, 48, 24, 52] },
+	right: { rect: [16, 52, 4, 12], uv: [16, 52, 20, 64] },
+	front: { rect: [20, 52, 4, 12], uv: [20, 52, 24, 64] },
+	left: { rect: [24, 52, 4, 12], uv: [24, 52, 28, 64] },
+	back: { rect: [28, 52, 4, 12], uv: [28, 52, 32, 64] },
 };
+
+const LEFT_LEG_OVERLAY: ExpectedPart = {
+	top: { rect: [4, 48, 4, 4], uv: [8, 52, 4, 48] },
+	bottom: { rect: [8, 48, 4, 4], uv: [12, 48, 8, 52] },
+	right: { rect: [0, 52, 4, 12], uv: [0, 52, 4, 64] },
+	front: { rect: [4, 52, 4, 12], uv: [4, 52, 8, 64] },
+	left: { rect: [8, 52, 4, 12], uv: [8, 52, 12, 64] },
+	back: { rect: [12, 52, 4, 12], uv: [12, 52, 16, 64] },
+};
+
+/** The slim left arm keeps the same 32,48 origin but is 3 wide. */
+const SLIM_LEFT_ARM: ExpectedPart = {
+	top: { rect: [36, 48, 3, 4], uv: [39, 52, 36, 48] },
+	bottom: { rect: [39, 48, 3, 4], uv: [42, 48, 39, 52] },
+	right: { rect: [32, 52, 4, 12], uv: [32, 52, 36, 64] },
+	front: { rect: [36, 52, 3, 12], uv: [36, 52, 39, 64] },
+	left: { rect: [39, 52, 4, 12], uv: [39, 52, 43, 64] },
+	back: { rect: [43, 52, 3, 12], uv: [43, 52, 46, 64] },
+};
+
+const SLIM_LEFT_ARM_OVERLAY: ExpectedPart = {
+	top: { rect: [52, 48, 3, 4], uv: [55, 52, 52, 48] },
+	bottom: { rect: [55, 48, 3, 4], uv: [58, 48, 55, 52] },
+	right: { rect: [48, 52, 4, 12], uv: [48, 52, 52, 64] },
+	front: { rect: [52, 52, 3, 12], uv: [52, 52, 55, 64] },
+	left: { rect: [55, 52, 4, 12], uv: [55, 52, 59, 64] },
+	back: { rect: [59, 52, 3, 12], uv: [59, 52, 62, 64] },
+};
+
+const RIGHT_ARM_OVERLAY: ExpectedPart = {
+	top: { rect: [44, 32, 4, 4], uv: [48, 36, 44, 32] },
+	bottom: { rect: [48, 32, 4, 4], uv: [52, 32, 48, 36] },
+	right: { rect: [40, 36, 4, 12], uv: [40, 36, 44, 48] },
+	front: { rect: [44, 36, 4, 12], uv: [44, 36, 48, 48] },
+	left: { rect: [48, 36, 4, 12], uv: [48, 36, 52, 48] },
+	back: { rect: [52, 36, 4, 12], uv: [52, 36, 56, 48] },
+};
+
+const RIGHT_LEG_OVERLAY: ExpectedPart = {
+	top: { rect: [4, 32, 4, 4], uv: [8, 36, 4, 32] },
+	bottom: { rect: [8, 32, 4, 4], uv: [12, 32, 8, 36] },
+	right: { rect: [0, 36, 4, 12], uv: [0, 36, 4, 48] },
+	front: { rect: [4, 36, 4, 12], uv: [4, 36, 8, 48] },
+	left: { rect: [8, 36, 4, 12], uv: [8, 36, 12, 48] },
+	back: { rect: [12, 36, 4, 12], uv: [12, 36, 16, 48] },
+};
+
+const FACE_NAMES = ["top", "bottom", "right", "front", "left", "back"] as const;
+
+function assertNotMirror(
+	check: EntityCaseCheck,
+	right: ExpectedPart,
+	left: ExpectedPart,
+	label: string,
+): void {
+	for (const face of FACE_NAMES) {
+		const rightFace = right[face] as ExpectedFace;
+		const leftFace = left[face] as ExpectedFace;
+		check.ok(
+			rightFace.rect.join(",") !== leftFace.rect.join(","),
+			`${label}.${face} rectangle differs between the right and left limb`,
+		);
+	}
+}
 
 const BASE_PARTS: ReadonlyArray<readonly [string, ExpectedPart]> = [
 	["head", HEAD],
@@ -198,6 +272,27 @@ function textOf(result: {
 	return block.text;
 }
 
+/** Byte-for-byte `mc-asset build --help` from the main baseline. */
+const BUILD_HELP_BASELINE = `Usage: mc-asset build [options] [source]
+
+Build a .mcpx source file (or stdin) into PNG and/or .mcpx.
+
+Options:
+  --stdin              Read the .mcpx source from stdin.
+  --output <path>      Explicit PNG output file path.
+  --stdout             Write PNG bytes to stdout.
+  --source <path>      Write the re-serialized .mcpx source file.
+  --force              Allow overwriting an existing output file.
+  --mkdir              Create missing parent directories.
+  --in-place           Rewrite the input .mcpx with the new source (implies
+                       force for that target).
+  --input <path>       Input path used with --in-place.
+  --profile <name>     Asset profile (generic, minecraft:item, minecraft:block,
+                       minecraft:gui, minecraft:particle).
+  --operations <path>  Batch operations JSON file ("-" reads stdin).
+  -h, --help           display help for command
+`;
+
 export const ENTITY_CASES: readonly EntityCase[] = [
 	{
 		name: "player wide base parts pin every face rectangle and UV direction",
@@ -224,6 +319,134 @@ export const ENTITY_CASES: readonly EntityCase[] = [
 					unmappedPixels: 832,
 				},
 				"coverage",
+			);
+		},
+	},
+	{
+		name: "player left limbs keep their own vanilla UV regions instead of mirroring the right limbs",
+		run(check) {
+			const wide = resolveEntityLayoutDocument(
+				getEntityLayoutDocument("player_wide"),
+			);
+			check.deepEqual(faceMap(partOf(wide, "left_arm")), LEFT_ARM, "left arm");
+			check.deepEqual(
+				faceMap(partOf(wide, "left_arm_overlay")),
+				LEFT_ARM_OVERLAY,
+				"left sleeve",
+			);
+			check.deepEqual(faceMap(partOf(wide, "left_leg")), LEFT_LEG, "left leg");
+			check.deepEqual(
+				faceMap(partOf(wide, "left_leg_overlay")),
+				LEFT_LEG_OVERLAY,
+				"left pants",
+			);
+			check.deepEqual(
+				faceMap(partOf(wide, "right_arm_overlay")),
+				RIGHT_ARM_OVERLAY,
+				"right sleeve",
+			);
+			check.deepEqual(
+				faceMap(partOf(wide, "right_leg_overlay")),
+				RIGHT_LEG_OVERLAY,
+				"right pants",
+			);
+			for (const id of [
+				"left_arm",
+				"left_arm_overlay",
+				"left_leg",
+				"left_leg_overlay",
+			]) {
+				check.equal(partOf(wide, id).mirror, false, `${id} mirror flag`);
+			}
+			assertNotMirror(
+				check,
+				faceMap(partOf(wide, "right_arm")),
+				faceMap(partOf(wide, "left_arm")),
+				"arm",
+			);
+			assertNotMirror(
+				check,
+				faceMap(partOf(wide, "right_leg")),
+				faceMap(partOf(wide, "left_leg")),
+				"leg",
+			);
+
+			const slim = resolveEntityLayoutDocument(
+				getEntityLayoutDocument("player_slim"),
+			);
+			check.deepEqual(
+				faceMap(partOf(slim, "left_arm")),
+				SLIM_LEFT_ARM,
+				"slim left arm",
+			);
+			check.deepEqual(
+				faceMap(partOf(slim, "left_arm_overlay")),
+				SLIM_LEFT_ARM_OVERLAY,
+				"slim left sleeve",
+			);
+			check.equal(partOf(slim, "left_arm").mirror, false, "slim mirror flag");
+			assertNotMirror(
+				check,
+				faceMap(partOf(slim, "right_arm")),
+				faceMap(partOf(slim, "left_arm")),
+				"slim arm",
+			);
+		},
+	},
+	{
+		name: "a layout that needs more regions than the canvas allows is refused before any template",
+		run(check) {
+			const parts = Array.from({ length: 43 }, (_unused, index) => ({
+				id: `p${index}`,
+				size: [4, 4, 4],
+				uv: [0, 0],
+			}));
+			const error = errorOf(() =>
+				resolveEntityLayoutDocument({
+					format: "mc-asset/entity-layout",
+					version: 1,
+					id: "too-many-regions",
+					texture: { width: 64, height: 64 },
+					parts,
+				}),
+			);
+			check.equal(error.code, "ENTITY_LAYOUT_INVALID", "code");
+			check.equal(
+				(error.details as { reason?: string }).reason,
+				"invalid-layout",
+				"reason",
+			);
+			check.equal(
+				(error.details as { requiredRegions?: number }).requiredRegions,
+				258,
+				"required regions",
+			);
+			check.equal(
+				(error.details as { limit?: number }).limit,
+				256,
+				"region limit",
+			);
+			check.ok(error.message.includes("258"), "message names the need");
+			// 42 parts need 252 regions and pass the region gate; these probes
+			// overlap, so the next rejection is the geometry check.
+			const fits = Array.from({ length: 42 }, (_unused, index) => ({
+				id: `p${index}`,
+				size: [4, 4, 4],
+				uv: [0, 0],
+			}));
+			const overlap = errorOf(() =>
+				resolveEntityLayoutDocument({
+					format: "mc-asset/entity-layout",
+					version: 1,
+					id: "still-overlaps",
+					texture: { width: 64, height: 64 },
+					parts: fits,
+				}),
+			);
+			check.equal(
+				overlap.code,
+				"ENTITY_LAYOUT_OVERLAP",
+				"42 parts pass the gate",
 			);
 		},
 	},
@@ -576,15 +799,15 @@ export const ENTITY_CASES: readonly EntityCase[] = [
 				check.equal(
 					sha256(encodePng(template.canvas)),
 					layoutId === "player_wide"
-						? "6fd551434f061a8cac2e80226fa7d78eb8a72e0f1735604af16f26459775f46d"
-						: "03899d354ad1c36525a3e75e2f50e44692f5c33d464c15c7583822293b139fae",
+						? "7495aa84add52936a3f32ec1653caa8b4974a1b8e43320da70b52adf6d15aadb"
+						: "cf775a4911c3b9ab3b98cade3644d0055b7d8301839189c745f0f03d848c37e7",
 					`${layoutId} PNG`,
 				);
 				check.equal(
 					sha256(serializeMcpx(template.canvas)),
 					layoutId === "player_wide"
-						? "f5d1e66e6fbc1880fb32e21b4368a96eaac7abc9cd2e760d0598ce709085e23d"
-						: "d10e09f37942405527e07b9f670bda9ba90bc361b1827ae44f35b22afd5e1f43",
+						? "58cde6921efc3443ed3e8059cf0a60b8fb6e818f2addff472c7dd164ef9b6c17"
+						: "e350315239a690576e7c44ae995090b88f10e09935774859d7a8893f61070f0f",
 					`${layoutId} mcpx`,
 				);
 			}
@@ -704,6 +927,231 @@ export const ENTITY_CASES: readonly EntityCase[] = [
 			} finally {
 				await rm(dir, { recursive: true, force: true });
 			}
+		},
+	},
+	{
+		name: "text mode lists every face rectangle and keeps warning coordinates",
+		async run(check) {
+			const inspectStreams = captureStreams();
+			const inspectExit = await runEntity(
+				"inspect",
+				undefined,
+				{ layout: "player_wide" },
+				false,
+				inspectStreams.streams,
+			);
+			check.equal(inspectExit, 0, "inspect exit");
+			const inspectText = new TextDecoder().decode(inspectStreams.stdout());
+			for (const fragment of [
+				"layout: player_wide",
+				"parts: 12 faces: 72",
+				"head.top 8,0,8,8 uv=16,8,8,0 mirror=false layer=base",
+				"left_arm.front 36,52,4,12 uv=36,52,40,64 mirror=false layer=base",
+				"left_arm_overlay.front 52,52,4,12 uv=52,52,56,64 mirror=false layer=overlay",
+				"left_leg.back 28,52,4,12 uv=28,52,32,64 mirror=false layer=base",
+			]) {
+				check.ok(inspectText.includes(fragment), `inspect text: ${fragment}`);
+			}
+			check.equal(
+				inspectText.trim().split("\n").length,
+				3 + 72,
+				"one line per face",
+			);
+
+			const dir = await mkdtemp(join(tmpdir(), "mc-asset-entity-text-"));
+			try {
+				const texture = createCanvas(64, 64);
+				const base = addLayer(texture, { id: "base" });
+				replaceLayerPixels(texture, base.id, emptyPixels(64, 64));
+				setPixel(texture, base.id, 24, 0, { r: 255, g: 0, b: 0, a: 255 });
+				const texturePath = join(dir, "stray.png");
+				await writeFile(texturePath, encodePng(texture));
+				const validateStreams = captureStreams();
+				const validateExit = await runEntity(
+					"validate",
+					texturePath,
+					{ layout: "player_wide" },
+					false,
+					validateStreams.streams,
+				);
+				check.equal(validateExit, 0, "warning-only exit");
+				const validateText = new TextDecoder().decode(validateStreams.stdout());
+				check.ok(
+					validateText.includes("verdict: pass"),
+					"validate verdict line",
+				);
+				check.ok(
+					validateText.includes(
+						"warning [ENTITY_UNMAPPED_PIXEL] 1 non-transparent pixel lies outside every face. positions: 24,0",
+					),
+					"warning carries the coordinate",
+				);
+
+				const layoutPath = join(dir, "overlap.json");
+				await writeFile(
+					layoutPath,
+					JSON.stringify({
+						format: "mc-asset/entity-layout",
+						version: 1,
+						id: "overlap",
+						texture: { width: 16, height: 16 },
+						parts: [
+							{ id: "a", size: [4, 4, 4], uv: [0, 0] },
+							{ id: "b", size: [4, 4, 4], uv: [0, 0] },
+						],
+					}),
+				);
+				const overlapStreams = captureStreams();
+				const overlapExit = await runEntity(
+					"inspect",
+					undefined,
+					{ layout: layoutPath },
+					false,
+					overlapStreams.streams,
+				);
+				check.equal(overlapExit, 2, "overlap exit");
+				const overlapText = new TextDecoder().decode(overlapStreams.stdout());
+				check.ok(
+					overlapText.includes("ENTITY_LAYOUT_OVERLAP"),
+					"overlap code named",
+				);
+				check.ok(overlapText.includes("a.top"), "first face named");
+				check.ok(overlapText.includes("b.top"), "second face named");
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		},
+	},
+	{
+		name: "template outputs go through the standard overwrite, alias, extension, and symlink guards",
+		async run(check) {
+			const dir = await mkdtemp(join(tmpdir(), "mc-asset-entity-guard-"));
+			try {
+				const existing = join(dir, "taken.png");
+				await writeFile(existing, new Uint8Array([1, 2, 3]));
+				const refused = captureStreams();
+				const refusedExit = await runEntity(
+					"template",
+					undefined,
+					{ layout: "player_wide", output: existing },
+					false,
+					refused.streams,
+				);
+				check.equal(refusedExit, 4, "existing output exit");
+				check.ok(
+					new TextDecoder().decode(refused.stdout()).includes("OUTPUT_EXISTS"),
+					"OUTPUT_EXISTS named",
+				);
+				check.deepEqual(
+					[...(await readFile(existing))],
+					[1, 2, 3],
+					"refused output untouched",
+				);
+
+				const forced = await runEntity(
+					"template",
+					undefined,
+					{ layout: "player_wide", output: existing, force: true },
+					false,
+					captureStreams().streams,
+				);
+				check.equal(forced, 0, "--force overwrites");
+				check.ok((await readFile(existing)).length > 3, "PNG rewritten");
+
+				const badOutput = await runEntity(
+					"template",
+					undefined,
+					{ layout: "player_wide", output: join(dir, "template.txt") },
+					false,
+					captureStreams().streams,
+				);
+				check.equal(badOutput, 2, "PNG extension guard");
+				const badSource = await runEntity(
+					"template",
+					undefined,
+					{ layout: "player_wide", source: join(dir, "source.png") },
+					false,
+					captureStreams().streams,
+				);
+				check.equal(badSource, 2, "mcpx extension guard");
+
+				const layoutPath = join(dir, "layout.mcpx");
+				const layoutText = JSON.stringify({
+					format: "mc-asset/entity-layout",
+					version: 1,
+					id: "guard",
+					texture: { width: 16, height: 16 },
+					parts: [{ id: "box", size: [4, 4, 4], uv: [0, 0] }],
+				});
+				await writeFile(layoutPath, layoutText);
+				const alias = captureStreams();
+				const aliasExit = await runEntity(
+					"template",
+					undefined,
+					{ layout: layoutPath, source: layoutPath, force: true },
+					false,
+					alias.streams,
+				);
+				check.equal(aliasExit, 2, "output aliasing the layout input");
+				check.ok(
+					new TextDecoder()
+						.decode(alias.stdout())
+						.includes("ARGUMENT_CONFLICT"),
+					"ARGUMENT_CONFLICT named",
+				);
+				check.equal(
+					await readFile(layoutPath, "utf8"),
+					layoutText,
+					"layout kept",
+				);
+
+				const realTarget = join(dir, "real.png");
+				await writeFile(realTarget, new Uint8Array([9]));
+				const link = join(dir, "link.png");
+				await symlink(realTarget, link);
+				const symlinked = await runEntity(
+					"template",
+					undefined,
+					{ layout: "player_wide", output: link, force: true },
+					false,
+					captureStreams().streams,
+				);
+				check.equal(symlinked, 4, "symlink target exit");
+				check.deepEqual(
+					[...(await readFile(realTarget))],
+					[9],
+					"symlink target untouched",
+				);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		},
+	},
+	{
+		name: "build --help and the INVALID_PROFILE text match the main baseline byte for byte",
+		run(check) {
+			const program = buildProgram();
+			const build = program.commands.find(
+				(command) => command.name() === "build",
+			);
+			check.ok(build !== undefined, "build command registered");
+			check.equal(
+				build?.helpInformation(),
+				BUILD_HELP_BASELINE,
+				"build help bytes",
+			);
+			const error = errorOf(() => parseProfile("typo"));
+			check.equal(error.code, "INVALID_PROFILE", "profile error code");
+			check.equal(
+				error.message,
+				'[INVALID_PROFILE] Unknown profile "typo". Supported: generic, minecraft:item, minecraft:block, minecraft:gui, minecraft:particle.',
+				"profile error bytes",
+			);
+			check.equal(
+				parseProfile("minecraft:entity"),
+				"minecraft:entity",
+				"entity profile still accepted",
+			);
 		},
 	},
 ];

@@ -20,8 +20,9 @@ import type {
  * faces map onto the sheet.
  *
  * With `mirror`, every face flips horizontally inside its own cell and the
- * right and left cells swap. That is the rule the player skin uses for the
- * left arm and left leg, and it matches Blockbench and Java Edition.
+ * right and left cells swap. Biped mobs that paint both limbs from one UV
+ * region use it; the 64x64 player skin does not, because its left limbs have
+ * dedicated regions.
  */
 export const ENTITY_FACE_NAMES: readonly EntityFaceName[] = [
 	"top",

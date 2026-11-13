@@ -1,6 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { McAssetError } from "../core/errors.ts";
 import {
+	type EntityFaceReport,
 	type EntityInspectReport,
 	type EntityLayoutSummary,
 	inspectEntityLayout,
@@ -14,7 +15,7 @@ import {
 	buildEntityTemplate,
 	type EntityTemplateRegion,
 } from "../entity/template.ts";
-import type { EntityLayout } from "../entity/types.ts";
+import type { EntityLayer, EntityLayout } from "../entity/types.ts";
 import {
 	type EntityValidateReport,
 	validateEntityTexture,
@@ -32,8 +33,8 @@ import {
 import { errorEnvelope, successEnvelope } from "./envelope.ts";
 import { exitCodeForMcAssetError } from "./exit.ts";
 import {
-	type ExtensionlessOutputTarget,
-	planOutputTargetsKeepingExtension,
+	type OutputTarget,
+	planOutputTargets,
 	writePlannedTargets,
 } from "./safe-output.ts";
 
@@ -251,39 +252,19 @@ async function loadTexture(path: string): Promise<LoadedTexture> {
 	};
 }
 
-function assertPngPath(path: string): void {
-	if (!path.toLowerCase().endsWith(".png")) {
-		throw new McAssetError(
-			"INVALID_ARGUMENT",
-			`PNG output path must end with .png: ${path}.`,
-			{ path },
-		);
-	}
-}
-
-function assertMcpxPath(path: string): void {
-	if (!path.toLowerCase().endsWith(".mcpx")) {
-		throw new McAssetError(
-			"INVALID_ARGUMENT",
-			`Source output path must end with .mcpx: ${path}.`,
-			{ path },
-		);
-	}
-}
-
-function templateTargets(request: EntityRequest): ExtensionlessOutputTarget[] {
-	const targets: ExtensionlessOutputTarget[] = [];
+function templateTargets(request: EntityRequest): OutputTarget[] {
+	const targets: OutputTarget[] = [];
 	if (request.outputPngPath !== undefined) {
-		assertPngPath(request.outputPngPath);
 		targets.push({
 			path: request.outputPngPath,
+			extension: ".png",
 			allowOverwrite: request.force === true,
 		});
 	}
 	if (request.outputMcpxPath !== undefined) {
-		assertMcpxPath(request.outputMcpxPath);
 		targets.push({
 			path: request.outputMcpxPath,
+			extension: ".mcpx",
 			allowOverwrite: request.force === true,
 		});
 	}
@@ -315,11 +296,9 @@ async function runTemplate(
 	}
 	const targets = templateTargets(request);
 	// Path phase: every target is checked before any canvas is built.
-	const planned = await planOutputTargetsKeepingExtension(targets, {
+	const planned = await planOutputTargets(targets, {
 		inputs: sourcePath === undefined ? [] : [sourcePath],
 		mkdir: request.mkdir === true,
-		// Keep the extension whitelist out of the shared guard: .mcpx is not
-		// part of its frozen target set, and both extensions are checked above.
 	});
 	const fill = request.fill !== false;
 	const template = buildEntityTemplate(layout, { fill });
@@ -441,26 +420,50 @@ function formatValidateReport(report: EntityValidateReport): string {
 		`mapped: ${report.coverage.mappedPixels}/${report.coverage.totalPixels}`,
 	];
 	for (const finding of report.findings) {
-		lines.push(`${finding.level} [${finding.code}] ${finding.message}`);
+		const coordinates =
+			finding.code === "ENTITY_UNMAPPED_PIXEL"
+				? ` positions: ${finding.positions
+						.map((position) => `${position.x},${position.y}`)
+						.join(" ")}${
+						finding.truncated
+							? ` (+${finding.count - finding.positions.length} more)`
+							: ""
+					}`
+				: "";
+		lines.push(
+			`${finding.level} [${finding.code}] ${finding.message}${coordinates}`,
+		);
 	}
 	return lines.join("\n");
 }
 
-function humanLine(result: EntityResult): string {
-	if (result.mode === "inspect") {
-		return `ok entity inspect layout=${result.layout.id} parts=${result.layout.partCount} faces=${result.layout.faceCount} mapped=${result.layout.mappedPixels}/${result.layout.totalPixels}`;
+function formatFaceLine(
+	partId: string,
+	layer: EntityLayer,
+	face: EntityFaceReport,
+): string {
+	const { rect } = face;
+	return `${partId}.${face.face} ${rect.x},${rect.y},${rect.width},${rect.height} uv=${face.uv.join(",")} mirror=${face.mirror} layer=${layer}`;
+}
+
+function formatInspectReport(report: EntityInspectReport): string {
+	const lines = [
+		`layout: ${report.layout.id}`,
+		`texture: ${report.layout.texture.width}x${report.layout.texture.height}`,
+		`parts: ${report.layout.partCount} faces: ${report.layout.faceCount} mapped: ${report.layout.mappedPixels}/${report.layout.totalPixels} unmapped: ${report.layout.unmappedPixels}`,
+	];
+	for (const part of report.parts) {
+		for (const face of part.faces) {
+			lines.push(formatFaceLine(part.id, part.layer, face));
+		}
 	}
-	if (result.mode === "template") {
-		const output =
-			result.output === undefined ? "" : ` output=${result.output}`;
-		const source =
-			result.source === undefined ? "" : ` source=${result.source}`;
-		return `ok entity template layout=${result.layout.id} regions=${result.regions.length}${output}${source}`;
-	}
-	const warnings = result.findings.filter(
-		(finding) => finding.level === "warning",
-	).length;
-	return `ok entity validate layout=${result.layout.id} verdict=${result.verdict} warnings=${warnings}`;
+	return lines.join("\n");
+}
+
+function formatTemplateLine(result: EntityTemplateReport): string {
+	const output = result.output === undefined ? "" : ` output=${result.output}`;
+	const source = result.source === undefined ? "" : ` source=${result.source}`;
+	return `ok entity template layout=${result.layout.id} regions=${result.regions.length}${output}${source}`;
 }
 
 /**
@@ -519,8 +522,10 @@ export async function runEntity(
 			emitEnvelope(successEnvelope(outcome.result), streams, route);
 		} else if (outcome.result.mode === "validate") {
 			emitLog(formatValidateReport(outcome.result), streams, route);
+		} else if (outcome.result.mode === "inspect") {
+			emitLog(formatInspectReport(outcome.result), streams, route);
 		} else {
-			emitLog(humanLine(outcome.result), streams, route);
+			emitLog(formatTemplateLine(outcome.result), streams, route);
 		}
 		return 0;
 	} catch (error) {
