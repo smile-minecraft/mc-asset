@@ -6,6 +6,8 @@
 
 import { McAssetError } from "../core/errors.ts";
 import { isJsonObject, isPathInsideDirectory } from "./document.ts";
+import { collectJsonOutputsForStep } from "./item-plan.ts";
+import { assertV1ItemDefinition } from "./item-templates.ts";
 import { compareCodeUnits } from "./skeleton.ts";
 
 export interface RecipeSource {
@@ -65,6 +67,12 @@ const SUPPORTED_STEP_TYPES: ReadonlySet<string> = new Set([
 	"operations",
 	"model",
 	"itemDefinition",
+]);
+
+/** Steps formatVersion 2 adds; formatVersion 1 recipes keep refusing them. */
+const FORMAT_VERSION_2_STEP_TYPES: ReadonlySet<string> = new Set([
+	"blockModel",
+	"blockstate",
 ]);
 
 const IMAGE_STEP_TYPES: ReadonlySet<string> = new Set([
@@ -141,7 +149,7 @@ export function parseRecipeText(text: string): RecipeDocument {
 			{ field: "formatVersion" },
 		);
 	}
-	if (formatVersion > 1) {
+	if (formatVersion > 2) {
 		throw new McAssetError(
 			"RECIPE_UNSUPPORTED_VERSION",
 			`Unsupported recipe formatVersion: ${formatVersion}`,
@@ -370,12 +378,37 @@ export function parseRecipeText(text: string): RecipeDocument {
 					{ targetId: rawTarget.id, stepIndex },
 				);
 			}
-			if (!SUPPORTED_STEP_TYPES.has(rawStep.type)) {
+			if (
+				!SUPPORTED_STEP_TYPES.has(rawStep.type) &&
+				!(formatVersion >= 2 && FORMAT_VERSION_2_STEP_TYPES.has(rawStep.type))
+			) {
+				if (
+					formatVersion < 2 &&
+					FORMAT_VERSION_2_STEP_TYPES.has(rawStep.type)
+				) {
+					throw new McAssetError(
+						"RECIPE_INVALID",
+						`Target '${rawTarget.id}' step at index ${stepIndex} uses '${rawStep.type}', which requires recipe formatVersion 2.`,
+						{
+							targetId: rawTarget.id,
+							stepIndex,
+							stepType: rawStep.type,
+							requiredFormatVersion: 2,
+						},
+					);
+				}
 				throw new McAssetError(
 					"RECIPE_INVALID",
 					`Target '${rawTarget.id}' step at index ${stepIndex} has unsupported step type '${rawStep.type}'.`,
-					{ targetId: rawTarget.id, stepIndex, stepType: rawStep.type },
+					{
+						targetId: rawTarget.id,
+						stepIndex,
+						stepType: rawStep.type,
+					},
 				);
+			}
+			if (formatVersion < 2 && rawStep.type === "itemDefinition") {
+				assertV1ItemDefinition(rawStep.definition, rawTarget.id);
 			}
 			steps.push({ ...rawStep, type: rawStep.type });
 		}
@@ -657,28 +690,23 @@ export function expandRecipeTargets(
 			}
 			seenOutputs.add(t.output);
 		}
-		for (const step of t.steps) {
+		for (const [stepIndex, step] of t.steps.entries()) {
 			if (step.type === "sweep" && typeof step.mcmetaOutput === "string") {
 				if (seenOutputs.has(step.mcmetaOutput)) {
 					dupeOutputs.add(step.mcmetaOutput);
 				}
 				seenOutputs.add(step.mcmetaOutput);
 			}
-			if (step.type === "model") {
-				const item = typeof step.item === "string" ? step.item : t.id;
-				const modelRel = `assets/${namespace}/models/item/${item}.json`;
-				if (seenOutputs.has(modelRel)) {
-					dupeOutputs.add(modelRel);
+			for (const output of collectJsonOutputsForStep(
+				step,
+				t.id,
+				namespace,
+				stepIndex,
+			)) {
+				if (seenOutputs.has(output.path)) {
+					dupeOutputs.add(output.path);
 				}
-				seenOutputs.add(modelRel);
-			}
-			if (step.type === "itemDefinition") {
-				const item = typeof step.item === "string" ? step.item : t.id;
-				const itemRel = `assets/${namespace}/items/${item}.json`;
-				if (seenOutputs.has(itemRel)) {
-					dupeOutputs.add(itemRel);
-				}
-				seenOutputs.add(itemRel);
+				seenOutputs.add(output.path);
 			}
 		}
 	}

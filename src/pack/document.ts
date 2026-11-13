@@ -90,6 +90,32 @@ export function formatValue(value: unknown): string {
 	return text === undefined ? "undefined" : text;
 }
 
+const PLAIN_ASSET_NAME = /^[a-z0-9_.-]+$/;
+
+/**
+ * A plain asset name: one lowercase path segment used as the file stem for
+ * models, blockstates, and item definitions. A resource-location prefix is
+ * refused here because the namespace comes from the project document.
+ */
+export function requirePlainAssetName(
+	value: unknown,
+	field: string,
+	targetId: string,
+): string {
+	if (
+		typeof value !== "string" ||
+		value.trim() === "" ||
+		!PLAIN_ASSET_NAME.test(value)
+	) {
+		throw new McAssetError(
+			"RECIPE_INVALID",
+			`Invalid ${field} '${String(value)}' for target '${targetId}'.`,
+			{ targetId, field, value },
+		);
+	}
+	return value;
+}
+
 /**
  * The refusal shape every project-document error carries: the document
  * path, the field path a caller localizes on, and the release version once

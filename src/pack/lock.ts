@@ -17,7 +17,14 @@ import { compareCodeUnits } from "./skeleton.ts";
 export interface LockEntry {
 	readonly targetId: string;
 	readonly recipeId: string;
-	readonly kind: "texture" | "model" | "itemDefinition" | "mcmeta";
+	readonly kind:
+		| "texture"
+		| "model"
+		| "itemDefinition"
+		| "mcmeta"
+		| "blockModel"
+		| "blockItemModel"
+		| "blockstate";
 	readonly category?: string | undefined;
 	readonly inputHash: string;
 	readonly outputHash: string;
@@ -159,7 +166,10 @@ export function parseLockText(text: string): LockDocument {
 			kind !== "texture" &&
 			kind !== "model" &&
 			kind !== "itemDefinition" &&
-			kind !== "mcmeta"
+			kind !== "mcmeta" &&
+			kind !== "blockModel" &&
+			kind !== "blockItemModel" &&
+			kind !== "blockstate"
 		) {
 			throw new McAssetError(
 				"PACK_LOCK_INVALID",

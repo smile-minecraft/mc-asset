@@ -1,102 +1,138 @@
 /**
- * Model and item definition output planning helpers.
+ * Model, blockstate, and item definition output planning helpers.
  *
  * Pure helpers to enumerate the JSON documents a target generates so
  * planPackBuild can register them before any byte is written.
  */
 
-import { McAssetError } from "../core/errors.ts";
+import { parseBlockModelStep, parseBlockstateStep } from "./block.ts";
+import { requirePlainAssetName } from "./document.ts";
 import type { RecipeStep, RecipeTarget } from "./recipe.ts";
 
-const NAMESPACE_PATTERN = /^[a-z0-9_.-]+$/;
+/** The document families a recipe step can write under `assets/`. */
+export type JsonOutputKind =
+	| "model"
+	| "itemDefinition"
+	| "blockModel"
+	| "blockItemModel"
+	| "blockstate";
 
-function assertValidItemName(
-	item: string,
+export interface JsonOutput {
+	/** Project-relative path inside the output directory. */
+	readonly path: string;
+	readonly kind: JsonOutputKind;
+	/** The plain asset name the step declared (item, block, or target id). */
+	readonly name: string;
+	readonly stepIndex: number;
+}
+
+/**
+ * FormatVersion 1 `model` and `itemDefinition` steps treat a missing or
+ * blank `item` as "use the target id". Keep that fallback exactly; the
+ * build path has always resolved it this way.
+ */
+export function resolveStepItemName(
+	step: RecipeStep,
 	targetId: string,
+): string {
+	const raw = step.item;
+	if (raw === undefined) {
+		return targetId;
+	}
+	if (typeof raw === "string" && raw.trim() === "") {
+		return targetId;
+	}
+	return requirePlainAssetName(raw, "item", targetId);
+}
+
+/**
+ * Enumerate every JSON document one recipe step writes. Paths are relative
+ * to the project output directory (`assets/...`), the same shape the
+ * duplicate-output checks and the writer use.
+ */
+export function collectJsonOutputsForStep(
+	step: RecipeStep,
+	targetId: string,
+	namespace: string,
 	stepIndex: number,
-): void {
-	if (
-		typeof item !== "string" ||
-		item.trim() === "" ||
-		!NAMESPACE_PATTERN.test(item)
-	) {
-		throw new McAssetError(
-			"RECIPE_INVALID",
-			`Invalid item id '${item}' for target '${targetId}'.`,
+): JsonOutput[] {
+	if (step.type === "model") {
+		const item = resolveStepItemName(step, targetId);
+		return [
 			{
-				targetId,
-				item,
+				path: `assets/${namespace}/models/item/${item}.json`,
+				kind: "model",
+				name: item,
+				stepIndex,
 			},
-		);
+		];
 	}
-	void stepIndex;
-}
-
-/** Validate a value is a resource location with explicit namespace. */
-export function parseItemResourceLocation(value: unknown): {
-	namespace: string;
-	path: string;
-} {
-	if (typeof value !== "string") {
-		throw new Error("expected resource location string");
+	if (step.type === "itemDefinition") {
+		const item = resolveStepItemName(step, targetId);
+		return [
+			{
+				path: `assets/${namespace}/items/${item}.json`,
+				kind: "itemDefinition",
+				name: item,
+				stepIndex,
+			},
+		];
 	}
-	const cut = value.indexOf(":");
-	if (cut <= 0 || cut === value.length - 1) {
-		throw new Error(`invalid resource location: ${value}`);
+	if (step.type === "blockModel") {
+		const spec = parseBlockModelStep(step, targetId);
+		const block = spec.blockId;
+		return [
+			{
+				path: `assets/${namespace}/models/block/${block}.json`,
+				kind: "blockModel",
+				name: block,
+				stepIndex,
+			},
+			{
+				path: `assets/${namespace}/models/item/${block}.json`,
+				kind: "blockItemModel",
+				name: block,
+				stepIndex,
+			},
+			{
+				path: `assets/${namespace}/items/${block}.json`,
+				kind: "itemDefinition",
+				name: block,
+				stepIndex,
+			},
+		];
 	}
-	return {
-		namespace: value.slice(0, cut),
-		path: value.slice(cut + 1),
-	};
-}
-
-/** Enumerate model outputs: one per model step. */
-export function collectModelOutputsForStep(
-	step: RecipeStep,
-	targetId: string,
-): Array<{ item: string }> {
-	if (step.type !== "model") {
-		return [];
+	if (step.type === "blockstate") {
+		const spec = parseBlockstateStep(step, targetId);
+		return [
+			{
+				path: `assets/${namespace}/blockstates/${spec.blockId}.json`,
+				kind: "blockstate",
+				name: spec.blockId,
+				stepIndex,
+			},
+		];
 	}
-	const item =
-		typeof step.item === "string" && step.item.trim() !== ""
-			? step.item
-			: targetId;
-	assertValidItemName(item, targetId, -1);
-	return [{ item }];
-}
-
-/** Enumerate item definition outputs: at most one per itemDefinition step. */
-export function collectItemOutputsForStep(
-	step: RecipeStep,
-	targetId: string,
-): Array<{ item: string }> {
-	if (step.type !== "itemDefinition") {
-		return [];
-	}
-	const item =
-		typeof step.item === "string" && step.item.trim() !== ""
-			? step.item
-			: targetId;
-	assertValidItemName(item, targetId, -1);
-	return [{ item }];
+	return [];
 }
 
 /**
  * Whether a target produces JSON documents only.
  *
  * A target that declares no source has no image pipeline: the recipe reader
- * refuses image steps without a source, so its steps are `model` and
- * `itemDefinition` only. Such a target plans JSON outputs only — no texture
- * output, no canvas, no PNG. A target that declares a source keeps its texture
- * output even when every step is a JSON step, because the source image is the
- * texture it copies into the pack.
+ * refuses image steps without a source, so its steps are JSON steps only.
+ * Such a target plans JSON outputs only — no texture output, no canvas, no
+ * PNG. A target that declares a source keeps its texture output even when
+ * every step is a JSON step, because the source image is the texture it
+ * copies into the pack.
  */
 export function isJsonOnlyTarget(target: RecipeTarget): boolean {
 	return (
 		target.source === undefined &&
-		target.steps.every(
-			(step) => step.type === "model" || step.type === "itemDefinition",
+		target.steps.every((step) =>
+			["model", "itemDefinition", "blockModel", "blockstate"].includes(
+				step.type,
+			),
 		)
 	);
 }

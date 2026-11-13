@@ -1,5 +1,7 @@
 import type { ModelEditResult } from "./edit.ts";
+import { createModelDocument } from "./edit.ts";
 import { closeDocument, parseModelDocument } from "./edit-support.ts";
+import type { ModelSpec } from "./types.ts";
 import type { ModelRules } from "./versions.ts";
 
 /**
@@ -13,4 +15,17 @@ export function exportModelDocument(
 ): ModelEditResult {
 	const root = parseModelDocument(sourceText);
 	return closeDocument(root, rules, 0, { sourceText });
+}
+
+/**
+ * Build a model document from a typed specification with the same
+ * representability gate as export. `model create` and the resource-pack
+ * recipe block step both enter here, so a model this toolchain writes is
+ * checked once, in one place.
+ */
+export function buildModelDocument(
+	spec: ModelSpec,
+	rules: ModelRules,
+): ModelEditResult {
+	return createModelDocument(spec, rules);
 }
