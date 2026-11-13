@@ -403,6 +403,68 @@ function colorCountInBand(
 	return count;
 }
 
+/** Paint one opaque texel, for probes that must survive onto one face corner. */
+function paintTexel(
+	pixels: Uint8Array,
+	width: number,
+	x: number,
+	y: number,
+	color: readonly [number, number, number],
+): void {
+	const offset = (y * width + x) * 4;
+	pixels[offset] = color[0];
+	pixels[offset + 1] = color[1];
+	pixels[offset + 2] = color[2];
+	pixels[offset + 3] = 255;
+}
+
+interface PixelPoint {
+	readonly x: number;
+	readonly y: number;
+}
+
+/** Every pixel of one probe color inside one panel, in panel coordinates. */
+function pointsOfColor(
+	png: Uint8Array,
+	size: number,
+	panel: number,
+	color: readonly [number, number, number],
+): PixelPoint[] {
+	const image = decodedImage(png);
+	const points: PixelPoint[] = [];
+	for (let y = 0; y < size; y += 1) {
+		for (let x = 0; x < size; x += 1) {
+			const offset = (y * image.width + panel * size + x) * 4;
+			if (
+				image.pixels[offset] === color[0] &&
+				image.pixels[offset + 1] === color[1] &&
+				image.pixels[offset + 2] === color[2] &&
+				image.pixels[offset + 3] === 255
+			) {
+				points.push({ x, y });
+			}
+		}
+	}
+	return points;
+}
+
+/** Squared pixel distance; squared keeps the check free of Math.sqrt. */
+function nearestSquaredDistance(
+	from: readonly PixelPoint[],
+	to: readonly PixelPoint[],
+): number {
+	let best = Number.POSITIVE_INFINITY;
+	for (const a of from) {
+		for (const b of to) {
+			const dx = a.x - b.x;
+			const dy = a.y - b.y;
+			const squared = dx * dx + dy * dy;
+			if (squared < best) best = squared;
+		}
+	}
+	return best;
+}
+
 function fillTextureRect(
 	pixels: Uint8Array,
 	width: number,
@@ -1459,6 +1521,89 @@ export const ENTITY_CASES: readonly EntityCase[] = [
 					["front", "right", "top"],
 				],
 				"face cells per panel",
+			);
+		},
+	},
+	{
+		name: "the hat's top cell meets its front cell along the front-west seam",
+		run(check) {
+			const { layout, texture } = playerTemplate("player_wide");
+			const pixels = texture.pixels.slice();
+			// The hat's top cell is (40,0)-(48,8) and its front cell is
+			// (40,8)-(48,16). Their bottom-left and top-left texels touch the
+			// same front-west corner of the hat, so a red texel on the top
+			// cell's bottom row must render next to a green texel on the
+			// front cell's top row. A 180-degree turn of the top cell puts the
+			// red texel at the back-east corner, far from the green one.
+			paintTexel(pixels, 64, 40, 7, [255, 0, 0]);
+			paintTexel(pixels, 64, 40, 8, [0, 255, 0]);
+			const rendered = renderEntityPreview(
+				layout,
+				{ width: texture.width, height: texture.height, pixels },
+				{ texturePath: "player.png", size: 128 },
+			);
+			const red = pointsOfColor(rendered.png, 128, 0, [255, 0, 0]);
+			const green = pointsOfColor(rendered.png, 128, 0, [0, 255, 0]);
+			check.ok(red.length > 0, "the top-face marker is visible");
+			check.ok(green.length > 0, "the front-face marker is visible");
+			const nearest = nearestSquaredDistance(red, green);
+			check.ok(
+				nearest <= 16,
+				`the top and front markers meet at the front-west seam (at most 4 px apart; squared distance ${nearest}, ${red.length} red vs ${green.length} green pixels)`,
+			);
+		},
+	},
+	{
+		name: "the hat's bottom cell meets its back cell along the bottom-back seam",
+		run(check) {
+			// The four isometric panels all look down, so a standing part never
+			// shows its bottom face. Turn the hat half a turn about x: its
+			// bottom face becomes the visible top face and its back face
+			// becomes the visible front face, while the shared bottom-back edge
+			// stays shared. The red texel is the bottom cell's top-left corner
+			// (west-back) and the green texel is the back cell's bottom-right
+			// corner (west-bottom); a 180-degree turn of the bottom cell would
+			// separate them by the whole face.
+			const { texture } = playerTemplate("player_wide");
+			const pixels = texture.pixels.slice();
+			paintTexel(pixels, 64, 48, 0, [255, 0, 0]);
+			paintTexel(pixels, 64, 63, 15, [0, 255, 0]);
+			const probe = resolveEntityLayoutDocument({
+				format: "mc-asset/entity-layout",
+				version: 1,
+				id: "bottom-back-seam",
+				texture: { width: 64, height: 64 },
+				parts: [
+					{
+						id: "hat",
+						size: [8, 8, 8],
+						uv: [32, 0],
+						origin: [-4, 24, -4],
+						pivot: [0, 28, 0],
+						rotation: [180, 0, 0],
+						inflate: 0.5,
+					},
+				],
+			});
+			const rendered = renderEntityPreview(
+				probe,
+				{ width: 64, height: 64, pixels },
+				{ texturePath: "probe.png", size: 128 },
+			);
+			let nearest = Number.POSITIVE_INFINITY;
+			let visible = false;
+			for (const panel of [0, 3]) {
+				const red = pointsOfColor(rendered.png, 128, panel, [255, 0, 0]);
+				const green = pointsOfColor(rendered.png, 128, panel, [0, 255, 0]);
+				if (red.length === 0 || green.length === 0) continue;
+				visible = true;
+				const squared = nearestSquaredDistance(red, green);
+				if (squared < nearest) nearest = squared;
+			}
+			check.ok(visible, "both seam markers are visible in a south panel");
+			check.ok(
+				nearest <= 16,
+				`the bottom and back markers meet at the bottom-back seam (at most 4 px apart; squared distance ${nearest})`,
 			);
 		},
 	},

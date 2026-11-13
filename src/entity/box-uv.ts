@@ -15,9 +15,9 @@ import type {
  *   |  right  |  front    | left  | back  |
  *   +---------+-----------+-------+-------+
  *
- * The oriented UV corners match Blockbench's `face.uv`; `top`, `bottom`,
- * and `front` sample in reverse on one or both axes because of how the box
- * faces map onto the sheet.
+ * The oriented UV corners match Blockbench's `face.uv`; `top` samples in
+ * reverse on both axes and `bottom` on U because of how the box faces map
+ * onto the sheet.
  *
  * With `mirror`, every face flips horizontally inside its own cell and the
  * right and left cells swap. Biped mobs that paint both limbs from one UV

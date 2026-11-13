@@ -54,8 +54,8 @@ import type { EntityTextureInput } from "./validate.ts";
  *   back  (-z)   s = 1 - x, t = 1 - y
  *   right (-x)   s = z,     t = 1 - y
  *   left  (+x)   s = 1 - z, t = 1 - y
- *   top   (+y)   s = x,     t = z
- *   bottom(-y)   s = x,     t = 1 - z
+ *   top   (+y)   s = 1 - x, t = 1 - z
+ *   bottom(-y)   s = 1 - x, t = z
  *
  * `s` runs from the first U corner to the second, `t` from the first V corner
  * to the second, and the cell stretches across the inflated box exactly as the
@@ -158,6 +158,36 @@ type CornerBits = readonly [x: 0 | 1, y: 0 | 1, z: 0 | 1];
  * The four box corners of one face in (s, t) order: (0,0), (1,0), (1,1), (0,1).
  * Bits select the minimum (0) or maximum (1) corner on each axis, matching the
  * order `cubeCorners` uses.
+ *
+ * Top and bottom are the two faces whose in-cell direction is easy to get
+ * backwards, so both were read from the vanilla cube instead of guessed from
+ * the sheet. Source: the Minecraft Java Edition 26.2 client jar (its
+ * version.json reports id 26.2, build 2026-06-16; the jar is unobfuscated), in
+ * particular `net.minecraft.client.model.geom.ModelPart$Cube`'s constructor
+ * `(int u, int v, float x, float y, float z, float sizeX, float sizeY,
+ * float sizeZ, float growX, float growY, float growZ, boolean mirror,
+ * float uScale, float vScale, Set<Direction>)` and
+ * `ModelPart$Polygon(Vertex[], float u1, float v1, float u2, float v2, ...)`.
+ * `Polygon` maps its vertex list, in order, to the UV corners (u2,v1),
+ * (u1,v1), (u1,v2), (u2,v2).
+ *
+ * The cube's `Direction.UP` polygon (the `maxY` side of the model, which the
+ * living-entity renderer's `scale(-1, -1, 1)` turns into the world's bottom
+ * face) lists its vertices as `(maxX,maxY,minZ)`, `(minX,maxY,minZ)`,
+ * `(minX,maxY,maxZ)`, `(maxX,maxY,maxZ)` and passes the UV bounds
+ * `(u+depth+width, v+depth, u+depth+2*width, v)`; `Polygon` remaps vertex i
+ * in that order to `(uB,vA)`, `(uA,vA)`, `(uA,vB)`, `(uB,vB)` for
+ * `uA = u+depth+width`, `vA = v+depth`, `uB = u+depth+2*width`, `vB = v`.
+ * Through the renderer's world mapping `(x, -y, -z)` the four vertices are
+ * (east,bottom,front), (west,bottom,front), (west,bottom,back),
+ * (east,bottom,back). In the oriented frame the (s, t) order is
+ * (right,top), (left,top), (left,bottom), (right,bottom), which reads
+ * east-back, west-back, west-front, east-front: the bottom cell's left edge
+ * is west and its top edge is back. The `Direction.DOWN` polygon (the world's
+ * top face) gives the top cell the same left-west, top-back orientation:
+ * east-front, west-front, west-back, east-back. That also puts each cell's
+ * front edge on the sheet's bottom edge, so the top cell's bottom row meets
+ * the front cell's top row.
  */
 const FACE_CORNERS: Readonly<
 	Record<
@@ -190,16 +220,16 @@ const FACE_CORNERS: Readonly<
 		[1, 0, 1],
 	],
 	top: [
-		[0, 1, 0],
-		[1, 1, 0],
 		[1, 1, 1],
 		[0, 1, 1],
+		[0, 1, 0],
+		[1, 1, 0],
 	],
 	bottom: [
-		[0, 0, 1],
-		[1, 0, 1],
 		[1, 0, 0],
 		[0, 0, 0],
+		[0, 0, 1],
+		[1, 0, 1],
 	],
 };
 
