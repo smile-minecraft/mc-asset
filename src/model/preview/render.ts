@@ -91,9 +91,12 @@ export type {
  *
  * A recipe-built item model has no `elements` at all: it is a `parent` plus
  * `layer0` .. `layer4` textures, and the client generates its flat geometry
- * from them. The preview generates the same layer planes (`item-layers.ts`)
- * and sends them through the geometry renderer, so a two-dimensional item is
- * drawn and its `display` rotation, scale and translation are visible.
+ * from them. When a display slot, lighting or a tint is requested, the preview
+ * generates the same layer planes (`item-layers.ts`) and sends them through
+ * the geometry renderer, so a two-dimensional item is drawn and its `display`
+ * rotation, scale and translation are visible. Without one of those options
+ * such a model keeps its historical fully transparent image, because that is
+ * what the compatibility renderer produced before item layers existed.
  *
  * The report stays honest: anything not faithfully rendered is listed in
  * `coverage.skipped` (including a panel the content is clipped by), every
@@ -437,16 +440,25 @@ export async function renderModelPreview(
 
 	// A recipe-built item model is `parent` plus `textures.layer0` with no
 	// `elements` of its own; the client generates its flat geometry from the
-	// layer textures. Synthesising the planes here sends them through the same
-	// element, rasterisation and blending pipeline as authored elements, so
-	// the preview draws the item instead of a transparent image that claims
-	// complete coverage. A model that declares `elements` itself — even an
-	// empty array — keeps them; generation only applies when the chain has no
-	// elements at all.
+	// layer textures. The preview synthesises those planes only when one of
+	// the preview features that motivate them is requested: the historical
+	// preview of such a model is a fully transparent image, and a caller that
+	// passes none of the new options keeps that exact output. With a display
+	// slot, lighting or a tint, the planes go through the same element,
+	// rasterisation and blending pipeline as authored elements, so the item is
+	// drawn and its pose is visible. A model that declares `elements` itself —
+	// even an empty array — keeps them; generation only applies when the chain
+	// has no elements at all.
+	const newPreviewOptions =
+		options.display !== undefined ||
+		options.lighting === true ||
+		options.tint !== undefined ||
+		options.tints !== undefined;
 	const noElements = inspection.elementsSource.from === "none";
-	const generatedLayers = noElements
-		? itemLayerElements(inspection.textures)
-		: [];
+	const generatedLayers =
+		noElements && newPreviewOptions
+			? itemLayerElements(inspection.textures)
+			: [];
 	const elements: readonly ModelElementView[] = [
 		...inspection.elements,
 		...generatedLayers,
@@ -455,7 +467,7 @@ export async function renderModelPreview(
 	// only carries a resolution for the model's own textures. A layer that only
 	// a parent declares ends the generated run, so name it instead of returning
 	// a transparent image that claims complete coverage.
-	if (noElements) {
+	if (noElements && newPreviewOptions) {
 		const nextLayer = generatedLayers.length;
 		for (const texture of inspection.inheritedTextures) {
 			if (!isItemLayerName(texture.name)) continue;
@@ -596,11 +608,6 @@ export async function renderModelPreview(
 	// The compatibility renderer keeps its historical report, byte for byte:
 	// `tintindex` is only listed when the geometry renderer runs, which is the
 	// path a new view, a rotated element or a visible translucent face takes.
-	const newPreviewOptions =
-		options.display !== undefined ||
-		options.lighting === true ||
-		options.tint !== undefined ||
-		options.tints !== undefined;
 	let unapplied: string[] = ["display", "lighting"];
 	if (needsGeometry) {
 		unapplied = newPreviewOptions ? [] : unappliedSteps(allFaces);

@@ -172,6 +172,30 @@ export function bandPng(r: number, g: number, b: number, rows = 4): Uint8Array {
 	return encodePng(canvas);
 }
 
+/**
+ * 16x16 texture: a four-row band, blue on the left half and cyan on the right,
+ * transparent below. The two colours make a horizontal mirror visible.
+ */
+export function twoToneBandPng(rows = 4): Uint8Array {
+	const size = 16;
+	const canvas = createCanvas(size, size);
+	const layer = addLayer(canvas, { id: "base" });
+	const pixels = new Uint8Array(size * size * 4);
+	for (let y = 0; y < size; y += 1) {
+		for (let x = 0; x < size; x += 1) {
+			if (y >= rows) continue;
+			const o = (y * size + x) * 4;
+			const left = x < 8;
+			pixels[o] = 0;
+			pixels[o + 1] = left ? 0 : 255;
+			pixels[o + 2] = 255;
+			pixels[o + 3] = 255;
+		}
+	}
+	replaceLayerPixels(canvas, layer.id, pixels);
+	return encodePng(canvas);
+}
+
 export function memoryContext(
 	files: Record<string, Uint8Array>,
 ): ModelResolutionContext {

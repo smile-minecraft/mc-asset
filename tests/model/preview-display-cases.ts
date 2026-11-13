@@ -15,6 +15,10 @@ import {
 	parseTintColor,
 	shadeForNormal,
 } from "../../src/model/preview/display.ts";
+import {
+	ITEM_LAYER_Z_STEP,
+	itemLayerElements,
+} from "../../src/model/preview/item-layers.ts";
 import { renderModelPreview } from "../../src/model/preview/render.ts";
 import { buildParentModel } from "../../src/pack/item-templates.ts";
 import { captureStreams } from "../cli/optimize-model-cases.ts";
@@ -36,6 +40,7 @@ import {
 	sha256,
 	solidPng,
 	splitPng,
+	twoToneBandPng,
 	withTempRoot,
 } from "./preview-cases.ts";
 
@@ -1905,6 +1910,371 @@ export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
 						entry.target === "layer0",
 				),
 				"the undrawn inherited layer is named",
+			);
+		},
+	},
+	{
+		name: "a recipe-built item model keeps its historical transparent output without new options",
+		async run(check) {
+			const modelPath = "assets/demo/models/item/ruby.json";
+			const context = memoryContext({
+				"assets/demo/textures/item/ruby.png": splitPng(),
+			});
+			const text = JSON.stringify({
+				parent: "minecraft:item/generated",
+				textures: { layer0: "demo:item/ruby" },
+			});
+			const legacy = await renderModelPreview(text, {
+				path: modelPath,
+				context,
+				size: 64,
+			});
+			// 77c78fd synthesised no geometry for a model with no elements: the
+			// whole 192x64 image stayed transparent. The hash is that release's
+			// byte-exact output for this input, so an accidentally generated
+			// layer is caught even though every pixel is transparent.
+			check.equal(
+				sha256(legacy.png),
+				"2e2042bece3f9ace257124fb50362318091fa9315bc0647c1355bf40fba579f1",
+				"the no-option PNG matches the pre-layer release",
+			);
+			check.deepEqual(
+				legacy.report.range,
+				{ min: [0, 0, 0], max: [0, 0, 0], pixelsPerUnit: 1 },
+				"the empty range of the compatibility renderer",
+			);
+			check.deepEqual(
+				legacy.report.unapplied,
+				["display", "lighting"],
+				"the historical unapplied list",
+			);
+			check.equal(
+				legacy.report.lighting,
+				undefined,
+				"no lighting block without --lighting",
+			);
+			check.equal(
+				legacy.report.display,
+				undefined,
+				"no display block without --display",
+			);
+			check.equal(
+				legacy.report.tint,
+				undefined,
+				"no tint block without a tint",
+			);
+			check.equal(
+				legacy.report.coverage.status,
+				"complete",
+				"no new skip is reported",
+			);
+			check.deepEqual(
+				legacy.report.warnings,
+				[],
+				"the legacy report carries no warning",
+			);
+
+			const gui = await renderModelPreview(text, {
+				path: modelPath,
+				context,
+				size: 64,
+				display: "gui",
+			});
+			const guiPixels = flatOf(gui.png);
+			check.deepEqual(
+				[guiPixels.width, guiPixels.height],
+				[64, 64],
+				"a display slot produces one panel",
+			);
+			assertRgba(
+				check,
+				guiPixels.flat,
+				guiPixels.width,
+				20,
+				32,
+				[255, 0, 0, 255],
+				"--display gui draws layer0's left half",
+			);
+			assertRgba(
+				check,
+				guiPixels.flat,
+				guiPixels.width,
+				43,
+				32,
+				[0, 255, 0, 255],
+				"--display gui draws layer0's right half",
+			);
+			check.equal(
+				gui.report.coverage.status,
+				"complete",
+				"the drawn plane covers the display panel",
+			);
+
+			const lit = await renderModelPreview(text, {
+				path: modelPath,
+				context,
+				size: 64,
+				lighting: true,
+			});
+			const litPixels = flatOf(lit.png);
+			check.ok(
+				panelBox(
+					litPixels.flat,
+					litPixels.width,
+					0,
+					0,
+					litPixels.width - 1,
+					litPixels.height - 1,
+				).count > 0,
+				"--lighting draws the layer plane",
+			);
+
+			const tinted = await renderModelPreview(text, {
+				path: modelPath,
+				context,
+				size: 64,
+				tint: [0x80, 0xc0, 0x40],
+			});
+			check.equal(
+				tinted.report.tint?.appliedFaces,
+				2,
+				"both faces of the single layer are tinted",
+			);
+			check.equal(
+				tinted.report.tint?.uncoloredFaces,
+				0,
+				"no tintindex face is left uncoloured",
+			);
+		},
+	},
+	{
+		name: "generated item layers render both faces with the upper layer nearest from either side",
+		async run(check) {
+			const modelPath = "assets/demo/models/item/ruby.json";
+			const context = memoryContext({
+				"assets/demo/textures/item/ruby.png": splitPng(),
+				"assets/demo/textures/item/ruby_top.png": twoToneBandPng(),
+			});
+			const model = (display?: unknown): string =>
+				JSON.stringify({
+					parent: "minecraft:item/generated",
+					textures: {
+						layer0: "demo:item/ruby",
+						layer1: "demo:item/ruby_top",
+					},
+					...(display === undefined ? {} : { display }),
+				});
+			const options = { path: modelPath, context, size: 64 as const };
+			const front = await renderModelPreview(
+				model({ gui: { rotation: [0, 0, 0] } }),
+				{ ...options, display: "gui" },
+			);
+			const back = await renderModelPreview(
+				model({ gui: { rotation: [0, 180, 0] } }),
+				{ ...options, display: "gui" },
+			);
+			const fixed = await renderModelPreview(model(), {
+				...options,
+				display: "fixed",
+			});
+
+			const frontPixels = flatOf(front.png);
+			assertRgba(
+				check,
+				frontPixels.flat,
+				frontPixels.width,
+				20,
+				18,
+				[0, 0, 255, 255],
+				"front: layer1's blue half is on the left",
+			);
+			assertRgba(
+				check,
+				frontPixels.flat,
+				frontPixels.width,
+				43,
+				18,
+				[0, 255, 255, 255],
+				"front: layer1's cyan half is on the right",
+			);
+			assertRgba(
+				check,
+				frontPixels.flat,
+				frontPixels.width,
+				20,
+				32,
+				[255, 0, 0, 255],
+				"front: layer0 red shows below the band",
+			);
+			assertRgba(
+				check,
+				frontPixels.flat,
+				frontPixels.width,
+				43,
+				32,
+				[0, 255, 0, 255],
+				"front: layer0 green shows below the band",
+			);
+
+			// The vanilla north UV attaches texel u = 0 to the same model-space x
+			// as the south face, so the back is the sprite's mirrored side. The
+			// upper layer is still nearest: the asymmetric band proves the north
+			// face is drawn and not a duplicated south face.
+			const backPixels = flatOf(back.png);
+			assertRgba(
+				check,
+				backPixels.flat,
+				backPixels.width,
+				20,
+				18,
+				[0, 255, 255, 255],
+				"back: layer1's cyan half is on the left",
+			);
+			assertRgba(
+				check,
+				backPixels.flat,
+				backPixels.width,
+				43,
+				18,
+				[0, 0, 255, 255],
+				"back: layer1's blue half is on the right",
+			);
+			assertRgba(
+				check,
+				backPixels.flat,
+				backPixels.width,
+				20,
+				32,
+				[0, 255, 0, 255],
+				"back: layer0 green shows below the band",
+			);
+			assertRgba(
+				check,
+				backPixels.flat,
+				backPixels.width,
+				43,
+				32,
+				[255, 0, 0, 255],
+				"back: layer0 red shows below the band",
+			);
+			check.equal(
+				sha256(back.png),
+				sha256(fixed.png),
+				"fixed uses item/generated's 180 degree rotation and renders the same bytes as gui 180",
+			);
+			check.equal(
+				fixed.report.display?.from,
+				"minecraft:item/generated",
+				"fixed transform comes from the builtin template",
+			);
+			check.deepEqual(
+				[...(fixed.report.display?.rotation ?? [])],
+				[0, 180, 0],
+				"fixed rotation",
+			);
+			check.equal(
+				fixed.report.coverage.status,
+				"complete",
+				"both sides resolve and the stack is covered",
+			);
+
+			const tinted = await renderModelPreview(
+				model({ gui: { rotation: [0, 180, 0] } }),
+				{
+					...options,
+					display: "gui",
+					tints: { "0": [0xff, 0xff, 0xff], "1": [0xff, 0xff, 0x00] },
+				},
+			);
+			const tintedPixels = flatOf(tinted.png);
+			assertRgba(
+				check,
+				tintedPixels.flat,
+				tintedPixels.width,
+				20,
+				18,
+				[0, 255, 0, 255],
+				"tinted back: cyan x yellow",
+			);
+			assertRgba(
+				check,
+				tintedPixels.flat,
+				tintedPixels.width,
+				43,
+				18,
+				[0, 0, 0, 255],
+				"tinted back: blue x yellow",
+			);
+			check.equal(
+				tinted.report.tint?.appliedFaces,
+				4,
+				"both faces of both layers carry a tint index",
+			);
+			check.equal(
+				tinted.report.tint?.uncoloredFaces,
+				0,
+				"every tintindex face gets a colour",
+			);
+
+			// The layer geometry itself: symmetric around z = 8, double-sided,
+			// with the vanilla UVs and the layer's tint index on both faces.
+			const layerTexture = (name: string) => ({
+				name,
+				resolution: {
+					status: "resolved" as const,
+					resolvedTo: `demo:item/${name}`,
+					via: [] as const,
+				},
+			});
+			const layers = itemLayerElements([
+				layerTexture("layer0"),
+				layerTexture("layer1"),
+			]);
+			check.equal(layers.length, 2, "two layers produce two elements");
+			check.deepEqual(
+				layers.map((element) => element.from),
+				[
+					[0, 0, 7.5],
+					[0, 0, 7.5 - ITEM_LAYER_Z_STEP],
+				],
+				"each layer grows towards the back of the centre plane",
+			);
+			check.deepEqual(
+				layers.map((element) => element.to),
+				[
+					[16, 16, 8.5],
+					[16, 16, 8.5 + ITEM_LAYER_Z_STEP],
+				],
+				"each layer grows towards the front of the centre plane",
+			);
+			check.deepEqual(
+				layers.map((element) => element.faces.map((face) => face.face)),
+				[
+					["south", "north"],
+					["south", "north"],
+				],
+				"every layer declares both sides",
+			);
+			check.deepEqual(
+				layers.map((element) => element.faces.map((face) => face.uv)),
+				[
+					[
+						[0, 0, 16, 16],
+						[16, 0, 0, 16],
+					],
+					[
+						[0, 0, 16, 16],
+						[16, 0, 0, 16],
+					],
+				],
+				"the vanilla south and north UVs",
+			);
+			check.deepEqual(
+				layers.flatMap((element) =>
+					element.faces.map((face) => face.tintindex),
+				),
+				[0, 0, 1, 1],
+				"both faces carry the layer's tint index",
 			);
 		},
 	},
