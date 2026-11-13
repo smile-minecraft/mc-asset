@@ -1,13 +1,14 @@
 import { z } from "zod";
 
 /**
- * Frozen MCP tool surface: twenty-eight tools for agent authoring — the
+ * Frozen MCP tool surface: twenty-nine tools for agent authoring — the
  * intake and inspection pair, raster transforms, palette and quantization,
  * the deterministic pixelize pipeline, procedural generation, tiling and
  * preview, animation sheets, single-asset and whole-pack validation, model
  * and `.mcmeta` authoring, style presets and palette export, resource-pack
- * project authoring, particle definition generation, and PNG comparison.
- * `MCP_TOOL_NAMES` below is the registry this count is checked against.
+ * project authoring, particle definition generation, icon fonts, and PNG
+ * comparison. `MCP_TOOL_NAMES` below is the registry this count is checked
+ * against.
  * The product document once listed `edit_asset` for the batch-edit slot, and
  * §90 wins, so the frozen name is `apply_asset_operations`. The input
  * shapes below are the frozen contract; handler behavior lives in
@@ -43,6 +44,7 @@ export const MCP_TOOL_NAMES = [
 	"style_asset",
 	"pack_asset",
 	"particle_asset",
+	"font_asset",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -678,6 +680,9 @@ export type McmetaAssetInput = z.infer<z.ZodObject<typeof mcmetaAssetInput>>;
 export type ModelAssetInput = z.infer<z.ZodObject<typeof modelAssetInput>>;
 export type ParticleAssetInput = z.infer<
 	z.ZodObject<typeof particleAssetInput>
+>;
+export type FontAssetInput = z.infer<
+	z.ZodObject<typeof TOOL_INPUT_SCHEMAS.font_asset>
 >;
 
 export const TOOL_INPUT_SCHEMAS = {
@@ -1474,5 +1479,56 @@ export const TOOL_INPUT_SCHEMAS = {
 			.min(1)
 			.optional()
 			.describe("check only: release version override."),
+	},
+	font_asset: {
+		specPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Font spec JSON path; a relative icon path inside it resolves against the spec directory. Exactly one of specPath and spec.",
+			),
+		spec: z
+			.record(z.unknown())
+			.optional()
+			.describe(
+				"Inline font spec object with the same fields as the document (formatVersion, namespace, id, icons at least; height and ascent are top-level defaults or per-icon values). Exactly one of specPath and spec.",
+			),
+		outputPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Explicit font definition .json output path. When omitted the definition text returns in the result and nothing is written.",
+			),
+		atlasPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Explicit atlas .png output path for a spec with one height/ascent group. When omitted the PNG bytes embed as pngBase64.",
+			),
+		atlasDirPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Explicit directory receiving one atlas .png per height/ascent group, each named from its texture location. Use instead of atlasPath when the spec mixes geometries.",
+			),
+		tablePath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Explicit icon table .json output path. When omitted the table text returns in the result.",
+			),
+		force: z
+			.boolean()
+			.optional()
+			.describe("Replace existing output files as a whole."),
+		mkdir: z
+			.boolean()
+			.optional()
+			.describe("Create missing parent directories."),
 	},
 } satisfies Record<McpToolName, Record<string, z.ZodTypeAny>>;

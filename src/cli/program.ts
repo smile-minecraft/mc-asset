@@ -14,6 +14,7 @@ import { type AnimateOptions, runAnimate } from "./cmd-animate.ts";
 import { type BuildOptions, runBuild } from "./cmd-build.ts";
 import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
 import { type CompareCliOptions, runCompare } from "./cmd-compare.ts";
+import { type FontCliOptions, runFont } from "./cmd-font.ts";
 import { type GenerateOptions, runGenerate } from "./cmd-generate.ts";
 import { type GuiScaleOptions, runGuiScale } from "./cmd-gui-scale.ts";
 import { type ImportOptions, runImport } from "./cmd-import.ts";
@@ -1774,6 +1775,29 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			);
 		});
 	}
+
+	program
+		.command("font <spec>")
+		.description(
+			"Lay icon images into grid-aligned bitmap font atlases and write the font definition, one atlas PNG per height/ascent group, and the icon-to-character table.",
+		)
+		.option("--output <path>", "Font definition .json output path (required).")
+		.option("--atlas <path>", "Atlas .png output path; one atlas group only.")
+		.option(
+			"--output-dir <dir>",
+			"Directory receiving one atlas .png per height/ascent group.",
+		)
+		.option(
+			"--table <path>",
+			"Icon-to-character table .json output path (required).",
+		)
+		.option("--force", "Allow overwriting existing output files.")
+		.option("--mkdir", "Create missing parent directories.")
+		.action(async (spec: string, options: FontCliOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runFont(spec, options, globals.json === true, streams);
+			process.exitCode = code;
+		});
 
 	return program;
 }

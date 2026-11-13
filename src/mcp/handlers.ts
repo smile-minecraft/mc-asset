@@ -28,6 +28,7 @@ import {
 	restoreUnselectedPixels,
 	snapshotLayerBytes,
 } from "../cli/canvas-input.ts";
+import { runFontRequest } from "../cli/cmd-font.ts";
 import { generateParticleAsset } from "../cli/cmd-particle.ts";
 import { resolveStyleFamilyRamps } from "../cli/cmd-recolor.ts";
 import { writeStyleFile, writeStylePalette } from "../cli/cmd-style.ts";
@@ -173,6 +174,7 @@ import { validateCanvas } from "../validate/checks.ts";
 import { scanPack } from "../validate/pack.ts";
 import type {
 	CompareAssetsInput,
+	FontAssetInput,
 	McmetaAssetInput,
 	ParticleAssetInput,
 	TOOL_INPUT_SCHEMAS,
@@ -3267,6 +3269,38 @@ export async function handleParticleAsset(
 			mkdir: args.mkdir === true,
 		});
 		return textResult({ ...report });
+	} catch (error) {
+		return errorResult(error);
+	}
+}
+
+/**
+ * font_asset: build one icon font from a spec document. The atlases, the
+ * font definition, and the icon table come from the same `runFontRequest`
+ * pipeline the CLI uses, so the embedded bytes and the written files are
+ * identical. Without an explicit path an artifact is embedded instead of
+ * written; a directory sink covers a spec with several height/ascent
+ * groups. A rejected spec, a code-point collision, or an over-tall icon
+ * refuses before any output is planned.
+ */
+export async function handleFontAsset(
+	args: FontAssetInput,
+): Promise<McpTextResult> {
+	try {
+		const outcome = await runFontRequest({
+			...(args.specPath === undefined ? {} : { specPath: args.specPath }),
+			...(args.spec === undefined ? {} : { spec: args.spec }),
+			...(args.outputPath === undefined ? {} : { outputPath: args.outputPath }),
+			...(args.atlasPath === undefined ? {} : { atlasPath: args.atlasPath }),
+			...(args.atlasDirPath === undefined
+				? {}
+				: { atlasDirPath: args.atlasDirPath }),
+			...(args.tablePath === undefined ? {} : { tablePath: args.tablePath }),
+			...(args.force === undefined ? {} : { force: args.force }),
+			...(args.mkdir === undefined ? {} : { mkdir: args.mkdir }),
+			requireArtifactPaths: false,
+		});
+		return textResult({ ...outcome.result });
 	} catch (error) {
 		return errorResult(error);
 	}

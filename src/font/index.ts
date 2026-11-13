@@ -1,0 +1,25 @@
+export {
+	type FontAtlas,
+	type FontAtlasPlan,
+	type FontBitmapProvider,
+	type FontDefinition,
+	type FontGlyphSource,
+	type FontPlan,
+	type FontPlanGlyph,
+	type FontProvider,
+	type FontReferenceProvider,
+	type FontSpaceProvider,
+	type FontTable,
+	type FontTableIcon,
+	planFont,
+} from "./plan.ts";
+export {
+	FONT_PUA_FIRST,
+	FONT_PUA_LAST,
+	FONT_SPEC_FORMAT_VERSION,
+	type FontSpace,
+	type FontSpec,
+	type FontSpecIcon,
+	type FontSpecParseOptions,
+	parseFontSpec,
+} from "./spec.ts";

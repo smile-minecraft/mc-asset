@@ -7,7 +7,7 @@ export interface McpToolDefinition {
 }
 
 /**
- * Frozen tool surface: the twenty-eight names in `MCP_TOOL_NAMES`, each with
+ * Frozen tool surface: the twenty-nine names in `MCP_TOOL_NAMES`, each with
  * its final description and input schema. Descriptions state the read/write
  * contract so agents pick batch or grid paths instead of per-pixel calls.
  */
@@ -179,5 +179,11 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 		description:
 			"Generate a particle definition (assets/<namespace>/particles/<id>.json) and its frame sprites (assets/<namespace>/textures/particle/<prefix>_<n>.png) from a frames directory or one PNG/.mcpx frame. Frames are ordered by UTF-8 file-name bytes, never readdir order; textures[] entries are namespaced paths without .png or the textures/particle/ prefix. Every target is checked before the first write, and an occupied path refuses the whole batch unless force is true. The tool cannot add new particle types; a pack only overrides existing ones.",
 		inputSchema: TOOL_INPUT_SCHEMAS.particle_asset,
+	},
+	{
+		name: "font_asset",
+		description:
+			"Lay icon images (PNG or .mcpx) into grid-aligned bitmap font atlases and build the font definition (one bitmap provider per height/ascent group, plus optional space and reference providers) and the icon-to-character table. Each icon may set its own height and ascent; icons that share a pair share one atlas, and a spec with several pairs writes one atlas per pair. Icons are sorted by name and code points are allocated deterministically, so shuffled input produces byte-identical artifacts. Every chars row is padded to the column count with U+0000, ascent may be negative, and space advances are signed. A duplicate code point, an ascent above its height, or an over-tall icon is refused before anything is written.",
+		inputSchema: TOOL_INPUT_SCHEMAS.font_asset,
 	},
 ];
