@@ -26,6 +26,9 @@ export const LOCK_ENTRY_KINDS = [
 	"entityTemplateSource",
 	"equipmentDefinition",
 	"equipmentTexture",
+	"fontDefinition",
+	"fontAtlas",
+	"fontTable",
 ] as const;
 
 /** One output family a lock entry can name. */

@@ -11,7 +11,8 @@
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { addLayer, createCanvas, replaceLayerPixels } from "../core/canvas.ts";
 import { McAssetError } from "../core/errors.ts";
 import {
 	canonicalEntityLayoutId,
@@ -20,12 +21,18 @@ import {
 	resolveEntityLayoutDocument,
 } from "../entity/index.ts";
 import { buildEntityTemplate } from "../entity/template.ts";
+import type { EquipmentLayerRequest } from "../equipment/index.ts";
+import { planEquipmentAsset } from "../equipment/index.ts";
 import {
-	type EquipmentLayerRequest,
-	planEquipmentAsset,
-} from "../equipment/index.ts";
+	type FontGlyphSource,
+	type FontSpec,
+	type FontSpecIcon,
+	parseFontSpec,
+	planFont,
+} from "../font/index.ts";
+import { decodeImage } from "../io/decode.ts";
 import { encodePng } from "../io/png.ts";
-import { serializeMcpx } from "../mcpx/index.ts";
+import { parseMcpx, serializeMcpx } from "../mcpx/index.ts";
 import { isJsonObject, isRelativeProjectPath } from "./document.ts";
 import type { RecipeStep } from "./recipe.ts";
 
@@ -33,6 +40,7 @@ import type { RecipeStep } from "./recipe.ts";
 export const GENERATED_STEP_TYPES: ReadonlySet<string> = new Set([
 	"entityTemplate",
 	"equipment",
+	"font",
 ]);
 
 /** Lock kinds a generator-backed step writes. */
@@ -40,7 +48,10 @@ export type GeneratedOutputKind =
 	| "entityTemplate"
 	| "entityTemplateSource"
 	| "equipmentDefinition"
-	| "equipmentTexture";
+	| "equipmentTexture"
+	| "fontDefinition"
+	| "fontAtlas"
+	| "fontTable";
 
 /** The file extension each generated family writes. */
 const EXTENSION_BY_KIND: Readonly<
@@ -50,6 +61,9 @@ const EXTENSION_BY_KIND: Readonly<
 	entityTemplateSource: ".mcpx",
 	equipmentDefinition: ".json",
 	equipmentTexture: ".png",
+	fontDefinition: ".json",
+	fontAtlas: ".png",
+	fontTable: ".json",
 };
 
 /** One file a step produces, with the bytes fixed before any write. */
@@ -127,6 +141,13 @@ const EQUIPMENT_LAYER_FIELDS: ReadonlySet<string> = new Set([
 
 const EQUIPMENT_DYEABLE_FIELDS: ReadonlySet<string> = new Set([
 	"colorWhenUndyed",
+]);
+
+const FONT_FIELDS: ReadonlySet<string> = new Set([
+	"type",
+	"spec",
+	"table",
+	"override",
 ]);
 
 const TEXT_ENCODER = new TextEncoder();
@@ -542,6 +563,168 @@ function planEquipment(context: GeneratedStepContext): GeneratedStepPlan {
 	return { outputs, inputs: [] };
 }
 
+/** A bitmap atlas location names its own path inside the pack. */
+function atlasLocationToAssets(texture: string): string {
+	const at = texture.indexOf(":");
+	return `assets/${texture.slice(0, at)}/textures/${texture.slice(at + 1)}`;
+}
+
+/** Load one icon the way `font` does: `.mcpx` as editable text, anything else through the raster decoder. */
+async function loadFontIcon(
+	icon: FontSpecIcon,
+	context: GeneratedStepContext,
+): Promise<{ source: FontGlyphSource; input: GeneratedInput }> {
+	const path = icon.path;
+	let bytes: Uint8Array;
+	try {
+		bytes = new Uint8Array(readFileSync(path));
+	} catch {
+		throw new McAssetError(
+			"RECIPE_SOURCE_MISSING",
+			`Source file not found: ${path}`,
+			{
+				path: icon.path,
+				targetId: context.targetId,
+				stepType: context.step.type,
+				stepIndex: context.stepIndex,
+				field: `icons.${icon.name}`,
+			},
+		);
+	}
+	let canvas: FontGlyphSource["canvas"];
+	if (path.toLowerCase().endsWith(".mcpx")) {
+		let text: string;
+		try {
+			text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+		} catch {
+			stepFailure(
+				context,
+				`icons.${icon.name}`,
+				`icon "${icon.name}" is not valid UTF-8: ${path}.`,
+			);
+		}
+		try {
+			canvas = parseMcpx(text);
+		} catch (error) {
+			translateGeneratorFailure(error, context);
+		}
+	} else {
+		let decoded: Awaited<ReturnType<typeof decodeImage>>;
+		try {
+			decoded = await decodeImage(bytes);
+		} catch (error) {
+			translateGeneratorFailure(error, context);
+		}
+		const created = createCanvas(decoded.width, decoded.height);
+		const layer = addLayer(created, { id: "base" });
+		replaceLayerPixels(created, layer.id, decoded.pixels);
+		canvas = created;
+	}
+	return {
+		source: { name: icon.name, canvas },
+		input: {
+			ref: `font-icon:${icon.name}`,
+			sha256: sha256Hex(bytes),
+		},
+	};
+}
+
+async function planFontStep(
+	context: GeneratedStepContext,
+): Promise<GeneratedStepPlan> {
+	const step = context.step;
+	assertStepFields(step, FONT_FIELDS, context);
+	parseOverride(step.override, context);
+	const declared = step.spec;
+	if (typeof declared !== "string" || declared.trim() === "") {
+		stepFailure(
+			context,
+			"spec",
+			`font step field 'spec' must be a path to a font spec document for target '${context.targetId}'.`,
+		);
+	}
+	const specPath = resolve(context.recipeDir, declared);
+	const specText = readSourceText(specPath, declared, context, "spec");
+	let raw: unknown;
+	try {
+		raw = JSON.parse(specText) as unknown;
+	} catch {
+		throw new McAssetError(
+			"RECIPE_INVALID",
+			`Font spec is not valid JSON: ${declared}.`,
+			{
+				path: declared,
+				targetId: context.targetId,
+				stepType: context.step.type,
+				stepIndex: context.stepIndex,
+				field: "spec",
+			},
+		);
+	}
+	let spec: FontSpec;
+	try {
+		spec = parseFontSpec(raw, {
+			baseDir: dirname(specPath),
+			source: declared,
+		});
+	} catch (error) {
+		translateGeneratorFailure(error, context);
+	}
+	if (spec.namespace !== context.namespace) {
+		stepFailure(
+			context,
+			"spec",
+			`font spec declares namespace '${spec.namespace}', which differs from the project namespace '${context.namespace}'.`,
+		);
+	}
+	const inputs: GeneratedInput[] = [
+		{
+			ref: `font-spec:${declared}`,
+			sha256: sha256Hex(TEXT_ENCODER.encode(specText)),
+		},
+	];
+	const sources: FontGlyphSource[] = [];
+	for (const icon of spec.icons) {
+		const loaded = await loadFontIcon(icon, context);
+		inputs.push(loaded.input);
+		sources.push(loaded.source);
+	}
+	let plan: ReturnType<typeof planFont>;
+	try {
+		plan = planFont(spec, sources);
+	} catch (error) {
+		translateGeneratorFailure(error, context);
+	}
+	const outputs: GeneratedOutput[] = [
+		generatedOutput(
+			`assets/${spec.namespace}/font/${spec.id}.json`,
+			"fontDefinition",
+			TEXT_ENCODER.encode(plan.definitionText),
+		),
+	];
+	for (const atlas of plan.atlases) {
+		outputs.push(
+			generatedOutput(
+				atlasLocationToAssets(atlas.texture),
+				"fontAtlas",
+				atlas.atlas.png,
+			),
+		);
+	}
+	const tablePath =
+		step.table === undefined
+			? `assets/${spec.namespace}/font/${spec.id}.table.json`
+			: declaredOutputPath(step.table, "table", context, ".json");
+	outputs.push(
+		generatedOutput(
+			tablePath,
+			"fontTable",
+			TEXT_ENCODER.encode(plan.tableText),
+		),
+	);
+	return { outputs, inputs };
+}
+
 /** Plan one generator-backed step; every refusal happens before a write. */
 export async function planGeneratedStep(
 	context: GeneratedStepContext,
@@ -551,6 +734,9 @@ export async function planGeneratedStep(
 	}
 	if (context.step.type === "equipment") {
 		return planEquipment(context);
+	}
+	if (context.step.type === "font") {
+		return planFontStep(context);
 	}
 	throw new McAssetError(
 		"RECIPE_INVALID",

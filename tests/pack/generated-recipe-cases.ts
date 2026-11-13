@@ -4,12 +4,20 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	addLayer,
+	createCanvas,
+	replaceLayerPixels,
+} from "../../src/core/canvas.ts";
+import {
 	getEntityLayoutDocument,
 	resolveEntityLayoutDocument,
 } from "../../src/entity/index.ts";
 import { buildEntityTemplate } from "../../src/entity/template.ts";
 import { planEquipmentAsset } from "../../src/equipment/index.ts";
+import { parseFontSpec, planFont } from "../../src/font/index.ts";
+import { decodeImage } from "../../src/io/decode.ts";
 import { encodePng } from "../../src/io/png.ts";
+import { parseMcpx } from "../../src/mcpx/index.ts";
 import { executePackBuild, planPackBuild } from "../../src/pack/build.ts";
 import { initializePackProject } from "../../src/pack/init.ts";
 import { parseLockText } from "../../src/pack/lock.ts";
@@ -137,6 +145,95 @@ function entityRecipe(
 		id: "hero-template",
 		targets: [{ id: "hero", steps }],
 	};
+}
+
+const GEM_ICON = `mcpx 1
+
+[canvas]
+width = 4
+height = 4
+
+[palette]
+. = transparent
+G = #FFD700FF
+
+[layer base]
+visible = true
+opacity = 1
+
+[grid]
+.GG.
+GGGG
+GGGG
+.GG.
+`;
+
+function fontSpec(
+	icons: Array<Record<string, unknown>>,
+	extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+	return {
+		formatVersion: 1,
+		namespace: NAMESPACE,
+		id: "icons",
+		height: 4,
+		ascent: 4,
+		texture: `${NAMESPACE}:font/icons.png`,
+		icons,
+		...extra,
+	};
+}
+
+async function writeFontSpec(
+	projectDir: string,
+	spec: Record<string, unknown>,
+): Promise<void> {
+	await writeText(projectDir, "recipes/sources/icon_gem.mcpx", GEM_ICON);
+	await writeText(
+		projectDir,
+		"recipes/sources/icons.font.json",
+		`${JSON.stringify(spec, null, 2)}\n`,
+	);
+}
+
+function fontRecipe(): Record<string, unknown> {
+	return {
+		formatVersion: 3,
+		id: "font-spec",
+		targets: [
+			{
+				id: "icons",
+				steps: [{ type: "font", spec: "sources/icons.font.json" }],
+			},
+		],
+	};
+}
+
+/** The exact plan the standalone `font` command produces for the same files. */
+async function expectedFontPlan(projectDir: string, spec: unknown) {
+	const parsed = parseFontSpec(spec, {
+		baseDir: join(projectDir, "recipes", "sources"),
+		source: "icons.font.json",
+	});
+	const sources: Array<{
+		name: string;
+		canvas: import("../../src/core/types.ts").PixelCanvas;
+	}> = [];
+	for (const icon of parsed.icons) {
+		if (icon.path.toLowerCase().endsWith(".mcpx")) {
+			sources.push({
+				name: icon.name,
+				canvas: parseMcpx(await readFile(icon.path, "utf8")),
+			});
+			continue;
+		}
+		const decoded = await decodeImage(await readFile(icon.path));
+		const canvas = createCanvas(decoded.width, decoded.height);
+		const layer = addLayer(canvas, { id: "base" });
+		replaceLayerPixels(canvas, layer.id, decoded.pixels);
+		sources.push({ name: icon.name, canvas });
+	}
+	return planFont(parsed, sources);
 }
 
 export const GENERATED_RECIPE_CASES: readonly GeneratedCase[] = [
@@ -643,6 +740,223 @@ export const GENERATED_RECIPE_CASES: readonly GeneratedCase[] = [
 				assert.deepEqual(refusal.details?.conflicts, [
 					{ path: `pack/${texturePath}`, reason: "own-modified" },
 				]);
+			});
+		},
+	},
+	{
+		name: "a font step writes the definition, atlas, and table",
+		async run() {
+			await withProject(async (projectDir) => {
+				const spec = fontSpec([{ name: "gem", path: "icon_gem.mcpx" }]);
+				await writeFontSpec(projectDir, spec);
+				await writeRecipe(projectDir, "font", fontRecipe());
+				await build(projectDir);
+				const plan = await expectedFontPlan(projectDir, spec);
+				const cases: Array<{
+					path: string;
+					kind: string;
+					expected: Uint8Array | string;
+				}> = [
+					{
+						path: `assets/${NAMESPACE}/font/icons.json`,
+						kind: "fontDefinition",
+						expected: plan.definitionText,
+					},
+					{
+						path: `assets/${NAMESPACE}/textures/font/icons.png`,
+						kind: "fontAtlas",
+						expected: plan.atlases[0]?.atlas.png as Uint8Array,
+					},
+					{
+						path: `assets/${NAMESPACE}/font/icons.table.json`,
+						kind: "fontTable",
+						expected: plan.tableText,
+					},
+				];
+				const lock = parseLockText(
+					await readFile(join(projectDir, "mc-asset.lock.json"), "utf8"),
+				);
+				for (const entry of cases) {
+					const bytes = await bytesAt(onDisk(projectDir, entry.path));
+					assert.ok(bytes, `${entry.path} exists`);
+					assert.equal(
+						sha256(bytes),
+						sha256(
+							typeof entry.expected === "string"
+								? new TextEncoder().encode(entry.expected)
+								: entry.expected,
+						),
+						`${entry.path} is the standalone font plan's bytes`,
+					);
+					assert.equal(
+						lock.outputs[`pack/${entry.path}`]?.kind,
+						entry.kind,
+						`${entry.path} is locked as ${entry.kind}`,
+					);
+				}
+
+				const second = await planPackBuild(projectPath(projectDir));
+				assert.ok(
+					second.outputs.every((output) => output.judgement === "own-clean"),
+					"a rerun sees only own-clean outputs",
+				);
+			});
+		},
+	},
+	{
+		name: "a font step with two geometries writes two atlases and both providers",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeText(projectDir, "recipes/sources/icon_gem.mcpx", GEM_ICON);
+				await writeText(
+					projectDir,
+					"recipes/sources/icon_tall.mcpx",
+					`mcpx 1
+
+[canvas]
+width = 8
+height = 8
+
+[palette]
+. = transparent
+T = #FF8800FF
+
+[layer base]
+visible = true
+opacity = 1
+
+[grid]
+..TTTT..
+.TTTTTT.
+TTTTTTTT
+TTTTTTTT
+TTTTTTTT
+TTTTTTTT
+.TTTTTT.
+..TTTT..
+`,
+				);
+				const spec = {
+					formatVersion: 1,
+					namespace: NAMESPACE,
+					id: "icons",
+					texture: `${NAMESPACE}:font/icons.png`,
+					icons: [
+						{ name: "gem", path: "icon_gem.mcpx", height: 4, ascent: 4 },
+						{ name: "tall", path: "icon_tall.mcpx", height: 8, ascent: 8 },
+					],
+				};
+				await writeText(
+					projectDir,
+					"recipes/sources/icons.font.json",
+					`${JSON.stringify(spec, null, 2)}\n`,
+				);
+				await writeRecipe(projectDir, "font", fontRecipe());
+				await build(projectDir);
+				for (const path of [
+					`assets/${NAMESPACE}/font/icons.json`,
+					`assets/${NAMESPACE}/textures/font/icons_h4a4.png`,
+					`assets/${NAMESPACE}/textures/font/icons_h8a8.png`,
+					`assets/${NAMESPACE}/font/icons.table.json`,
+				]) {
+					assert.ok(await bytesAt(onDisk(projectDir, path)), `${path} exists`);
+				}
+			});
+		},
+	},
+	{
+		name: "a font spec with a foreign namespace writes nothing",
+		async run() {
+			await withProject(async (projectDir) => {
+				const spec = {
+					...fontSpec([{ name: "gem", path: "icon_gem.mcpx" }]),
+					namespace: "elsewhere",
+				};
+				await writeFontSpec(projectDir, spec);
+				await writeRecipe(projectDir, "font", fontRecipe());
+				const refusal = await refusalOf(async () =>
+					planPackBuild(projectPath(projectDir)),
+				);
+				assert.equal(refusal.code, "RECIPE_INVALID");
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+				);
+				assert.equal(
+					await bytesAt(onDisk(projectDir, `assets/elsewhere/font/icons.json`)),
+					null,
+					"nothing is written outside the project namespace",
+				);
+			});
+		},
+	},
+	{
+		name: "an unreadable font spec is a recipe refusal with nothing written",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "font", {
+					formatVersion: 3,
+					id: "font",
+					targets: [
+						{
+							id: "icons",
+							steps: [{ type: "font", spec: "sources/missing.json" }],
+						},
+					],
+				});
+				const refusal = await refusalOf(async () =>
+					planPackBuild(projectPath(projectDir)),
+				);
+				assert.equal(refusal.code, "RECIPE_SOURCE_MISSING");
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+				);
+			});
+		},
+	},
+	{
+		name: "changing a font icon file forces the font outputs to rewrite",
+		async run() {
+			await withProject(async (projectDir) => {
+				const spec = fontSpec([{ name: "gem", path: "icon_gem.mcpx" }]);
+				await writeFontSpec(projectDir, spec);
+				await writeRecipe(projectDir, "font", fontRecipe());
+				await build(projectDir);
+				await writeText(
+					projectDir,
+					"recipes/sources/icon_gem.mcpx",
+					GEM_ICON.replace("G = #FFD700FF", "G = #FF00FFFF"),
+				);
+				const executed = await build(projectDir);
+				assert.deepEqual([...executed.completed].sort(), [
+					`pack/assets/${NAMESPACE}/font/icons.json`,
+					`pack/assets/${NAMESPACE}/font/icons.table.json`,
+					`pack/assets/${NAMESPACE}/textures/font/icons.png`,
+				]);
+			});
+		},
+	},
+	{
+		name: "a table path override is honoured for the font step",
+		async run() {
+			await withProject(async (projectDir) => {
+				const spec = fontSpec([{ name: "gem", path: "icon_gem.mcpx" }]);
+				await writeFontSpec(projectDir, spec);
+				const recipe = fontRecipe();
+				((recipe.targets as unknown[])[0] as { steps: unknown[] }).steps = [
+					{
+						type: "font",
+						spec: "sources/icons.font.json",
+						table: "docs/icons.table.json",
+					},
+				];
+				await writeRecipe(projectDir, "font", recipe);
+				await build(projectDir);
+				assert.ok(
+					await bytesAt(onDisk(projectDir, "docs/icons.table.json")),
+					"the table lands at the declared path",
+				);
 			});
 		},
 	},
