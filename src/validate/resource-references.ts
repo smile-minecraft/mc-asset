@@ -21,7 +21,9 @@ import {
  * coverage. Resolution follows the same rules as every other reference:
  * a miss is an error, a `minecraft:` reference with no vanilla tree
  * provided is an unresolved external, and a case-only difference is a case
- * mismatch.
+ * mismatch. A `minecraft:` sound miss with a vanilla tree that carries no
+ * `assets/minecraft/sounds/` files is an unresolved external too, because
+ * the client jars ship no sounds and the miss proves nothing.
  *
  * Path rules (each prefix is inserted between the namespace directory and
  * the reference path):
@@ -203,6 +205,25 @@ function layersOf(context: ResourceContext): Layer[] {
 		layers.push({ current: false, index: context.vanilla });
 	}
 	return layers;
+}
+
+/**
+ * Whether the vanilla tree carries any `assets/minecraft/sounds/` file.
+ * A vanilla tree built from a client jar ships no sounds, so a miss there
+ * proves nothing; a tree merged with an asset index does carry them.
+ */
+function hasVanillaSounds(context: ResourceContext): boolean {
+	const vanilla = context.vanilla;
+	if (vanilla === undefined) {
+		return false;
+	}
+	const prefix = `assets/minecraft/${SOUND_EVENT_FACT.value.soundRoot}`;
+	for (const file of vanilla.files) {
+		if (file.startsWith(prefix)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -901,7 +922,7 @@ function checkReferenceProvider(
  * `event`; an event names another sound event and is not a file reference.
  */
 export function checkSoundReferences(input: ResourceReferenceInput): void {
-	const { rel, doc, sink } = input;
+	const { rel, doc, sink, context } = input;
 	if (allowedFormat(input, rel, SOUND_EVENT_FORMAT) === undefined) {
 		return;
 	}
@@ -909,6 +930,7 @@ export function checkSoundReferences(input: ResourceReferenceInput): void {
 		skipShape(sink, rel, []);
 		return;
 	}
+	const vanillaSounds = hasVanillaSounds(context);
 	for (const event of Object.keys(doc)) {
 		const definition = doc[event];
 		const at = [event];
@@ -922,7 +944,7 @@ export function checkSoundReferences(input: ResourceReferenceInput): void {
 			continue;
 		}
 		for (let index = 0; index < sounds.length; index += 1) {
-			checkSoundEntry(input, event, index, sounds[index]);
+			checkSoundEntry(input, event, index, sounds[index], vanillaSounds);
 		}
 	}
 }
@@ -933,6 +955,7 @@ function checkSoundEntry(
 	event: string,
 	index: number,
 	entry: unknown,
+	vanillaSounds: boolean,
 ): void {
 	const { rel, context, sink } = input;
 	const at = [event, "sounds", index];
@@ -981,6 +1004,19 @@ function checkSoundEntry(
 		"resource-file",
 	);
 	if (outcome === "missing") {
+		// A vanilla tree built from a client jar ships no sounds, so a
+		// `minecraft:` miss against it proves nothing; treat it as an
+		// external this scan cannot check, like having no vanilla tree.
+		if (parsed.namespace === "minecraft" && !vanillaSounds) {
+			sink.unresolved({
+				kind: "resource-file",
+				field,
+				value: name,
+				target,
+				rel,
+			});
+			return;
+		}
 		sink.problem(
 			"PACK_MISSING_ASSET",
 			`sound event "${event}" entry ${index} "${name}" in "${rel}" has no sound at "${target}".`,

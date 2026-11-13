@@ -1186,6 +1186,120 @@ export const PACK_RESOURCE_REFERENCE_CASES: PackResourceReferenceCase[] = [
 			});
 		},
 	},
+	{
+		name: "sounds: a vanilla tree without sounds/ makes a minecraft reference unresolved, not missing",
+		run: async (check) => {
+			await withDirs(2, async ([dir, vanilla]) => {
+				await json(dir, "assets/minecraft/sounds.json", {
+					"my.event": { sounds: ["mob/zombie/say1"] },
+				});
+				// A client jar unpacked as-is: textures only, no sounds/.
+				await png(
+					vanilla as string,
+					"assets/minecraft/textures/block/stone.png",
+				);
+				const report = await scanPack(dir, {
+					...V971,
+					vanillaPath: vanilla as string,
+				});
+				check.deepEqual(errorsOf(report), []);
+				const external = findingsOf(report, "PACK_UNRESOLVED_EXTERNAL");
+				check.equal(external.length, 1);
+				check.equal(external[0]?.level, "warning");
+				check.ok(
+					external[0]?.message.includes("my.event.sounds[0]"),
+					"the message names the event and the entry",
+				);
+				check.ok(
+					external[0]?.message.includes("mob/zombie/say1"),
+					"the message names the referenced sound",
+				);
+				check.equal(report.verdict, "pass");
+				// The external reference records an external-reference coverage
+				// skip, exactly as an absent vanilla tree does, so the scan
+				// does not claim the reference was checked.
+				check.ok(
+					report.coverage.skipped.some(
+						(skip) =>
+							skip.kind === "external-reference" &&
+							skip.reason === "vanilla-not-provided" &&
+							skip.target === "assets/minecraft/sounds/mob/zombie/say1.ogg",
+					),
+					"the unresolved sound is recorded as an external skip",
+				);
+				check.equal(report.coverage.status, "partial");
+			});
+		},
+	},
+	{
+		name: "sounds: a minecraft reference with no vanilla tree is unresolved, not missing",
+		run: async (check) => {
+			await withPack(async (dir) => {
+				await json(dir, "assets/minecraft/sounds.json", {
+					"my.event": { sounds: ["mob/zombie/say1"] },
+				});
+				const report = await scanPack(dir, V971);
+				check.deepEqual(errorsOf(report), []);
+				check.equal(findingsOf(report, "PACK_UNRESOLVED_EXTERNAL").length, 1);
+				check.equal(report.verdict, "pass");
+			});
+		},
+	},
+	{
+		name: "sounds: a missing sound in the pack's own namespace stays a PACK_MISSING_ASSET",
+		run: async (check) => {
+			await withDirs(2, async ([dir, vanilla]) => {
+				await json(dir, "assets/testpack/sounds.json", {
+					"testpack:chime": { sounds: ["testpack:custom_sound"] },
+				});
+				await png(
+					vanilla as string,
+					"assets/minecraft/textures/block/stone.png",
+				);
+				const report = await scanPack(dir, {
+					...V971,
+					vanillaPath: vanilla as string,
+				});
+				const missing = findingsOf(report, "PACK_MISSING_ASSET");
+				check.equal(missing.length, 1);
+				check.ok(
+					missing[0]?.message.includes(
+						"assets/testpack/sounds/custom_sound.ogg",
+					),
+					"the message names the sound file path and extension",
+				);
+				check.equal(report.verdict, "fail");
+			});
+		},
+	},
+	{
+		name: "sounds: a vanilla tree with sounds/ still reports a missing minecraft sound as PACK_MISSING_ASSET",
+		run: async (check) => {
+			await withDirs(2, async ([dir, vanilla]) => {
+				await json(dir, "assets/minecraft/sounds.json", {
+					"my.event": { sounds: ["mob/zombie/missing"] },
+				});
+				await writePackFile(
+					vanilla as string,
+					"assets/minecraft/sounds/other.ogg",
+					new Uint8Array([0x4f, 0x67, 0x67, 0x53]),
+				);
+				const report = await scanPack(dir, {
+					...V971,
+					vanillaPath: vanilla as string,
+				});
+				const missing = findingsOf(report, "PACK_MISSING_ASSET");
+				check.equal(missing.length, 1);
+				check.ok(
+					missing[0]?.message.includes(
+						"assets/minecraft/sounds/mob/zombie/missing.ogg",
+					),
+					"the message names the sound file path and extension",
+				);
+				check.equal(report.verdict, "fail");
+			});
+		},
+	},
 
 	// --- post effects ---
 	{
