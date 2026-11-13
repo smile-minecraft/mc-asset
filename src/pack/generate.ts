@@ -135,6 +135,15 @@ export interface GeneratedStepContext {
 	readonly recipeDir: string;
 }
 
+/**
+ * Replaceable intake for the particle frames. Production always uses the real
+ * loader; the seam lets a test change the source files between decoding and
+ * hashing to prove the plan records the bytes it decoded.
+ */
+export interface GeneratedStepDependencies {
+	readonly loadParticleFrames?: typeof loadParticleFrames | undefined;
+}
+
 const ENTITY_TEMPLATE_FIELDS: ReadonlySet<string> = new Set([
 	"type",
 	"layout",
@@ -180,6 +189,41 @@ const PARTICLE_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 const TEXT_ENCODER = new TextEncoder();
+
+/**
+ * Files the build owns at the project root. A generator step writes its
+ * pack files below the output directory and, for the font table, a document
+ * below the project root; that project-level path must never name the build's
+ * own lock or the project document, or the later lock write would silently
+ * replace the step's output.
+ */
+const RESERVED_PROJECT_OUTPUTS: ReadonlySet<string> = new Set([
+	"mc-asset.lock.json",
+	"mc-asset.pack.json",
+]);
+
+function assertProjectOutputAllowed(
+	output: GeneratedOutput,
+	context: GeneratedStepContext,
+): void {
+	if (output.scope !== "project") {
+		return;
+	}
+	const normalized = output.relativePath
+		.split("/")
+		.filter((segment) => segment !== ".")
+		.join("/")
+		.toLowerCase();
+	if (!RESERVED_PROJECT_OUTPUTS.has(normalized)) {
+		return;
+	}
+	stepFailure(
+		context,
+		output.kind === "fontTable" ? "table" : "output",
+		`${context.step.type} step output '${output.relativePath}' is reserved for the project documents.`,
+		{ value: output.relativePath },
+	);
+}
 
 function sha256Hex(bytes: Uint8Array): string {
 	return createHash("sha256").update(bytes).digest("hex");
@@ -364,9 +408,10 @@ function readSourceText(
 	declared: string,
 	context: GeneratedStepContext,
 	field: string,
-): string {
+): { readonly text: string; readonly bytes: Uint8Array } {
+	let bytes: Uint8Array;
 	try {
-		return readFileSync(path, "utf8");
+		bytes = new Uint8Array(readFileSync(path));
 	} catch {
 		throw new McAssetError(
 			"RECIPE_SOURCE_MISSING",
@@ -380,6 +425,10 @@ function readSourceText(
 			},
 		);
 	}
+	return {
+		text: new TextDecoder("utf-8", { ignoreBOM: true }).decode(bytes),
+		bytes,
+	};
 }
 
 /** Parse a layout document read from a file or an inline declaration. */
@@ -413,10 +462,10 @@ function loadEntityLayout(context: GeneratedStepContext): {
 		};
 	}
 	const path = resolve(context.recipeDir, raw);
-	const text = readSourceText(path, raw, context, "layout");
+	const source = readSourceText(path, raw, context, "layout");
 	let value: unknown;
 	try {
-		value = JSON.parse(text) as unknown;
+		value = JSON.parse(source.text) as unknown;
 	} catch {
 		throw new McAssetError(
 			"RECIPE_INVALID",
@@ -436,14 +485,13 @@ function loadEntityLayout(context: GeneratedStepContext): {
 	} catch (error) {
 		translateGeneratorFailure(error, context);
 	}
-	const layoutBytes = TEXT_ENCODER.encode(text);
 	return {
 		layout,
 		input: {
 			ref: `entity-layout:${raw}`,
-			sha256: sha256Hex(layoutBytes),
+			sha256: sha256Hex(source.bytes),
 		},
-		sourceBytes: layoutBytes.length,
+		sourceBytes: source.bytes.length,
 	};
 }
 
@@ -729,10 +777,10 @@ async function planFontStep(
 		);
 	}
 	const specPath = resolve(context.recipeDir, declared);
-	const specText = readSourceText(specPath, declared, context, "spec");
+	const specSource = readSourceText(specPath, declared, context, "spec");
 	let raw: unknown;
 	try {
-		raw = JSON.parse(specText) as unknown;
+		raw = JSON.parse(specSource.text) as unknown;
 	} catch {
 		throw new McAssetError(
 			"RECIPE_INVALID",
@@ -763,13 +811,12 @@ async function planFontStep(
 		);
 	}
 	const inputs: GeneratedInput[] = [];
-	const specBytes = TEXT_ENCODER.encode(specText);
 	inputs.push({
 		ref: `font-spec:${declared}`,
-		sha256: sha256Hex(specBytes),
+		sha256: sha256Hex(specSource.bytes),
 	});
 	const sources: FontGlyphSource[] = [];
-	let sourceBytes = specBytes.length;
+	let sourceBytes = specSource.bytes.length;
 	let decodedPixels = 0;
 	for (const icon of spec.icons) {
 		const loaded = await loadFontIcon(icon, context);
@@ -823,6 +870,7 @@ async function planFontStep(
 
 async function planParticleStep(
 	context: GeneratedStepContext,
+	loadFrames: typeof loadParticleFrames,
 ): Promise<GeneratedStepPlan> {
 	const step = context.step;
 	assertStepFields(step, PARTICLE_FIELDS, context);
@@ -858,7 +906,7 @@ async function planParticleStep(
 	const fullPath = resolve(context.recipeDir, declared);
 	let loaded: Awaited<ReturnType<typeof loadParticleFrames>>;
 	try {
-		loaded = await loadParticleFrames(fullPath, {
+		loaded = await loadFrames(fullPath, {
 			maxDecodedPixels: PACK_BUILD_MAX_DECODED_PIXELS,
 		});
 	} catch (error) {
@@ -877,10 +925,10 @@ async function planParticleStep(
 	} catch (error) {
 		translateGeneratorFailure(error, context);
 	}
-	const inputs: GeneratedInput[] = loaded.inputFiles.map((file) => ({
-		ref: `particle-frame:${basename(file)}`,
-		sha256: sha256Hex(new Uint8Array(readFileSync(file))),
-		filePath: file,
+	const inputs: GeneratedInput[] = loaded.frames.map((frame, index) => ({
+		ref: `particle-frame:${basename(loaded.inputFiles[index])}`,
+		sha256: frame.sourceSha256,
+		filePath: loaded.inputFiles[index],
 	}));
 	const outputs: GeneratedOutput[] = [
 		generatedOutput(
@@ -905,26 +953,33 @@ async function planParticleStep(
 /** Plan one generator-backed step; every refusal happens before a write. */
 export async function planGeneratedStep(
 	context: GeneratedStepContext,
+	dependencies: GeneratedStepDependencies = {},
 ): Promise<GeneratedStepPlan> {
+	let plan: GeneratedStepPlan;
 	if (context.step.type === "entityTemplate") {
-		return planEntityTemplate(context);
+		plan = planEntityTemplate(context);
+	} else if (context.step.type === "equipment") {
+		plan = planEquipment(context);
+	} else if (context.step.type === "font") {
+		plan = await planFontStep(context);
+	} else if (context.step.type === "particle") {
+		plan = await planParticleStep(
+			context,
+			dependencies.loadParticleFrames ?? loadParticleFrames,
+		);
+	} else {
+		throw new McAssetError(
+			"RECIPE_INVALID",
+			`Unknown generator step type: ${context.step.type}`,
+			{
+				targetId: context.targetId,
+				stepType: context.step.type,
+				stepIndex: context.stepIndex,
+			},
+		);
 	}
-	if (context.step.type === "equipment") {
-		return planEquipment(context);
+	for (const output of plan.outputs) {
+		assertProjectOutputAllowed(output, context);
 	}
-	if (context.step.type === "font") {
-		return planFontStep(context);
-	}
-	if (context.step.type === "particle") {
-		return planParticleStep(context);
-	}
-	throw new McAssetError(
-		"RECIPE_INVALID",
-		`Unknown generator step type: ${context.step.type}`,
-		{
-			targetId: context.targetId,
-			stepType: context.step.type,
-			stepIndex: context.stepIndex,
-		},
-	);
+	return plan;
 }

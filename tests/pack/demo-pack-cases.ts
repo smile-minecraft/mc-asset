@@ -308,6 +308,59 @@ export const DEMO_PACK_CASES: readonly DemoCase[] = [
 		},
 	},
 	{
+		name: "pack check reports every generated output deleted from disk",
+		async run() {
+			const missing: ReadonlyArray<{ name: string; file: string }> = [
+				{
+					name: "entity template",
+					file: "pack/assets/aurelian/textures/entity/aurelian_hero.png",
+				},
+				{
+					name: "equipment definition",
+					file: "pack/assets/aurelian/equipment/aurelian_gear.json",
+				},
+				{
+					name: "font definition",
+					file: "pack/assets/aurelian/font/icons.json",
+				},
+				{
+					name: "particle definition",
+					file: "pack/assets/aurelian/particles/aurelian_spark.json",
+				},
+			];
+			for (const entry of missing) {
+				await withDemoProject(async (projectDir) => {
+					await buildDemo(projectDir);
+					await unlink(join(projectDir, entry.file));
+					const summary = await checkResourcePack({
+						projectPath: projectPath(projectDir),
+					});
+					assert.equal(
+						summary.verdict,
+						"fail",
+						`${entry.name}: a missing generated output fails the verdict`,
+					);
+					const fix = summary.fixList.find(
+						(candidate) => candidate.code === "PACK_GENERATED_OUTPUT_MISSING",
+					);
+					assert.ok(
+						fix,
+						`${entry.name}: the fix list names the missing output`,
+					);
+					assert.equal(
+						fix.level,
+						"error",
+						`${entry.name}: the fix is an error`,
+					);
+					assert.ok(
+						fix.samplePaths.includes(entry.file),
+						`${entry.name}: the fix points at ${entry.file}`,
+					);
+				});
+			}
+		},
+	},
+	{
 		name: "packaging the demo twice produces the same zip",
 		async run() {
 			await withDemoProject(async (projectDir, root) => {

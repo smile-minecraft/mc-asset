@@ -65,6 +65,23 @@ function inferCategoryFromFilename(filename: string): string {
 }
 
 /**
+ * Lock kinds a recipe generator writes. Eight of them are pack files and one
+ * (`fontTable`) is project documentation, so every kind is checked for
+ * existence at the project-root path the lock records.
+ */
+const GENERATED_OUTPUT_KINDS: ReadonlySet<string> = new Set([
+	"entityTemplate",
+	"entityTemplateSource",
+	"equipmentDefinition",
+	"equipmentTexture",
+	"fontDefinition",
+	"fontAtlas",
+	"fontTable",
+	"particleDefinition",
+	"particleTexture",
+]);
+
+/**
  * Lock kinds a recipe generator writes as a PNG texture. A generated armor
  * sheet, icon atlas, particle sprite, or entity template is judged by its
  * generator, not by the hand-painted sprite rules of the style presets, and
@@ -82,24 +99,50 @@ const GENERATED_TEXTURE_KINDS: ReadonlySet<string> = new Set([
 	"particleTexture",
 ]);
 
+interface LockedGeneratedOutputs {
+	/** Pack-relative paths of every generated texture. */
+	readonly textures: ReadonlySet<string>;
+	/** Project-root paths of generated files that are gone from disk. */
+	readonly missing: ReadonlyArray<{
+		readonly path: string;
+		readonly kind: string;
+	}>;
+}
+
+function lockedFileMissing(projectDir: string, path: string): boolean {
+	try {
+		return !statSync(resolve(projectDir, path)).isFile();
+	} catch {
+		return true;
+	}
+}
+
 /**
- * Pack-relative paths of the textures a recipe generator wrote, read from the
- * lock document. An absent, unreadable, or unparsable lock suppresses
- * nothing: the lock belongs to the build, and a check that cannot read it
- * still reports what the pack holds, byte for byte as before.
+ * Generated outputs recorded by the lock. An absent, unreadable, or unparsable
+ * lock suppresses nothing and reports nothing: the lock belongs to the build,
+ * and a check that cannot read it still reports what the pack holds, byte for
+ * byte as before. A lock that records only older kinds keeps exactly the
+ * findings it produced before generator steps existed.
  */
-function lockGeneratedTextures(
+function readLockedGeneratedOutputs(
 	projectDir: string,
 	packDir: string,
-): ReadonlySet<string> {
-	const generated = new Set<string>();
+): LockedGeneratedOutputs {
+	const textures = new Set<string>();
+	const missing: Array<{ path: string; kind: string }> = [];
 	const lockPath = join(projectDir, "mc-asset.lock.json");
 	if (!existsSync(lockPath)) {
-		return generated;
+		return { textures, missing };
 	}
 	try {
 		const lock = parseLockText(readFileSync(lockPath, "utf8"));
 		for (const [path, entry] of Object.entries(lock.outputs)) {
+			if (!GENERATED_OUTPUT_KINDS.has(entry.kind)) {
+				continue;
+			}
+			if (lockedFileMissing(projectDir, path)) {
+				missing.push({ path, kind: entry.kind });
+			}
 			if (!GENERATED_TEXTURE_KINDS.has(entry.kind)) {
 				continue;
 			}
@@ -108,13 +151,13 @@ function lockGeneratedTextures(
 				"/",
 			);
 			if (rel !== "" && rel !== ".." && !rel.startsWith("../")) {
-				generated.add(rel);
+				textures.add(rel);
 			}
 		}
 	} catch {
-		return new Set();
+		return { textures: new Set(), missing: [] };
 	}
-	return generated;
+	return { textures, missing };
 }
 
 /** Check a pack project and summarize what to fix first. */
@@ -172,7 +215,17 @@ export async function checkResourcePack(
 	}
 
 	const packDir = resolve(projectDir, outputDir);
-	const generatedTextures = lockGeneratedTextures(projectDir, packDir);
+	const lockedOutputs = readLockedGeneratedOutputs(projectDir, packDir);
+	const generatedTextures = lockedOutputs.textures;
+	for (const missing of lockedOutputs.missing) {
+		findings.push({
+			code: "PACK_GENERATED_OUTPUT_MISSING",
+			level: "error",
+			path: missing.path,
+			message: `Generated output is missing: ${missing.path} (${missing.kind}).`,
+			suggestion: "Run pack build to regenerate missing recipe outputs.",
+		});
+	}
 	const mcmetaPath = join(packDir, "pack.mcmeta");
 	if (!existsSync(mcmetaPath)) {
 		findings.push({

@@ -6,6 +6,7 @@
  * editable-source parser; encoding happens later in the pure planner.
  */
 
+import { createHash } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { McAssetError } from "../core/errors.ts";
@@ -19,13 +20,22 @@ export interface ParticleWarning {
 	readonly message: string;
 }
 
+/**
+ * A decoded frame plus the hash of the exact bytes it was decoded from. The
+ * hash travels with the frame so a pack build records the input it actually
+ * decoded instead of reading the source file a second time.
+ */
+export interface LoadedParticleFrame extends ParticleFrame {
+	readonly sourceSha256: string;
+}
+
 export interface LoadedParticleFrames {
 	readonly inputPath: string;
 	readonly inputKind: "directory" | "file";
 	/** Path of every frame file that was read; never writable, even with force. */
 	readonly inputFiles: readonly string[];
 	/** Byte-ordered frames. */
-	readonly frames: readonly ParticleFrame[];
+	readonly frames: readonly LoadedParticleFrame[];
 	/** Total bytes of the frame files that were read. */
 	readonly sourceBytes: number;
 	/** Width times height over every decoded frame. */
@@ -67,19 +77,24 @@ async function readFrameBytes(path: string): Promise<Uint8Array> {
 	}
 }
 
+function sha256Hex(bytes: Uint8Array): string {
+	return createHash("sha256").update(bytes).digest("hex");
+}
+
 async function decodeFrame(
 	path: string,
 	name: string,
 ): Promise<{
-	frame: ParticleFrame;
+	frame: LoadedParticleFrame;
 	warnings: ParticleWarning[];
 	sourceBytes: number;
 }> {
 	const bytes = await readFrameBytes(path);
+	const sourceSha256 = sha256Hex(bytes);
 	if (frameFormat(name) === "png") {
 		const decoded = decodePng(bytes);
 		return {
-			frame: { name, canvas: decoded.canvas },
+			frame: { name, canvas: decoded.canvas, sourceSha256 },
 			warnings: decoded.warnings.map((warning) => ({
 				code: warning.code,
 				message: `${name}: ${warning.message}`,
@@ -98,7 +113,7 @@ async function decodeFrame(
 		);
 	}
 	return {
-		frame: { name, canvas: parseMcpx(text) },
+		frame: { name, canvas: parseMcpx(text), sourceSha256 },
 		warnings: [],
 		sourceBytes: bytes.length,
 	};
@@ -153,7 +168,7 @@ async function loadDirectory(
 			{ path: inputPath, count: 0 },
 		);
 	}
-	const frames: ParticleFrame[] = [];
+	const frames: LoadedParticleFrame[] = [];
 	const inputFiles: string[] = [];
 	let sourceBytes = 0;
 	let decodedPixels = 0;

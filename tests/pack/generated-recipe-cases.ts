@@ -1112,6 +1112,53 @@ TTTTTTTT
 		},
 	},
 	{
+		name: "a font table that names a project document is refused before anything is written",
+		async run() {
+			await withProject(async (projectDir) => {
+				const spec = fontSpec([{ name: "gem", path: "icon_gem.mcpx" }]);
+				await writeFontSpec(projectDir, spec);
+				const projectDoc = await readFile(projectPath(projectDir));
+				for (const table of [
+					"mc-asset.lock.json",
+					"./mc-asset.pack.json",
+					"MC-ASSET.LOCK.json",
+				]) {
+					const recipe = fontRecipe();
+					((recipe.targets as unknown[])[0] as { steps: unknown[] }).steps = [
+						{
+							type: "font",
+							spec: "sources/icons.font.json",
+							table,
+						},
+					];
+					await writeRecipe(projectDir, "font", recipe);
+					const refusal = await refusalOf(async () =>
+						planPackBuild(projectPath(projectDir)),
+					);
+					assert.equal(refusal.code, "RECIPE_INVALID", table);
+					assert.equal(refusal.details?.field, "table", table);
+					assert.equal(
+						await bytesAt(join(projectDir, "mc-asset.lock.json")),
+						null,
+						`${table}: the lock is not written`,
+					);
+					assert.equal(
+						await bytesAt(
+							onDisk(projectDir, `assets/${NAMESPACE}/font/icons.json`),
+						),
+						null,
+						`${table}: no pack output is written`,
+					);
+					assert.deepEqual(
+						await readFile(projectPath(projectDir)),
+						projectDoc,
+						`${table}: the project document is unchanged`,
+					);
+				}
+			});
+		},
+	},
+	{
 		name: "a particle step writes the definition and both sprites in name order",
 		async run() {
 			await withProject(async (projectDir) => {
@@ -1189,6 +1236,73 @@ TTTTTTTT
 				assert.ok(
 					second.outputs.every((output) => output.judgement === "own-clean"),
 					"a rerun sees only own-clean outputs",
+				);
+			});
+		},
+	},
+	{
+		name: "a particle frame replaced after decoding keeps the input hash on the decoded bytes",
+		async run() {
+			await withProject(async (projectDir) => {
+				const framePath = join(
+					projectDir,
+					"recipes",
+					"sources",
+					"spark",
+					"frame_0.mcpx",
+				);
+				await writeText(
+					projectDir,
+					"recipes/sources/spark/frame_0.mcpx",
+					SPARK_A,
+				);
+				const originalBytes = new Uint8Array(await readFile(framePath));
+				let replaced = false;
+				const loadAndReplace: typeof loadParticleFrames = async (
+					inputPath,
+					options,
+				) => {
+					const loaded = await loadParticleFrames(inputPath, options);
+					// The file changes after its bytes were decoded but before
+					// the step records the input hash.
+					await writeFile(framePath, SPARK_B);
+					replaced = true;
+					return loaded;
+				};
+				const plan = await planGeneratedStep(
+					stepContext(projectDir, "spark", {
+						type: "particle",
+						frames: "sources/spark",
+					}),
+					{ loadParticleFrames: loadAndReplace },
+				);
+				assert.ok(replaced, "the source was replaced after decoding");
+				assert.equal(plan.inputs.length, 1, "one frame is one input");
+				assert.equal(
+					plan.inputs[0]?.sha256,
+					sha256(originalBytes),
+					"the input hash covers the bytes that were decoded",
+				);
+				assert.notEqual(
+					sha256(new Uint8Array(await readFile(framePath))),
+					plan.inputs[0]?.sha256,
+					"the replaced file has a different hash",
+				);
+				const texture = plan.outputs.find(
+					(output) => output.kind === "particleTexture",
+				);
+				assert.ok(texture, "the step planned the sprite");
+				const expected = planParticleAsset({
+					namespace: NAMESPACE,
+					id: "spark",
+					frames: [{ name: "frame_0.mcpx", canvas: parseMcpx(SPARK_A) }],
+				});
+				const expectedTexture = expected.textures[0];
+				assert.ok(expectedTexture, "the standalone plan has its sprite");
+				assert.equal(
+					sha256(texture.bytes),
+					sha256(expectedTexture.data),
+					"the sprite uses the decoded pixels, not the replaced file",
 				);
 			});
 		},

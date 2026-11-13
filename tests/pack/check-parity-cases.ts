@@ -371,4 +371,56 @@ export const CHECK_PARITY_CASES: readonly CheckCase[] = [
 			});
 		},
 	},
+	{
+		name: "a lock that records only older kinds reports no generated-output finding",
+		async run() {
+			await withTempDir(async (dir) => {
+				const projectDir = join(dir, "old-kinds");
+				await initializePackProject({
+					projectDir,
+					namespace: "demo",
+					minecraftVersion: "1.21.9",
+					name: "old-kinds",
+				});
+				const entries: ReadonlyArray<[string, LockEntry["kind"]]> = [
+					["pack/assets/demo/textures/item/missing.png", "texture"],
+					["pack/assets/demo/models/item/missing.json", "model"],
+					["pack/assets/demo/items/missing.json", "itemDefinition"],
+					["pack/assets/demo/models/block/missing.json", "blockModel"],
+					["pack/assets/demo/models/item/missing_block.json", "blockItemModel"],
+					["pack/assets/demo/blockstates/missing.json", "blockstate"],
+				];
+				const outputs: Record<string, LockEntry> = {};
+				for (const [index, [path, kind]] of entries.entries()) {
+					outputs[path] = {
+						targetId: `missing_${index}`,
+						recipeId: "one",
+						kind,
+						inputHash: sha256(new TextEncoder().encode(path)),
+						outputHash: sha256(new TextEncoder().encode(`${path}:out`)),
+					};
+				}
+				const lock: LockDocument = {
+					formatVersion: 1,
+					tool: { name: "mc-asset", version: "0.5.0" },
+					project: { namespace: "demo", style: "vanilla" },
+					outputs,
+				};
+				await writeFile(
+					join(projectDir, "mc-asset.lock.json"),
+					serializeLockText(lock),
+					"utf8",
+				);
+				const summary = await checkResourcePack({
+					projectPath: projectPathOf(projectDir),
+				});
+				assert.equal(
+					summary.verdict,
+					"pass",
+					"missing paths under older kinds stay outside the generated-output check",
+				);
+				assert.deepEqual(summary.fixList, [], "there is nothing to fix");
+			});
+		},
+	},
 ];
