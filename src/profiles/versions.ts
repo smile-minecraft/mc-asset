@@ -54,6 +54,10 @@ export interface AtlasPaletteRootValue {
 	root: "textures/palettes/";
 }
 
+export interface RemovedItemTypesValue {
+	readonly types: readonly string[];
+}
+
 /**
  * §95 compatibility facts as version-interval data. Every fact carries its
  * sourced starting packFormat in `since` as a dotted string; the
@@ -196,6 +200,48 @@ export const ATLAS_PALETTE_ROOT_FACT: VersionedFact<AtlasPaletteRootValue> = {
 };
 
 /**
+ * Item model node types the client removed, keyed by the first pack format
+ * that no longer accepts them. Read by the pack recipe builder when it
+ * writes a formatVersion 2 `items/` definition; kept out of COMPAT_FACTS
+ * because these removals never surface as validator findings.
+ *
+ * 26.2 turned beds, signs, and hanging signs into ordinary block models and
+ * removed their special model types at resource pack format 88.0.
+ */
+export const REMOVED_SPECIAL_MODEL_TYPES_FACT: VersionedFact<RemovedItemTypesValue> =
+	{
+		fact: "item-special-model-types-removed",
+		since: { packFormat: "88.0" },
+		value: {
+			types: [
+				"minecraft:bed",
+				"minecraft:standing_sign",
+				"minecraft:hanging_sign",
+			],
+		},
+		status: "verified",
+		source:
+			"Minecraft Java Edition 26.2 release notes, Resource Pack Version 88.0 — Item Models: minecraft:bed, minecraft:standing_sign and minecraft:hanging_sign removed (https://www.minecraft.net/en-us/article/minecraft-java-edition-26-2)",
+		checkedAt: "2026-11-13",
+	};
+
+/**
+ * Item tint sources the client removed, keyed by the first pack format that
+ * no longer accepts them. 26.3 stopped drawing maps as a tinted overlay, so
+ * `minecraft:map_color` is gone from the item model tint sources.
+ */
+export const REMOVED_ITEM_TINT_TYPES_FACT: VersionedFact<RemovedItemTypesValue> =
+	{
+		fact: "item-tint-types-removed",
+		since: { packFormat: "95.0" },
+		value: { types: ["minecraft:map_color"] },
+		status: "verified",
+		source:
+			"Minecraft Java Edition 26.3 snapshot 7 release notes, Resource Pack Version 95.0 — Item Models, Tint Sources: minecraft:map_color removed (https://www.minecraft.net/en-us/article/minecraft-26-3-snapshot-7); Minecraft Java Edition 26.3 release notes (https://www.minecraft.net/en-us/article/minecraft-java-edition-26-3)",
+		checkedAt: "2026-11-13",
+	};
+
+/**
  * Pack formats the release table covers (1.19.3 = 12.0 through 26.3 =
  * 97.1, see src/cli/version-options.ts). Outside it a version cannot be
  * called checked for a feature the table says nothing about.
@@ -299,6 +345,29 @@ export function resolveVersionedFact<Value>(
 		return undefined;
 	}
 	return fact.value;
+}
+
+export interface RemovedTypesAtFormat {
+	/** The first pack format that no longer accepts the listed types. */
+	readonly since: string;
+	readonly types: ReadonlySet<string>;
+}
+
+/**
+ * The types a removal fact has dropped at or below `packFormat`, with the
+ * first format that dropped them; undefined while every type is still
+ * present. Callers compare the returned set against normalized type ids.
+ */
+export function removedTypesAtFormat(
+	fact: VersionedFact<RemovedItemTypesValue>,
+	packFormat: string,
+): RemovedTypesAtFormat | undefined {
+	const value = resolveVersionedFact(fact, packFormat);
+	const since = fact.since.packFormat;
+	if (value === undefined || since === undefined) {
+		return undefined;
+	}
+	return { since, types: new Set(value.types) };
 }
 
 export function getItemAtlasPolicy(

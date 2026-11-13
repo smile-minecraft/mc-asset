@@ -50,6 +50,8 @@ import {
 import type { PaletteRole, PixelCanvas, RGBA } from "../core/types.ts";
 import { decodePng, encodePng } from "../io/png.ts";
 import { parseMcpx } from "../mcpx/index.ts";
+import type { ModelRules } from "../model/versions.ts";
+import { resolveModelRules } from "../model/versions.ts";
 import {
 	comparePackFormats,
 	normalizePackFormat,
@@ -58,18 +60,28 @@ import { resolveStyle } from "../style/load.ts";
 import type { ResolvedStyle } from "../style/types.ts";
 import { parseResourceLocation } from "../validate/resource-location.ts";
 import {
+	buildBlockItemDefinitionText,
+	buildBlockItemModelText,
+	buildBlockModelText,
+	buildBlockstateText,
+	parseBlockModelStep,
+	parseBlockstateStep,
+} from "./block.ts";
+import {
 	canonicalDocumentText,
 	isJsonObject,
 	isPathInsideDirectory,
 	isRelativeProjectPath,
 } from "./document.ts";
 import {
-	collectItemOutputsForStep,
-	collectModelOutputsForStep,
+	collectJsonOutputsForStep,
 	isJsonOnlyTarget,
+	type JsonOutputKind,
+	resolveStepItemName,
 } from "./item-plan.ts";
 import {
 	buildItemDefinitionDocument,
+	buildItemDefinitionDocumentV2,
 	buildParentModel,
 	collectItemDefinitionModelRefs,
 } from "./item-templates.ts";
@@ -122,7 +134,8 @@ export interface TextureOutputPlanInternal {
 export interface ModelOutputPlan {
 	readonly path: string;
 	readonly judgement: BuildOutputJudgement;
-	readonly kind: "model" | "itemDefinition";
+	readonly kind: JsonOutputKind;
+	readonly stepIndex: number;
 	readonly needsRewrite: boolean;
 	computedOutputHash?: string | undefined;
 	computedText?: string | undefined;
@@ -131,6 +144,7 @@ export interface ModelOutputPlan {
 export interface TargetPlanInternal {
 	readonly targetId: string;
 	readonly recipeId: string;
+	readonly recipeFormatVersion: number;
 	readonly target: RecipeTarget;
 	readonly sourceDecl?: RecipeSource | undefined;
 	readonly sourceFilePath?: string | undefined;
@@ -159,6 +173,42 @@ export interface PackBuildPlan {
 
 function sha256Hex(data: string | Uint8Array): string {
 	return createHash("sha256").update(data).digest("hex");
+}
+
+interface OutputJudgement {
+	readonly judgement: BuildOutputJudgement;
+	readonly needsRewrite: boolean;
+}
+
+/**
+ * The four-way judgement every output family shares: a lock entry plus the
+ * same bytes on disk is own-clean (rewrite only when the target input hash
+ * changed), a hand-edited file is own-modified, a file nobody planned is
+ * foreign, and a missing file is new.
+ */
+function classifyOutput(
+	fullPath: string,
+	lockEntry: LockEntry | undefined,
+	inputHash: string,
+): OutputJudgement {
+	const existsOnDisk = existsSync(fullPath);
+	if (lockEntry !== undefined) {
+		if (!existsOnDisk) {
+			return { judgement: "new", needsRewrite: true };
+		}
+		const diskHash = sha256Hex(readFileSync(fullPath));
+		if (diskHash !== lockEntry.outputHash) {
+			return { judgement: "own-modified", needsRewrite: false };
+		}
+		return {
+			judgement: "own-clean",
+			needsRewrite: inputHash !== lockEntry.inputHash,
+		};
+	}
+	if (existsOnDisk) {
+		return { judgement: "foreign", needsRewrite: false };
+	}
+	return { judgement: "new", needsRewrite: true };
 }
 
 function sortKeys(value: unknown): unknown {
@@ -348,6 +398,8 @@ export async function planPackBuild(
 
 	const project = parsePackProjectText(projectText, resolvedDocPath);
 	const projectDir = dirname(resolvedDocPath);
+	const format = normalizePackFormat(project.resourcePackVersion);
+	const modelRules = resolveModelRules(format);
 
 	let recipeFiles: string[] = [];
 	if (options.recipe !== undefined && options.recipe !== "") {
@@ -378,6 +430,18 @@ export async function planPackBuild(
 		expanded: readonly RecipeTarget[];
 	}> = [];
 
+	const seenOutputsAcrossRecipes = new Set<string>();
+	const registerOutput = (relPath: string): void => {
+		if (seenOutputsAcrossRecipes.has(relPath)) {
+			throw new McAssetError(
+				"RECIPE_OUTPUT_CONFLICT",
+				`Duplicate output path across recipes: ${relPath}`,
+				{ conflicts: [relPath] },
+			);
+		}
+		seenOutputsAcrossRecipes.add(relPath);
+	};
+
 	let totalOutputCount = 0;
 	for (const file of recipeFiles) {
 		const text = readFileSync(file, "utf8");
@@ -387,14 +451,28 @@ export async function planPackBuild(
 			project.namespace,
 			project.outputDir,
 		);
-		for (const t of expanded) {
-			totalOutputCount += 1;
-			if (
-				t.steps.some(
-					(s) => s.type === "sweep" && typeof s.mcmetaOutput === "string",
-				)
-			) {
+		for (const target of expanded) {
+			if (!isJsonOnlyTarget(target)) {
+				const texturePath = target.output
+					? `${project.outputDir}/${target.output}`
+					: `${project.outputDir}/assets/${project.namespace}/textures/item/${target.id}.png`;
 				totalOutputCount += 1;
+				registerOutput(texturePath);
+			}
+			for (const [stepIndex, step] of target.steps.entries()) {
+				if (step.type === "sweep" && typeof step.mcmetaOutput === "string") {
+					totalOutputCount += 1;
+					registerOutput(`${project.outputDir}/${step.mcmetaOutput}`);
+				}
+				for (const output of collectJsonOutputsForStep(
+					step,
+					target.id,
+					project.namespace,
+					stepIndex,
+				)) {
+					totalOutputCount += 1;
+					registerOutput(`${project.outputDir}/${output.path}`);
+				}
 			}
 		}
 		recipes.push({ file, recipe, expanded });
@@ -406,36 +484,6 @@ export async function planPackBuild(
 			`Planned outputs (${totalOutputCount}) exceed budget of 4096.`,
 			{ count: totalOutputCount, limit: 4096 },
 		);
-	}
-
-	const seenOutputsAcrossRecipes = new Set<string>();
-	for (const { expanded } of recipes) {
-		for (const target of expanded) {
-			if (target.output) {
-				const relPath = `${project.outputDir}/${target.output}`;
-				if (seenOutputsAcrossRecipes.has(relPath)) {
-					throw new McAssetError(
-						"RECIPE_OUTPUT_CONFLICT",
-						`Duplicate output path across recipes: ${relPath}`,
-						{ conflicts: [relPath] },
-					);
-				}
-				seenOutputsAcrossRecipes.add(relPath);
-			}
-			for (const step of target.steps) {
-				if (step.type === "sweep" && typeof step.mcmetaOutput === "string") {
-					const mcmetaPath = `${project.outputDir}/${step.mcmetaOutput}`;
-					if (seenOutputsAcrossRecipes.has(mcmetaPath)) {
-						throw new McAssetError(
-							"RECIPE_OUTPUT_CONFLICT",
-							`Duplicate output path across recipes: ${mcmetaPath}`,
-							{ conflicts: [mcmetaPath] },
-						);
-					}
-					seenOutputsAcrossRecipes.add(mcmetaPath);
-				}
-			}
-		}
 	}
 
 	const lockPath = join(projectDir, "mc-asset.lock.json");
@@ -661,45 +709,18 @@ export async function planPackBuild(
 					: `${project.outputDir}/assets/${project.namespace}/textures/item/${target.id}.png`;
 				assertOutputInsideOutputDir(outputRelPath, target, project.outputDir);
 
-				const fullOutputPath = join(projectDir, outputRelPath);
-				const existsOnDisk = existsSync(fullOutputPath);
-				const lockEntry = lock?.outputs?.[outputRelPath];
-
-				let judgement: BuildOutputJudgement;
-				let needsRewrite = false;
-
-				if (lockEntry !== undefined) {
-					if (!existsOnDisk) {
-						judgement = "new";
-						needsRewrite = true;
-					} else {
-						const diskBytes = readFileSync(fullOutputPath);
-						const diskHash = sha256Hex(diskBytes);
-						if (diskHash !== lockEntry.outputHash) {
-							judgement = "own-modified";
-							needsRewrite = false;
-						} else {
-							judgement = "own-clean";
-							needsRewrite = inputHash !== lockEntry.inputHash;
-						}
-					}
-				} else {
-					if (existsOnDisk) {
-						judgement = "foreign";
-						needsRewrite = false;
-					} else {
-						judgement = "new";
-						needsRewrite = true;
-					}
-				}
-
+				const classified = classifyOutput(
+					join(projectDir, outputRelPath),
+					lock?.outputs?.[outputRelPath],
+					inputHash,
+				);
 				outputs.push({
 					path: outputRelPath,
-					judgement,
+					judgement: classified.judgement,
 					targetId: target.id,
 					recipeId: recipe.id,
 				});
-				texturePlan = { path: outputRelPath, judgement, needsRewrite };
+				texturePlan = { path: outputRelPath, ...classified };
 			}
 
 			// Check for sweep step with mcmetaOutput
@@ -727,180 +748,104 @@ export async function planPackBuild(
 						{ output: mcmetaRelRaw },
 					);
 				}
-				const fullMcmetaPath = join(projectDir, mcmetaRelPath);
-				const mcmetaExists = existsSync(fullMcmetaPath);
-				const mcmetaLockEntry = lock?.outputs?.[mcmetaRelPath];
-
-				let mcmetaJudgement: BuildOutputJudgement;
-				let mcmetaNeedsRewrite = false;
-
-				if (mcmetaLockEntry !== undefined) {
-					if (!mcmetaExists) {
-						mcmetaJudgement = "new";
-						mcmetaNeedsRewrite = true;
-					} else {
-						const diskBytes = readFileSync(fullMcmetaPath);
-						const diskHash = sha256Hex(diskBytes);
-						if (diskHash !== mcmetaLockEntry.outputHash) {
-							mcmetaJudgement = "own-modified";
-							mcmetaNeedsRewrite = false;
-						} else {
-							mcmetaJudgement = "own-clean";
-							mcmetaNeedsRewrite = inputHash !== mcmetaLockEntry.inputHash;
-						}
-					}
-				} else {
-					if (mcmetaExists) {
-						mcmetaJudgement = "foreign";
-						mcmetaNeedsRewrite = false;
-					} else {
-						mcmetaJudgement = "new";
-						mcmetaNeedsRewrite = true;
-					}
-				}
-
+				const classified = classifyOutput(
+					join(projectDir, mcmetaRelPath),
+					lock?.outputs?.[mcmetaRelPath],
+					inputHash,
+				);
 				outputs.push({
 					path: mcmetaRelPath,
-					judgement: mcmetaJudgement,
+					judgement: classified.judgement,
 					targetId: target.id,
 					recipeId: recipe.id,
 				});
-
-				mcmetaPlan = {
-					path: mcmetaRelPath,
-					judgement: mcmetaJudgement,
-					needsRewrite: mcmetaNeedsRewrite,
-				};
+				mcmetaPlan = { path: mcmetaRelPath, ...classified };
 			}
 
 			const modelPlans: ModelOutputPlan[] = [];
-			for (const step of target.steps) {
-				for (const rel of collectModelOutputsForStep(step, target.id)) {
-					const modelRelPath = `${project.outputDir}/assets/${project.namespace}/models/item/${rel.item}.json`;
-
-					validateJsonNamespaceOverride(
-						rel.item,
-						project.namespace,
-						step,
-						target.id,
-						"model step",
-					);
-
-					const fullModelPath = join(projectDir, modelRelPath);
-					const existsOnDisk = existsSync(fullModelPath);
-					const lockEntry = lock?.outputs?.[modelRelPath];
-
-					let modelJudgement: BuildOutputJudgement;
-					let modelNeedsRewrite = false;
-
-					if (lockEntry !== undefined) {
-						if (!existsOnDisk) {
-							modelJudgement = "new";
-							modelNeedsRewrite = true;
-						} else {
-							const diskBytes = readFileSync(fullModelPath);
-							const diskHash = sha256Hex(diskBytes);
-							if (diskHash !== lockEntry.outputHash) {
-								modelJudgement = "own-modified";
-								modelNeedsRewrite = false;
-							} else {
-								modelJudgement = "own-clean";
-								modelNeedsRewrite = inputHash !== lockEntry.inputHash;
-							}
-						}
-					} else {
-						if (existsOnDisk) {
-							modelJudgement = "foreign";
-							modelNeedsRewrite = false;
-						} else {
-							modelJudgement = "new";
-							modelNeedsRewrite = true;
-						}
-					}
-
-					outputs.push({
-						path: modelRelPath,
-						judgement: modelJudgement,
-						targetId: target.id,
-						recipeId: recipe.id,
-					});
-					modelPlans.push({
-						path: modelRelPath,
-						judgement: modelJudgement,
-						kind: "model",
-						needsRewrite: modelNeedsRewrite,
-					});
-				}
-				for (const rel of collectItemOutputsForStep(step, target.id)) {
-					validateJsonNamespaceOverride(
-						rel.item,
-						project.namespace,
-						step,
-						target.id,
-						"itemDefinition step",
-					);
-
-					const itemRelPath = `${project.outputDir}/assets/${project.namespace}/items/${rel.item}.json`;
-
-					const format = normalizePackFormat(project.resourcePackVersion);
+			for (const [stepIndex, step] of target.steps.entries()) {
+				if (step.type === "itemDefinition" || step.type === "blockModel") {
 					if (comparePackFormats(format, "46.0") < 0) {
 						throw new McAssetError(
 							"RECIPE_VERSION_UNSUPPORTED",
-							`itemDefinition requires pack format 46.0 or higher; target format is ${format}.`,
-							{ targetId: target.id, actualFormat: format },
+							step.type === "blockModel"
+								? `blockModel requires pack format 46.0 or higher because it writes an items definition; target format is ${format}.`
+								: `itemDefinition requires pack format 46.0 or higher; target format is ${format}.`,
+							{
+								targetId: target.id,
+								actualFormat: format,
+								stepType: step.type,
+							},
 						);
 					}
+				}
+				for (const output of collectJsonOutputsForStep(
+					step,
+					target.id,
+					project.namespace,
+					stepIndex,
+				)) {
+					validateJsonNamespaceOverride(
+						output.name,
+						project.namespace,
+						step,
+						target.id,
+						`${step.type} step`,
+					);
 
-					const fullItemPath = join(projectDir, itemRelPath);
-					const existsOnDisk = existsSync(fullItemPath);
-					const lockEntry = lock?.outputs?.[itemRelPath];
-
-					let itemJudgement: BuildOutputJudgement;
-					let itemNeedsRewrite = false;
-
-					if (lockEntry !== undefined) {
-						if (!existsOnDisk) {
-							itemJudgement = "new";
-							itemNeedsRewrite = true;
-						} else {
-							const diskBytes = readFileSync(fullItemPath);
-							const diskHash = sha256Hex(diskBytes);
-							if (diskHash !== lockEntry.outputHash) {
-								itemJudgement = "own-modified";
-								itemNeedsRewrite = false;
-							} else {
-								itemJudgement = "own-clean";
-								itemNeedsRewrite = inputHash !== lockEntry.inputHash;
-							}
-						}
-					} else {
-						if (existsOnDisk) {
-							itemJudgement = "foreign";
-							itemNeedsRewrite = false;
-						} else {
-							itemJudgement = "new";
-							itemNeedsRewrite = true;
-						}
-					}
-
+					const jsonRelPath = `${project.outputDir}/${output.path}`;
+					const classified = classifyOutput(
+						join(projectDir, jsonRelPath),
+						lock?.outputs?.[jsonRelPath],
+						inputHash,
+					);
 					outputs.push({
-						path: itemRelPath,
-						judgement: itemJudgement,
+						path: jsonRelPath,
+						judgement: classified.judgement,
 						targetId: target.id,
 						recipeId: recipe.id,
 					});
 					modelPlans.push({
-						path: itemRelPath,
-						judgement: itemJudgement,
-						kind: "itemDefinition",
-						needsRewrite: itemNeedsRewrite,
+						path: jsonRelPath,
+						judgement: classified.judgement,
+						kind: output.kind,
+						stepIndex,
+						needsRewrite: classified.needsRewrite,
 					});
+				}
+			}
+
+			// Render every planned document here, before any write: version
+			// gates and reference checks must hold for own-clean outputs and
+			// dry runs too, not only for files about to be rewritten.
+			for (const mp of modelPlans) {
+				try {
+					mp.computedText = buildJsonOutputText(
+						target.id,
+						recipe.formatVersion,
+						target.steps,
+						mp,
+						project.namespace,
+						modelRules,
+						format,
+					);
+				} catch (error) {
+					if (error instanceof McAssetError) {
+						const details = isJsonObject(error.details) ? error.details : {};
+						throw new McAssetError(error.code, error.message, {
+							...details,
+							targetId: target.id,
+							stepIndex: mp.stepIndex,
+						});
+					}
+					throw error;
 				}
 			}
 
 			targetPlans.push({
 				targetId: target.id,
 				recipeId: recipe.id,
+				recipeFormatVersion: recipe.formatVersion,
 				target,
 				sourceDecl,
 				sourceFilePath,
@@ -945,7 +890,11 @@ export async function planPackBuild(
 	const plannedModelPaths = new Set<string>();
 	for (const tp of targetPlans) {
 		for (const mp of tp.modelPlans ?? []) {
-			if (mp.kind === "model") {
+			if (
+				mp.kind === "model" ||
+				mp.kind === "blockModel" ||
+				mp.kind === "blockItemModel"
+			) {
 				plannedModelPaths.add(mp.path);
 			}
 		}
@@ -955,13 +904,25 @@ export async function planPackBuild(
 			if (step.type !== "itemDefinition") {
 				continue;
 			}
-			const refs = collectItemDefinitionModelRefs(
-				isJsonObject(step.definition)
-					? (step.definition as Record<string, unknown>)
-					: undefined,
-			);
-			if (typeof step.model === "string" && refs.length === 0) {
-				refs.push(step.model);
+			const definition = isJsonObject(step.definition)
+				? (step.definition as Record<string, unknown>)
+				: undefined;
+			let refs: string[];
+			if (tp.recipeFormatVersion >= 2) {
+				const item = resolveStepItemName(step, tp.targetId);
+				const model = typeof step.model === "string" ? step.model : undefined;
+				const defaultModel = model ?? `${project.namespace}:item/${item}`;
+				refs = [
+					...buildItemDefinitionDocumentV2(definition, defaultModel, {
+						packFormat: format,
+						targetId: tp.targetId,
+					}).refs,
+				];
+			} else {
+				refs = collectItemDefinitionModelRefs(definition);
+				if (typeof step.model === "string" && refs.length === 0) {
+					refs.push(step.model);
+				}
 			}
 			assertItemModelRefsResolvable(
 				refs,
@@ -1006,6 +967,109 @@ function parseGridTextForBuild(text: string): PixelCanvas {
 }
 
 /**
+ * Render one JSON document from the step that planned it. The plan records
+ * the step index and document kind, so two steps that write different
+ * document families never infer the source from a path.
+ *
+ * Planning renders every planned document, own-clean and dry-run targets
+ * included: version gates and model-reference checks must hold for the
+ * whole recipe even when nothing is going to be rewritten.
+ */
+function buildJsonOutputText(
+	targetId: string,
+	recipeFormatVersion: number,
+	steps: readonly RecipeStep[],
+	mp: ModelOutputPlan,
+	projectNamespace: string,
+	rules: ModelRules,
+	packFormat: string,
+): string {
+	const step = steps[mp.stepIndex];
+	if (step === undefined) {
+		throw new McAssetError(
+			"INTERNAL_ERROR",
+			`No step at index ${mp.stepIndex} for planned output '${mp.path}'.`,
+			{ targetId },
+		);
+	}
+	if (mp.kind === "model" && step.type === "model") {
+		const item = resolveStepItemName(step, targetId);
+		if (step.modelSpec !== undefined) {
+			if (!isJsonObject(step.modelSpec)) {
+				throw new McAssetError(
+					"RECIPE_INVALID",
+					`model step modelSpec must be an object for item '${item}'.`,
+					{
+						targetId,
+						stepIndex: mp.stepIndex,
+						item,
+					},
+				);
+			}
+			return canonicalDocumentText(step.modelSpec);
+		}
+		const parent = typeof step.parent === "string" ? step.parent : "generated";
+		const texture =
+			typeof step.texture === "string"
+				? step.texture
+				: `${projectNamespace}:item/${item}`;
+		return canonicalDocumentText(
+			buildParentModel({
+				parent,
+				texture,
+				item,
+				namespace: projectNamespace,
+			}),
+		);
+	}
+	if (mp.kind === "itemDefinition" && step.type === "itemDefinition") {
+		const item = resolveStepItemName(step, targetId);
+		const model = typeof step.model === "string" ? step.model : undefined;
+		const definition = isJsonObject(step.definition)
+			? (step.definition as Record<string, unknown>)
+			: undefined;
+		const defaultModel = model ?? `${projectNamespace}:item/${item}`;
+		if (recipeFormatVersion >= 2) {
+			return canonicalDocumentText(
+				buildItemDefinitionDocumentV2(definition, defaultModel, {
+					packFormat,
+					targetId,
+				}).document,
+			);
+		}
+		return canonicalDocumentText(
+			buildItemDefinitionDocument(definition, defaultModel),
+		);
+	}
+	if (step.type === "blockModel") {
+		const spec = parseBlockModelStep(step, targetId);
+		if (mp.kind === "blockModel") {
+			return buildBlockModelText(spec, rules, targetId);
+		}
+		if (mp.kind === "blockItemModel") {
+			return buildBlockItemModelText(spec, projectNamespace);
+		}
+		if (mp.kind === "itemDefinition") {
+			return buildBlockItemDefinitionText(spec, projectNamespace);
+		}
+	}
+	if (mp.kind === "blockstate" && step.type === "blockstate") {
+		return buildBlockstateText(
+			parseBlockstateStep(step, targetId),
+			rules,
+			targetId,
+		);
+	}
+	throw new McAssetError(
+		"INTERNAL_ERROR",
+		`No matching step for planned output '${mp.path}'.`,
+		{
+			targetId,
+		},
+	);
+}
+
+/**
  * Execute a build plan.
  *
  * Verifies no conflicts, runs safe-output preflights, renders outputs,
@@ -1033,7 +1097,6 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 	}
 
 	const projectDir = plan.projectDir ?? process.cwd();
-	const projectNamespace = plan.project?.namespace ?? "";
 	const targetPlans = (plan.targetPlans ?? []) as TargetPlanInternal[];
 	const targetsToExecute = targetPlans.filter(
 		(tp) =>
@@ -1282,7 +1345,12 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 							canvas.layers.length === 1 ? canvas.layers[0]?.id : undefined,
 						);
 						applyOperations(canvas, typedOps);
-					} else if (step.type === "model" || step.type === "itemDefinition") {
+					} else if (
+						step.type === "model" ||
+						step.type === "itemDefinition" ||
+						step.type === "blockModel" ||
+						step.type === "blockstate"
+					) {
 						// JSON outputs are validated and rendered after the pixel steps.
 					} else {
 						throw new McAssetError(
@@ -1315,105 +1383,19 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 			if (!mp.needsRewrite) {
 				continue;
 			}
-			try {
-				const doc = buildModelOutputDocument(tp, mp, projectNamespace);
-				const text = canonicalDocumentText(doc);
-				mp.computedOutputHash = sha256Hex(new TextEncoder().encode(text));
-				mp.computedText = text;
-				payloads.set(
-					resolve(projectDir, mp.path),
-					new TextEncoder().encode(text),
+			const text = mp.computedText;
+			if (text === undefined) {
+				throw new McAssetError(
+					"INTERNAL_ERROR",
+					`Planned output '${mp.path}' has no rendered text.`,
+					{ targetId: tp.targetId, stepIndex: mp.stepIndex },
 				);
-				completedPaths.push(mp.path);
-			} catch (err) {
-				if (err instanceof McAssetError) {
-					const details = isJsonObject(err.details) ? err.details : {};
-					throw new McAssetError(err.code, err.message, {
-						...details,
-						targetId: tp.targetId,
-					});
-				}
-				throw err;
 			}
+			const bytes = new TextEncoder().encode(text);
+			mp.computedOutputHash = sha256Hex(bytes);
+			payloads.set(resolve(projectDir, mp.path), bytes);
+			completedPaths.push(mp.path);
 		}
-	}
-
-	/** Render one model or item definition document from recipe steps. */
-	function buildModelOutputDocument(
-		tp: TargetPlanInternal,
-		mp: ModelOutputPlan,
-		projectNamespace: string,
-	): Record<string, unknown> {
-		for (let stepIndex = 0; stepIndex < tp.target.steps.length; stepIndex++) {
-			const step = tp.target.steps[stepIndex] as RecipeStep;
-			if (mp.kind === "model" && step.type === "model") {
-				const item =
-					typeof step.item === "string" && step.item.trim() !== ""
-						? step.item
-						: tp.targetId;
-				const inferred = itemFromModelPath(mp.path);
-				if (inferred !== undefined && inferred !== item) {
-					continue;
-				}
-				const resolvedItem = inferred ?? item;
-				if (step.modelSpec !== undefined) {
-					if (!isJsonObject(step.modelSpec)) {
-						throw new McAssetError(
-							"RECIPE_INVALID",
-							`model step modelSpec must be an object for item '${resolvedItem}'.`,
-							{
-								targetId: tp.targetId,
-								stepIndex,
-								item: resolvedItem,
-							},
-						);
-					}
-					return step.modelSpec as Record<string, unknown>;
-				}
-				const parent =
-					typeof step.parent === "string" ? step.parent : "generated";
-				const texture =
-					typeof step.texture === "string"
-						? step.texture
-						: `${projectNamespace}:item/${resolvedItem}`;
-				return buildParentModel({
-					parent,
-					texture,
-					item: resolvedItem,
-					namespace: projectNamespace,
-				});
-			}
-			if (mp.kind === "itemDefinition" && step.type === "itemDefinition") {
-				const item =
-					typeof step.item === "string" && step.item.trim() !== ""
-						? step.item
-						: tp.targetId;
-				const inferred = itemFromModelPath(mp.path);
-				if (inferred !== undefined && inferred !== item) {
-					continue;
-				}
-				const resolvedItem = inferred ?? item;
-				const model = typeof step.model === "string" ? step.model : undefined;
-				const definition = isJsonObject(step.definition)
-					? (step.definition as Record<string, unknown>)
-					: undefined;
-				const defaultModel =
-					model ?? `${projectNamespace}:item/${resolvedItem}`;
-				return buildItemDefinitionDocument(definition, defaultModel);
-			}
-		}
-		throw new McAssetError(
-			"INTERNAL_ERROR",
-			`No matching step for planned output '${mp.path}'.`,
-			{
-				targetId: tp.targetId,
-			},
-		);
-	}
-
-	function itemFromModelPath(path: string): string | undefined {
-		const match = /\/(models\/item|items)\/(.+)\.json$/.exec(path);
-		return match?.[2];
 	}
 
 	// 3. Write planned targets to disk

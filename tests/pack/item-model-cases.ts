@@ -46,6 +46,7 @@ async function withProject(
 	body: (projectDir: string) => Promise<void>,
 	initOptions?: {
 		resourcePackVersion?: string;
+		minecraftVersion?: string;
 		namespace?: string;
 		allowMinecraftNamespace?: boolean;
 	},
@@ -55,7 +56,7 @@ async function withProject(
 	await initializePackProject({
 		projectDir,
 		namespace: initOptions?.namespace ?? NAMESPACE,
-		minecraftVersion: "1.21.9",
+		minecraftVersion: initOptions?.minecraftVersion ?? "1.21.9",
 		resourcePackVersion: initOptions?.resourcePackVersion,
 		allowMinecraftNamespace: initOptions?.allowMinecraftNamespace,
 		name: "forge",
@@ -73,6 +74,14 @@ async function withProject(
 async function bytesAt(path: string): Promise<Uint8Array | null> {
 	try {
 		return await readFile(path);
+	} catch {
+		return null;
+	}
+}
+
+async function textAt(path: string): Promise<string | null> {
+	try {
+		return await readFile(path, "utf8");
 	} catch {
 		return null;
 	}
@@ -757,6 +766,367 @@ export const ITEM_MODEL_CASES = [
 					),
 					null,
 					"no texture is written at the declared output",
+				);
+			});
+		},
+	},
+	{
+		name: "26.2 refuses the removed bed special model type and writes nothing",
+		async run() {
+			await withProject(
+				async (projectDir) => {
+					const recipePath = join(
+						projectDir,
+						"recipes",
+						"bed-special.recipe.json",
+					);
+					await writeFile(
+						recipePath,
+						`${JSON.stringify(
+							{
+								formatVersion: 2,
+								id: "bed-special",
+								targets: [
+									{
+										id: "bed_item",
+										steps: [
+											{
+												type: "itemDefinition",
+												definition: {
+													type: "special",
+													base: "minecraft:item/bed",
+													model: {
+														type: "minecraft:bed",
+														texture: "minecraft:entity/bed/red",
+													},
+												},
+											},
+										],
+									},
+								],
+							},
+							null,
+							2,
+						)}\n`,
+						"utf8",
+					);
+					const refusal = await refusalOf(async () =>
+						planPackBuild(join(projectDir, "mc-asset.pack.json"), {
+							recipe: recipePath,
+						}),
+					);
+					assert.equal(refusal.code, "RECIPE_VERSION_UNSUPPORTED");
+					assert.equal(refusal.details?.type, "minecraft:bed");
+					assert.equal(refusal.details?.since, "88.0");
+					assert.equal(refusal.details?.actualFormat, "88.0");
+					assert.equal(refusal.details?.targetId, "bed_item");
+					assert.equal(
+						await bytesAt(join(projectDir, "mc-asset.lock.json")),
+						null,
+						"nothing is built",
+					);
+					assert.equal(
+						await bytesAt(
+							join(
+								projectDir,
+								"pack",
+								"assets",
+								NAMESPACE,
+								"items",
+								"bed_item.json",
+							),
+						),
+						null,
+						"no item definition is written",
+					);
+				},
+				{ minecraftVersion: "26.2" },
+			);
+		},
+	},
+	{
+		name: "26.1 still writes the bed special model type",
+		async run() {
+			await withProject(
+				async (projectDir) => {
+					const recipePath = join(
+						projectDir,
+						"recipes",
+						"bed-special.recipe.json",
+					);
+					await writeFile(
+						recipePath,
+						`${JSON.stringify(
+							{
+								formatVersion: 2,
+								id: "bed-special",
+								targets: [
+									{
+										id: "bed_item",
+										steps: [
+											{
+												type: "itemDefinition",
+												definition: {
+													type: "special",
+													base: "minecraft:item/bed",
+													model: {
+														type: "minecraft:bed",
+														texture: "minecraft:entity/bed/red",
+													},
+												},
+											},
+										],
+									},
+								],
+							},
+							null,
+							2,
+						)}\n`,
+						"utf8",
+					);
+					const executed = await executePackBuild(
+						await planPackBuild(join(projectDir, "mc-asset.pack.json"), {
+							recipe: recipePath,
+						}),
+					);
+					assert.equal(executed.completed.length, 1);
+					const document = JSON.parse(
+						(await textAt(
+							join(
+								projectDir,
+								"pack",
+								"assets",
+								NAMESPACE,
+								"items",
+								"bed_item.json",
+							),
+						)) ?? "{}",
+					) as { model?: { model?: { type?: string } } };
+					assert.equal(document.model?.model?.type, "minecraft:bed");
+				},
+				{ minecraftVersion: "26.1" },
+			);
+		},
+	},
+	{
+		name: "26.3 refuses the removed map_color tint source and writes nothing",
+		async run() {
+			await withProject(
+				async (projectDir) => {
+					const recipePath = join(
+						projectDir,
+						"recipes",
+						"map-color.recipe.json",
+					);
+					await writeFile(
+						recipePath,
+						`${JSON.stringify(
+							{
+								formatVersion: 2,
+								id: "map-color",
+								targets: [
+									{
+										id: "map_item",
+										steps: [
+											{
+												type: "itemDefinition",
+												definition: {
+													type: "model",
+													model: "minecraft:item/filled_map",
+													tints: [{ type: "minecraft:map_color" }],
+												},
+											},
+										],
+									},
+								],
+							},
+							null,
+							2,
+						)}\n`,
+						"utf8",
+					);
+					const refusal = await refusalOf(async () =>
+						planPackBuild(join(projectDir, "mc-asset.pack.json"), {
+							recipe: recipePath,
+						}),
+					);
+					assert.equal(refusal.code, "RECIPE_VERSION_UNSUPPORTED");
+					assert.equal(refusal.details?.type, "minecraft:map_color");
+					assert.equal(refusal.details?.since, "95.0");
+					assert.equal(refusal.details?.actualFormat, "97.1");
+					assert.equal(refusal.details?.targetId, "map_item");
+					assert.equal(
+						await bytesAt(join(projectDir, "mc-asset.lock.json")),
+						null,
+						"nothing is built",
+					);
+					assert.equal(
+						await bytesAt(
+							join(
+								projectDir,
+								"pack",
+								"assets",
+								NAMESPACE,
+								"items",
+								"map_item.json",
+							),
+						),
+						null,
+						"no item definition is written",
+					);
+				},
+				{ minecraftVersion: "26.3" },
+			);
+		},
+	},
+	{
+		name: "26.1 still writes the map_color tint source",
+		async run() {
+			await withProject(
+				async (projectDir) => {
+					const recipePath = join(
+						projectDir,
+						"recipes",
+						"map-color.recipe.json",
+					);
+					await writeFile(
+						recipePath,
+						`${JSON.stringify(
+							{
+								formatVersion: 2,
+								id: "map-color",
+								targets: [
+									{
+										id: "map_item",
+										steps: [
+											{
+												type: "itemDefinition",
+												definition: {
+													type: "model",
+													model: "minecraft:item/filled_map",
+													tints: [{ type: "minecraft:map_color" }],
+												},
+											},
+										],
+									},
+								],
+							},
+							null,
+							2,
+						)}\n`,
+						"utf8",
+					);
+					const executed = await executePackBuild(
+						await planPackBuild(join(projectDir, "mc-asset.pack.json"), {
+							recipe: recipePath,
+						}),
+					);
+					assert.equal(executed.completed.length, 1);
+					const document = JSON.parse(
+						(await textAt(
+							join(
+								projectDir,
+								"pack",
+								"assets",
+								NAMESPACE,
+								"items",
+								"map_item.json",
+							),
+						)) ?? "{}",
+					) as { model?: { tints?: Array<{ type?: string }> } };
+					assert.equal(document.model?.tints?.[0]?.type, "minecraft:map_color");
+				},
+				{ minecraftVersion: "26.1" },
+			);
+		},
+	},
+	{
+		name: "an explicit non-string node property is refused instead of defaulted",
+		async run() {
+			await withProject(async (projectDir) => {
+				const nodes: Record<
+					string,
+					(property: unknown) => Record<string, unknown>
+				> = {
+					condition: (property) => ({
+						type: "condition",
+						property,
+						on_true: "minecraft:item/stone",
+						on_false: "minecraft:item/stone",
+					}),
+					select: (property) => ({
+						type: "select",
+						property,
+						cases: [],
+						fallback: "minecraft:item/stone",
+					}),
+					range_dispatch: (property) => ({
+						type: "range_dispatch",
+						property,
+						entries: [],
+						fallback: "minecraft:item/stone",
+					}),
+				};
+				const badProperties: unknown[] = [
+					42,
+					["minecraft:damaged"],
+					{ id: "minecraft:damaged" },
+					null,
+				];
+				let attempt = 0;
+				for (const [node, build] of Object.entries(nodes)) {
+					for (const property of badProperties) {
+						attempt += 1;
+						const name = `bad-property-${attempt}`;
+						const recipePath = join(
+							projectDir,
+							"recipes",
+							`${name}.recipe.json`,
+						);
+						await writeFile(
+							recipePath,
+							`${JSON.stringify(
+								{
+									formatVersion: 2,
+									id: name,
+									targets: [
+										{
+											id: `bad_property_${attempt}`,
+											steps: [
+												{
+													type: "itemDefinition",
+													definition: build(property),
+												},
+											],
+										},
+									],
+								},
+								null,
+								2,
+							)}\n`,
+							"utf8",
+						);
+						const refusal = await refusalOf(async () =>
+							planPackBuild(join(projectDir, "mc-asset.pack.json"), {
+								recipe: recipePath,
+							}),
+						);
+						assert.equal(
+							refusal.code,
+							"RECIPE_INVALID",
+							`${node} with explicit ${Array.isArray(property) ? "array" : property === null ? "null" : typeof property} property is refused`,
+						);
+						assert.equal(
+							refusal.details?.field,
+							"model.property",
+							`${node} names the property field`,
+						);
+					}
+				}
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+					"nothing is built",
 				);
 			});
 		},

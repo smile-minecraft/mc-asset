@@ -6,6 +6,7 @@
 
 import { McAssetError } from "../core/errors.ts";
 import { isJsonObject, isPathInsideDirectory } from "./document.ts";
+import { collectJsonOutputsForStep } from "./item-plan.ts";
 import { compareCodeUnits } from "./skeleton.ts";
 
 export interface RecipeSource {
@@ -65,6 +66,12 @@ const SUPPORTED_STEP_TYPES: ReadonlySet<string> = new Set([
 	"operations",
 	"model",
 	"itemDefinition",
+]);
+
+/** Steps formatVersion 2 adds; formatVersion 1 recipes keep refusing them. */
+const FORMAT_VERSION_2_STEP_TYPES: ReadonlySet<string> = new Set([
+	"blockModel",
+	"blockstate",
 ]);
 
 const IMAGE_STEP_TYPES: ReadonlySet<string> = new Set([
@@ -141,7 +148,7 @@ export function parseRecipeText(text: string): RecipeDocument {
 			{ field: "formatVersion" },
 		);
 	}
-	if (formatVersion > 1) {
+	if (formatVersion > 2) {
 		throw new McAssetError(
 			"RECIPE_UNSUPPORTED_VERSION",
 			`Unsupported recipe formatVersion: ${formatVersion}`,
@@ -370,13 +377,38 @@ export function parseRecipeText(text: string): RecipeDocument {
 					{ targetId: rawTarget.id, stepIndex },
 				);
 			}
-			if (!SUPPORTED_STEP_TYPES.has(rawStep.type)) {
+			if (
+				!SUPPORTED_STEP_TYPES.has(rawStep.type) &&
+				!(formatVersion >= 2 && FORMAT_VERSION_2_STEP_TYPES.has(rawStep.type))
+			) {
+				if (
+					formatVersion < 2 &&
+					FORMAT_VERSION_2_STEP_TYPES.has(rawStep.type)
+				) {
+					throw new McAssetError(
+						"RECIPE_INVALID",
+						`Target '${rawTarget.id}' step at index ${stepIndex} uses '${rawStep.type}', which requires recipe formatVersion 2.`,
+						{
+							targetId: rawTarget.id,
+							stepIndex,
+							stepType: rawStep.type,
+							requiredFormatVersion: 2,
+						},
+					);
+				}
 				throw new McAssetError(
 					"RECIPE_INVALID",
 					`Target '${rawTarget.id}' step at index ${stepIndex} has unsupported step type '${rawStep.type}'.`,
-					{ targetId: rawTarget.id, stepIndex, stepType: rawStep.type },
+					{
+						targetId: rawTarget.id,
+						stepIndex,
+						stepType: rawStep.type,
+					},
 				);
 			}
+			// formatVersion 1 keeps its historical fallback: an unknown
+			// definition type degenerates to the simple model document
+			// instead of being refused. Only formatVersion 2 is strict.
 			steps.push({ ...rawStep, type: rawStep.type });
 		}
 
@@ -433,7 +465,11 @@ function extractPlaceholders(text: string, out: Set<string>): void {
 	}
 }
 
-/** Collect placeholders across all string fields of a target. */
+/**
+ * Collect placeholders across all string fields of a target, object keys
+ * included: a blockstate variant key such as `facing={direction}` uses the
+ * variable just as a value does.
+ */
 function collectTargetPlaceholders(
 	target: RecipeTarget,
 	out: Set<string>,
@@ -454,7 +490,10 @@ function collectTargetPlaceholders(
 		} else if (Array.isArray(val)) {
 			for (const item of val) walkValues(item);
 		} else if (isJsonObject(val)) {
-			for (const v of Object.values(val)) walkValues(v);
+			for (const [key, item] of Object.entries(val)) {
+				extractPlaceholders(key, out);
+				walkValues(item);
+			}
 		}
 	};
 	walkValues(target.steps);
@@ -473,17 +512,29 @@ function substituteString(
 function substituteValue(
 	value: unknown,
 	scope: Readonly<Record<string, string>>,
+	targetId: string,
 ): unknown {
 	if (typeof value === "string") {
 		return substituteString(value, scope);
 	}
 	if (Array.isArray(value)) {
-		return value.map((item) => substituteValue(item, scope));
+		return value.map((item) => substituteValue(item, scope, targetId));
 	}
 	if (isJsonObject(value)) {
 		const out: Record<string, unknown> = {};
-		for (const [k, v] of Object.entries(value)) {
-			out[k] = substituteValue(v, scope);
+		const sources = new Map<string, string>();
+		for (const [key, item] of Object.entries(value)) {
+			const substituted = substituteString(key, scope);
+			const previous = sources.get(substituted);
+			if (previous !== undefined) {
+				throw new McAssetError(
+					"RECIPE_INVALID",
+					`Variable substitution produced duplicate key '${substituted}' for target '${targetId}' (from '${previous}' and '${key}').`,
+					{ targetId, key: substituted, keys: [previous, key] },
+				);
+			}
+			sources.set(substituted, key);
+			out[substituted] = substituteValue(item, scope, targetId);
 		}
 		return out;
 	}
@@ -600,7 +651,7 @@ export function expandRecipeTargets(
 				assertAssetNamespaceSegment(output);
 			}
 
-			const steps = substituteValue(target.steps, scope) as RecipeStep[];
+			const steps = substituteValue(target.steps, scope, id) as RecipeStep[];
 
 			for (const step of steps) {
 				if (step.type === "sweep" && typeof step.mcmetaOutput === "string") {
@@ -657,28 +708,23 @@ export function expandRecipeTargets(
 			}
 			seenOutputs.add(t.output);
 		}
-		for (const step of t.steps) {
+		for (const [stepIndex, step] of t.steps.entries()) {
 			if (step.type === "sweep" && typeof step.mcmetaOutput === "string") {
 				if (seenOutputs.has(step.mcmetaOutput)) {
 					dupeOutputs.add(step.mcmetaOutput);
 				}
 				seenOutputs.add(step.mcmetaOutput);
 			}
-			if (step.type === "model") {
-				const item = typeof step.item === "string" ? step.item : t.id;
-				const modelRel = `assets/${namespace}/models/item/${item}.json`;
-				if (seenOutputs.has(modelRel)) {
-					dupeOutputs.add(modelRel);
+			for (const output of collectJsonOutputsForStep(
+				step,
+				t.id,
+				namespace,
+				stepIndex,
+			)) {
+				if (seenOutputs.has(output.path)) {
+					dupeOutputs.add(output.path);
 				}
-				seenOutputs.add(modelRel);
-			}
-			if (step.type === "itemDefinition") {
-				const item = typeof step.item === "string" ? step.item : t.id;
-				const itemRel = `assets/${namespace}/items/${item}.json`;
-				if (seenOutputs.has(itemRel)) {
-					dupeOutputs.add(itemRel);
-				}
-				seenOutputs.add(itemRel);
+				seenOutputs.add(output.path);
 			}
 		}
 	}
