@@ -1501,7 +1501,7 @@ export const BLOCK_MODEL_CASES = [
 		async run() {
 			await withProject(async (projectDir) => {
 				const recipePath = await writeRecipe(projectDir, "future", {
-					formatVersion: 3,
+					formatVersion: 4,
 					id: "future",
 					targets: [
 						{
@@ -1520,7 +1520,7 @@ export const BLOCK_MODEL_CASES = [
 					planPackBuild(join(projectDir, PROJECT), { recipe: recipePath }),
 				);
 				assert.equal(refusal.code, "RECIPE_UNSUPPORTED_VERSION");
-				assert.equal(refusal.details?.formatVersion, 3);
+				assert.equal(refusal.details?.formatVersion, 4);
 				assert.equal(
 					await bytesAt(join(projectDir, "mc-asset.lock.json")),
 					null,

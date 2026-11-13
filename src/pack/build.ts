@@ -74,8 +74,14 @@ import {
 	isRelativeProjectPath,
 } from "./document.ts";
 import {
+	GENERATED_STEP_TYPES,
+	type GeneratedInput,
+	type GeneratedOutputKind,
+	planGeneratedStep,
+} from "./generate.ts";
+import {
 	collectJsonOutputsForStep,
-	isJsonOnlyTarget,
+	hasPlannedTexture,
 	type JsonOutputKind,
 	resolveStepItemName,
 } from "./item-plan.ts";
@@ -141,6 +147,23 @@ export interface ModelOutputPlan {
 	computedText?: string | undefined;
 }
 
+/**
+ * One file a generator-backed step plans. The bytes exist at plan time, so a
+ * dry run, a conflict check, and the eventual write all describe the same
+ * file; `judgement` and `needsRewrite` are filled once the target input hash
+ * is known.
+ */
+export interface GeneratedOutputPlan {
+	readonly path: string;
+	readonly kind: GeneratedOutputKind;
+	readonly extension: ".png" | ".json" | ".mcpx";
+	readonly stepIndex: number;
+	readonly bytes: Uint8Array;
+	readonly outputHash: string;
+	judgement: BuildOutputJudgement;
+	needsRewrite: boolean;
+}
+
 export interface TargetPlanInternal {
 	readonly targetId: string;
 	readonly recipeId: string;
@@ -159,6 +182,7 @@ export interface TargetPlanInternal {
 	readonly texturePlan?: TextureOutputPlanInternal | undefined;
 	readonly mcmetaPlan?: McmetaPlanInternal | undefined;
 	readonly modelPlans?: readonly ModelOutputPlan[] | undefined;
+	readonly generatedPlans?: readonly GeneratedOutputPlan[] | undefined;
 }
 
 export interface PackBuildPlan {
@@ -452,7 +476,7 @@ export async function planPackBuild(
 			project.outputDir,
 		);
 		for (const target of expanded) {
-			if (!isJsonOnlyTarget(target)) {
+			if (hasPlannedTexture(target)) {
 				const texturePath = target.output
 					? `${project.outputDir}/${target.output}`
 					: `${project.outputDir}/assets/${project.namespace}/textures/item/${target.id}.png`;
@@ -478,6 +502,9 @@ export async function planPackBuild(
 		recipes.push({ file, recipe, expanded });
 	}
 
+	// Declared outputs are counted before any source is read, exactly as
+	// before; generator-backed outputs join the count during planning and the
+	// same budget is checked again once every plan exists.
 	if (totalOutputCount > 4096) {
 		throw new McAssetError(
 			"RESOURCE_LIMIT_EXCEEDED",
@@ -692,18 +719,58 @@ export async function planPackBuild(
 				}
 			}
 
+			// Generator-backed steps plan every byte here, before the first
+			// write: the target input hash covers the files they read, and a
+			// refused step plans nothing at all.
+			const generatedPlans: GeneratedOutputPlan[] = [];
+			const stepInputs: GeneratedInput[] = [];
+			for (const [stepIndex, step] of target.steps.entries()) {
+				if (!GENERATED_STEP_TYPES.has(step.type)) {
+					continue;
+				}
+				const planned = await planGeneratedStep({
+					targetId: target.id,
+					stepIndex,
+					step,
+					namespace: project.namespace,
+					packFormat: format,
+					recipeDir: dirname(recipeFile),
+				});
+				stepInputs.push(...planned.inputs);
+				for (const output of planned.outputs) {
+					generatedPlans.push({
+						path: `${project.outputDir}/${output.relativePath}`,
+						kind: output.kind,
+						extension: output.extension,
+						stepIndex,
+						bytes: output.bytes,
+						outputHash: sha256Hex(output.bytes),
+						judgement: "new",
+						needsRewrite: true,
+					});
+					totalOutputCount += 1;
+				}
+			}
+
 			const normalizedInput = {
 				toolVersion: getToolVersion(),
 				styleHash,
 				sources: sourcesList.sort((a, b) => compareCodeUnits(a.ref, b.ref)),
+				...(stepInputs.length === 0
+					? {}
+					: {
+							stepInputs: [...stepInputs].sort((a, b) =>
+								compareCodeUnits(a.ref, b.ref),
+							),
+						}),
 				steps: target.steps,
 			};
 			const inputHash = sha256Hex(canonicalCompactJson(normalizedInput));
 
-			// A target without a source has no image pipeline: its steps are JSON
-			// steps only, and it plans no texture half at all.
+			// A target without a source and without an image step has no image
+			// pipeline: it plans exactly the files its steps own.
 			let texturePlan: TextureOutputPlanInternal | undefined;
-			if (!isJsonOnlyTarget(target)) {
+			if (hasPlannedTexture(target)) {
 				const outputRelPath = target.output
 					? `${project.outputDir}/${target.output}`
 					: `${project.outputDir}/assets/${project.namespace}/textures/item/${target.id}.png`;
@@ -842,6 +909,27 @@ export async function planPackBuild(
 				}
 			}
 
+			// Classify generator-backed outputs against the lock and disk once
+			// the target input hash is final. Registration here also applies
+			// the duplicate-output rule across every planned family.
+			for (const gp of generatedPlans) {
+				assertOutputInsideOutputDir(gp.path, target, project.outputDir);
+				registerOutput(gp.path);
+				const classified = classifyOutput(
+					join(projectDir, gp.path),
+					lock?.outputs?.[gp.path],
+					inputHash,
+				);
+				gp.judgement = classified.judgement;
+				gp.needsRewrite = classified.needsRewrite;
+				outputs.push({
+					path: gp.path,
+					judgement: classified.judgement,
+					targetId: target.id,
+					recipeId: recipe.id,
+				});
+			}
+
 			targetPlans.push({
 				targetId: target.id,
 				recipeId: recipe.id,
@@ -860,8 +948,17 @@ export async function planPackBuild(
 				texturePlan,
 				mcmetaPlan,
 				modelPlans,
+				generatedPlans,
 			});
 		}
+	}
+
+	if (totalOutputCount > 4096) {
+		throw new McAssetError(
+			"RESOURCE_LIMIT_EXCEEDED",
+			`Planned outputs (${totalOutputCount}) exceed budget of 4096.`,
+			{ count: totalOutputCount, limit: 4096 },
+		);
 	}
 
 	let totalSourceBytes = 0;
@@ -1102,7 +1199,8 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 		(tp) =>
 			tp.texturePlan?.needsRewrite ||
 			tp.mcmetaPlan?.needsRewrite ||
-			(tp.modelPlans ?? []).some((mp) => mp.needsRewrite),
+			(tp.modelPlans ?? []).some((mp) => mp.needsRewrite) ||
+			(tp.generatedPlans ?? []).some((gp) => gp.needsRewrite),
 	);
 
 	if (targetsToExecute.length === 0) {
@@ -1132,6 +1230,15 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 				outputTargets.push({
 					path: resolve(projectDir, mp.path),
 					extension: ".json",
+					allowOverwrite: true,
+				});
+			}
+		}
+		for (const gp of tp.generatedPlans ?? []) {
+			if (gp.needsRewrite) {
+				outputTargets.push({
+					path: resolve(projectDir, gp.path),
+					extension: gp.extension,
 					allowOverwrite: true,
 				});
 			}
@@ -1396,6 +1503,14 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 			payloads.set(resolve(projectDir, mp.path), bytes);
 			completedPaths.push(mp.path);
 		}
+
+		for (const gp of tp.generatedPlans ?? []) {
+			if (!gp.needsRewrite) {
+				continue;
+			}
+			payloads.set(resolve(projectDir, gp.path), gp.bytes);
+			completedPaths.push(gp.path);
+		}
 	}
 
 	// 3. Write planned targets to disk
@@ -1440,6 +1555,17 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 				inputHash: tp.inputHash,
 				outputHash: tp.mcmetaPlan.computedOutputHash,
 			};
+		}
+		for (const gp of tp.generatedPlans ?? []) {
+			if (gp.needsRewrite) {
+				updatedOutputs[gp.path] = {
+					targetId: tp.targetId,
+					recipeId: tp.recipeId,
+					kind: gp.kind,
+					inputHash: tp.inputHash,
+					outputHash: gp.outputHash,
+				};
+			}
 		}
 	}
 

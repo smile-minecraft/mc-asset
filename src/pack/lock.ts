@@ -13,18 +13,27 @@ import {
 } from "./document.ts";
 import { compareCodeUnits } from "./skeleton.ts";
 
+/** The output families a build records in the lock. */
+export const LOCK_ENTRY_KINDS = [
+	"texture",
+	"model",
+	"itemDefinition",
+	"mcmeta",
+	"blockModel",
+	"blockItemModel",
+	"blockstate",
+	"entityTemplate",
+	"entityTemplateSource",
+] as const;
+
+/** One output family a lock entry can name. */
+export type LockEntryKind = (typeof LOCK_ENTRY_KINDS)[number];
+
 /** A lock entry for one planned output. */
 export interface LockEntry {
 	readonly targetId: string;
 	readonly recipeId: string;
-	readonly kind:
-		| "texture"
-		| "model"
-		| "itemDefinition"
-		| "mcmeta"
-		| "blockModel"
-		| "blockItemModel"
-		| "blockstate";
+	readonly kind: LockEntryKind;
 	readonly category?: string | undefined;
 	readonly inputHash: string;
 	readonly outputHash: string;
@@ -163,13 +172,8 @@ export function parseLockText(text: string): LockDocument {
 			);
 		}
 		if (
-			kind !== "texture" &&
-			kind !== "model" &&
-			kind !== "itemDefinition" &&
-			kind !== "mcmeta" &&
-			kind !== "blockModel" &&
-			kind !== "blockItemModel" &&
-			kind !== "blockstate"
+			typeof kind !== "string" ||
+			!(LOCK_ENTRY_KINDS as readonly string[]).includes(kind)
 		) {
 			throw new McAssetError(
 				"PACK_LOCK_INVALID",
@@ -204,7 +208,7 @@ export function parseLockText(text: string): LockDocument {
 		outputs[key] = {
 			targetId,
 			recipeId,
-			kind,
+			kind: kind as LockEntryKind,
 			...(category !== undefined ? { category } : {}),
 			inputHash,
 			outputHash,

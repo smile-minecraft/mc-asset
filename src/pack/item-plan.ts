@@ -149,23 +149,26 @@ export function collectJsonOutputsForStep(
 	return [];
 }
 
+/** Steps that paint the target texture. */
+const IMAGE_STEP_TYPES: ReadonlySet<string> = new Set([
+	"recolor",
+	"outline",
+	"sweep",
+	"operations",
+]);
+
 /**
- * Whether a target produces JSON documents only.
+ * Whether a target plans a texture half.
  *
- * A target that declares no source has no image pipeline: the recipe reader
- * refuses image steps without a source, so its steps are JSON steps only.
- * Such a target plans JSON outputs only — no texture output, no canvas, no
- * PNG. A target that declares a source keeps its texture output even when
- * every step is a JSON step, because the source image is the texture it
- * copies into the pack.
+ * A declared source is the texture the target copies into the pack, so it
+ * always counts — even when every step is a JSON step. Without a source the
+ * recipe reader refuses image steps, so only image steps can still ask for
+ * one. A target whose steps are JSON documents or generator-backed families
+ * plans only the files those steps own: no blank canvas, no PNG.
  */
-export function isJsonOnlyTarget(target: RecipeTarget): boolean {
+export function hasPlannedTexture(target: RecipeTarget): boolean {
 	return (
-		target.source === undefined &&
-		target.steps.every((step) =>
-			["model", "itemDefinition", "blockModel", "blockstate"].includes(
-				step.type,
-			),
-		)
+		target.source !== undefined ||
+		target.steps.some((step) => IMAGE_STEP_TYPES.has(step.type))
 	);
 }
