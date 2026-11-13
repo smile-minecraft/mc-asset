@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import {
+	access,
 	mkdir,
 	mkdtemp,
 	readFile,
@@ -930,6 +931,96 @@ export const PARTICLE_CASES: readonly ParticleCase[] = [
 						"utf8",
 					),
 					"sentinel-sprite",
+				);
+			});
+		},
+	},
+	{
+		name: "a case-distinct external directory linked as assets/demo is refused via CLI and MCP on case-sensitive filesystems",
+		async run() {
+			await withTempDir(async (dir) => {
+				const probe = join(dir, "case-probe");
+				await writeFile(probe, "x");
+				let caseSensitive = false;
+				try {
+					await access(join(dir, "CASE-PROBE"));
+				} catch {
+					caseSensitive = true;
+				}
+				if (!caseSensitive) return;
+
+				const packcli = join(dir, "packcli");
+				const PACKCLI = join(dir, "PACKCLI");
+				await mkdir(join(packcli, "assets"), { recursive: true });
+				await mkdir(join(PACKCLI, "particles"), { recursive: true });
+				await mkdir(join(PACKCLI, "textures", "particle"), {
+					recursive: true,
+				});
+				const sentinelDefinition = "sentinel-definition";
+				const sentinelSprite = "sentinel-sprite";
+				await writeFile(
+					join(PACKCLI, "particles", "spark.json"),
+					sentinelDefinition,
+				);
+				await writeFile(
+					join(PACKCLI, "textures", "particle", "spark_0.png"),
+					sentinelSprite,
+				);
+				await symlink(PACKCLI, join(packcli, "assets", "demo"));
+
+				const framesDir = join(dir, "frames");
+				await writeFrames(framesDir, ["frame_0.png"]);
+
+				const cli = await runParticleCli([
+					"particle",
+					framesDir,
+					"--id",
+					"spark",
+					"--namespace",
+					"demo",
+					"--output-dir",
+					packcli,
+					"--force",
+					"--mkdir",
+					"--json",
+				]);
+				assert.equal(cli.code, 2, stdoutText(cli));
+				const cliFailure = JSON.parse(stdoutText(cli)) as {
+					error: { code: string; details?: { reason?: string } };
+				};
+				assert.equal(cliFailure.error.code, "INVALID_ARGUMENT");
+				assert.equal(cliFailure.error.details?.reason, "outside-allowed-root");
+				assert.equal(
+					await readText(join(PACKCLI, "particles", "spark.json")),
+					sentinelDefinition,
+				);
+				assert.equal(
+					await readText(join(PACKCLI, "textures", "particle", "spark_0.png")),
+					sentinelSprite,
+				);
+
+				const mcp = await handleParticleAsset({
+					inputPath: framesDir,
+					outputDir: packcli,
+					namespace: "demo",
+					id: "spark",
+					force: true,
+					mkdir: true,
+				});
+				assert.equal(mcp.isError, true);
+				const mcpFailure = JSON.parse(mcpText(mcp)) as {
+					code: string;
+					details?: { reason?: string };
+				};
+				assert.equal(mcpFailure.code, "INVALID_ARGUMENT");
+				assert.equal(mcpFailure.details?.reason, "outside-allowed-root");
+				assert.equal(
+					await readText(join(PACKCLI, "particles", "spark.json")),
+					sentinelDefinition,
+				);
+				assert.equal(
+					await readText(join(PACKCLI, "textures", "particle", "spark_0.png")),
+					sentinelSprite,
 				);
 			});
 		},
