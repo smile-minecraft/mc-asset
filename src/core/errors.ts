@@ -92,6 +92,11 @@ export type ErrorCode =
 	| "MODEL_INVALID_DISPLAY"
 	| "MODEL_VERSION_FEATURE"
 	| "MODEL_SUSPICIOUS_VALUE"
+	| "BBMODEL_UNSUPPORTED_FORMAT"
+	| "BBMODEL_UNSUPPORTED_VERSION"
+	| "BBMODEL_INVALID_DOCUMENT"
+	| "BBMODEL_INVALID_TEXTURE"
+	| "BBMODEL_MISSING_TEXTURE"
 	| "EMPTY_SELECTION"
 	| "SELF_INTERSECTING_POLYGON"
 	| "TRANSACTION_FAILED";
@@ -175,6 +180,14 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	MODEL_INVALID_DISPLAY: 3,
 	MODEL_VERSION_FEATURE: 3,
 	MODEL_SUSPICIOUS_VALUE: 3,
+	// Blockbench project exchange. A non-java_block project, a malformed
+	// document, and a damaged embedded texture are input refusals; a newer
+	// project format version is the one exchange code that exits 5.
+	BBMODEL_UNSUPPORTED_FORMAT: 2,
+	BBMODEL_UNSUPPORTED_VERSION: 5,
+	BBMODEL_INVALID_DOCUMENT: 2,
+	BBMODEL_INVALID_TEXTURE: 2,
+	BBMODEL_MISSING_TEXTURE: 2,
 	// A selection-scoped write whose read scope matched no pixels.
 	EMPTY_SELECTION: 2,
 	// A polygon whose nonadjacent edges touch or cross (holes unsupported).
