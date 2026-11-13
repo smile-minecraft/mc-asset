@@ -1454,7 +1454,7 @@ export const TOOL_INPUT_SCHEMAS = {
 			.record(z.unknown())
 			.optional()
 			.describe(
-				"Inline font spec object with the same fields as the document (formatVersion, namespace, id, height, ascent, and icons at least). Exactly one of specPath and spec.",
+				"Inline font spec object with the same fields as the document (formatVersion, namespace, id, icons at least; height and ascent are top-level defaults or per-icon values). Exactly one of specPath and spec.",
 			),
 		outputPath: z
 			.string()
@@ -1468,7 +1468,14 @@ export const TOOL_INPUT_SCHEMAS = {
 			.min(1)
 			.optional()
 			.describe(
-				"Explicit atlas .png output path. When omitted the PNG bytes embed as pngBase64.",
+				"Explicit atlas .png output path for a spec with one height/ascent group. When omitted the PNG bytes embed as pngBase64.",
+			),
+		atlasDirPath: z
+			.string()
+			.min(1)
+			.optional()
+			.describe(
+				"Explicit directory receiving one atlas .png per height/ascent group, each named from its texture location. Use instead of atlasPath when the spec mixes geometries.",
 			),
 		tablePath: z
 			.string()

@@ -4,12 +4,15 @@ import { CANVAS_MAX_EDGE } from "../core/validate.ts";
 import { validateResourceLocation } from "../validate/resource-location.ts";
 
 /**
- * Font icon spec document: the icon list plus the one provider geometry the
- * atlas is built from. Parsing is strict and side-effect free: every field
- * is checked here, so a rejected document never reaches the layout or the
- * write phase. The parsed value is the invariant the planner trusts: icons
- * are sorted by name, every explicit code point is unique and inside the
- * BMP private use area, and `ascent` never exceeds `height`.
+ * Font icon spec document: the icon list plus the geometry each atlas is
+ * built from. Parsing is strict and side-effect free: every field is checked
+ * here, so a rejected document never reaches the layout or the write phase.
+ * The parsed value is the invariant the planner trusts: icons are sorted by
+ * name, every explicit code point is unique and inside the BMP private use
+ * area, and every icon carries the `height`/`ascent` pair its provider will
+ * use. `height` and `ascent` are optional at the top level as defaults, so a
+ * document may set them per icon instead; `ascent` may be negative (vanilla
+ * uses that to move an icon down) but never above `height`.
  */
 
 /** The only spec format this build reads. */
@@ -41,7 +44,7 @@ const TOP_FIELDS = new Set([
 	"icons",
 ]);
 
-const ICON_FIELDS = new Set(["name", "path", "codePoint"]);
+const ICON_FIELDS = new Set(["name", "path", "codePoint", "height", "ascent"]);
 const SPACE_FIELDS = new Set(["advance", "codePoint"]);
 
 const NAMESPACE_PATTERN = /^[a-z0-9_.-]+$/;
@@ -50,12 +53,16 @@ const SCALAR_LAST = 0x10ffff;
 const SURROGATE_FIRST = 0xd800;
 const SURROGATE_LAST = 0xdfff;
 
-/** One icon: the mapping key, its image path, and an optional fixed code point. */
+/** One icon: the mapping key, its image path, its geometry, and an optional fixed code point. */
 export interface FontSpecIcon {
 	readonly name: string;
 	/** Image path; a relative path resolves against the spec file's directory. */
 	readonly path: string;
 	readonly codePoint?: number | undefined;
+	/** Bitmap provider height this icon needs; the top-level value when not overridden. */
+	readonly height: number;
+	/** Bitmap provider ascent this icon needs; the top-level value when not overridden. */
+	readonly ascent: number;
 }
 
 /** Optional `space` provider: one character with a fixed advance. */
@@ -70,20 +77,20 @@ export interface FontSpec {
 	readonly formatVersion: typeof FONT_SPEC_FORMAT_VERSION;
 	readonly namespace: string;
 	readonly id: string;
-	/** Bitmap provider height in pixels; also the atlas cell height. */
-	readonly height: number;
-	/** Bitmap provider ascent in pixels, at most `height`. */
-	readonly ascent: number;
+	/** Default provider height for icons that do not set their own. */
+	readonly height?: number | undefined;
+	/** Default provider ascent for icons that do not set their own. */
+	readonly ascent?: number | undefined;
 	/** First code point the automatic allocation may use. */
 	readonly start: number;
-	/** Fixed column count; omitted means `min(icon count, 16)`. */
+	/** Fixed column count per atlas; omitted means `min(icon count, 16)`. */
 	readonly columns?: number | undefined;
-	/** Bitmap `file` resource location, `.png` included. */
+	/** Bitmap `file` resource location of the first atlas, `.png` included. */
 	readonly texture: string;
 	/** Optional `reference` provider target font id. */
 	readonly reference?: string | undefined;
 	readonly space?: FontSpace | undefined;
-	/** Icons sorted by name in UTF-16 code-unit order. */
+	/** Icons sorted by name in UTF-16 code-unit order, each with its own geometry. */
 	readonly icons: readonly FontSpecIcon[];
 }
 
@@ -214,7 +221,12 @@ function scalarValue(
 	return value;
 }
 
-/** A code point given as an integer or as a one-character string. */
+/**
+ * A code point given as an integer or as a one-character string. A string is
+ * split into code points, not UTF-16 units, so a non-BMP character counts as
+ * one; the value it yields still goes through the same scalar-value rule, so
+ * a lone surrogate is refused however it was written.
+ */
 function requireCodePoint(
 	value: unknown,
 	options: FontSpecParseOptions,
@@ -241,7 +253,11 @@ function requireCodePoint(
 				`"${options.source}" field "${field}" must be exactly one character; got ${describeValue(value)}.`,
 			);
 		}
-		return (characters[0] as string).codePointAt(0) as number;
+		return scalarValue(
+			(characters[0] as string).codePointAt(0) as number,
+			options,
+			field,
+		);
 	}
 	fail(
 		"FONT_INVALID",
@@ -291,10 +307,46 @@ function requireResourceLocation(
 	return location;
 }
 
+/** An ascent is any integer from -CANVAS_MAX_EDGE up to the height it belongs to. */
+function requireAscent(
+	value: unknown,
+	options: FontSpecParseOptions,
+	field: string,
+	height: number,
+): number {
+	if (
+		typeof value !== "number" ||
+		!Number.isInteger(value) ||
+		value < -CANVAS_MAX_EDGE ||
+		value > height
+	) {
+		fail(
+			"FONT_INVALID",
+			options,
+			field,
+			`"${options.source}" field "${field}" must be an integer in [-${CANVAS_MAX_EDGE}, ${height}] (an ascent never sits above its height); got ${describeValue(value)}.`,
+		);
+	}
+	return value;
+}
+
+/** Defaults an icon inherits when it names no `height` or `ascent` of its own. */
+interface IconGeometryDefaults {
+	readonly height?: number | undefined;
+	readonly ascent?: number | undefined;
+}
+
+/**
+ * Read one icon and resolve the `height`/`ascent` pair its bitmap provider
+ * will use: the icon's own value, else the top-level default. A missing pair
+ * and an ascent above the height are refused here, naming the icon, because
+ * the planner groups icons by the resolved pair.
+ */
 function parseIcon(
 	value: unknown,
 	options: FontSpecParseOptions,
 	index: number,
+	defaults: IconGeometryDefaults,
 ): FontSpecIcon {
 	const field = `icons[${index}]`;
 	const record = requireRecord(value, options, field, "icon entry");
@@ -305,21 +357,66 @@ function parseIcon(
 		record.codePoint === undefined
 			? undefined
 			: requireIconCodePoint(record.codePoint, options, `${field}.codePoint`);
+	const height =
+		record.height === undefined
+			? defaults.height
+			: requireInteger(
+					record.height,
+					options,
+					`${field}.height`,
+					1,
+					CANVAS_MAX_EDGE,
+				);
+	if (height === undefined) {
+		fail(
+			"FONT_INVALID",
+			options,
+			`${field}.height`,
+			`"${options.source}" icon "${name}" has no height; set "${field}.height" or the top-level "height".`,
+			{ name },
+		);
+	}
+	const ascent =
+		record.ascent === undefined
+			? defaults.ascent
+			: requireAscent(record.ascent, options, `${field}.ascent`, height);
+	if (ascent === undefined) {
+		fail(
+			"FONT_INVALID",
+			options,
+			`${field}.ascent`,
+			`"${options.source}" icon "${name}" has no ascent; set "${field}.ascent" or the top-level "ascent".`,
+			{ name },
+		);
+	}
+	if (ascent > height) {
+		fail(
+			"FONT_INVALID",
+			options,
+			`${field}.ascent`,
+			`"${options.source}" icon "${name}" has ascent ${ascent} above its height ${height}.`,
+			{ name, ascent, height },
+		);
+	}
 	return {
 		name,
 		path: resolve(options.baseDir, path),
 		...(codePoint === undefined ? {} : { codePoint }),
+		height,
+		ascent,
 	};
 }
 
 function parseSpace(value: unknown, options: FontSpecParseOptions): FontSpace {
 	const record = requireRecord(value, options, "space", "space provider");
 	checkFields(record, SPACE_FIELDS, options, "space");
+	// Vanilla `space` advances are signed: a negative value pulls the cursor
+	// back, so a glyph can be written over the previous one.
 	const advance = requireInteger(
 		record.advance,
 		options,
 		"space.advance",
-		0,
+		-CANVAS_MAX_EDGE,
 		CANVAS_MAX_EDGE,
 	);
 	const codePoint =
@@ -406,14 +503,29 @@ export function parseFontSpec(
 			`"${options.source}" field "id" must match [a-z0-9._-]; got "${id}".`,
 		);
 	}
-	const height = requireInteger(
-		record.height,
-		options,
-		"height",
-		1,
-		CANVAS_MAX_EDGE,
-	);
-	const ascent = requireInteger(record.ascent, options, "ascent", 0, height);
+	const height =
+		record.height === undefined
+			? undefined
+			: requireInteger(record.height, options, "height", 1, CANVAS_MAX_EDGE);
+	const ascent =
+		record.ascent === undefined
+			? undefined
+			: requireInteger(
+					record.ascent,
+					options,
+					"ascent",
+					-CANVAS_MAX_EDGE,
+					CANVAS_MAX_EDGE,
+				);
+	if (height !== undefined && ascent !== undefined && ascent > height) {
+		fail(
+			"FONT_INVALID",
+			options,
+			"ascent",
+			`"${options.source}" has ascent ${ascent} above height ${height}.`,
+			{ ascent, height },
+		);
+	}
 	const start =
 		record.start === undefined
 			? FONT_PUA_FIRST
@@ -460,7 +572,7 @@ export function parseFontSpec(
 		);
 	}
 	const icons = rawIcons
-		.map((entry, index) => parseIcon(entry, options, index))
+		.map((entry, index) => parseIcon(entry, options, index, { height, ascent }))
 		.sort((left, right) =>
 			left.name < right.name ? -1 : left.name > right.name ? 1 : 0,
 		);
@@ -506,8 +618,8 @@ export function parseFontSpec(
 		formatVersion: FONT_SPEC_FORMAT_VERSION,
 		namespace,
 		id,
-		height,
-		ascent,
+		...(height === undefined ? {} : { height }),
+		...(ascent === undefined ? {} : { ascent }),
 		start,
 		...(columns === undefined ? {} : { columns }),
 		texture,

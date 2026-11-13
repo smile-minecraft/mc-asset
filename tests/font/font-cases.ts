@@ -10,7 +10,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { OutputStreams } from "../../src/cli/channels.ts";
-import { runFontRequest } from "../../src/cli/cmd-font.ts";
+import { type FontRequest, runFontRequest } from "../../src/cli/cmd-font.ts";
 import { runValidatePack } from "../../src/cli/cmd-validate-pack.ts";
 import {
 	addLayer,
@@ -226,21 +226,26 @@ export const FONT_CASES: readonly FontCase[] = [
 					atlasPath,
 					tablePath,
 					mkdir: true,
-					requireOutput: true,
+					requireArtifactPaths: true,
 				});
 				const result = outcome.result;
+				const atlas = result.atlases[0];
 				check.equal(result.font, "example:icons");
-				check.equal(result.texture, "example:font/icons.png");
+				check.equal(result.atlases.length, 1);
+				check.equal(atlas?.texture, "example:font/icons.png");
 				check.equal(result.icons, 3);
-				check.equal(result.columns, 3);
-				check.equal(result.rows, 1);
-				check.equal(result.height, 8);
-				check.equal(result.ascent, 7);
+				check.equal(atlas?.icons, 3);
+				check.equal(atlas?.columns, 3);
+				check.equal(atlas?.rows, 1);
+				check.equal(atlas?.height, 8);
+				check.equal(atlas?.ascent, 7);
+				check.equal(atlas?.atlasWidth, 24);
+				check.equal(atlas?.atlasHeight, 8);
 				check.equal(result.output, outputPath);
-				check.equal(result.atlas, atlasPath);
+				check.equal(atlas?.atlas, atlasPath);
 				check.equal(result.table, tablePath);
 				check.equal(result.definitionText, undefined);
-				check.equal(result.pngBase64, undefined);
+				check.equal(atlas?.pngBase64, undefined);
 
 				const definition = await readFile(outputPath, "utf8");
 				check.equal(definition, DEFINITION_THREE);
@@ -331,7 +336,7 @@ export const FONT_CASES: readonly FontCase[] = [
 						outputPath,
 						atlasPath,
 						tablePath,
-						requireOutput: true,
+						requireArtifactPaths: true,
 					});
 					return {
 						definition: await readFile(outputPath),
@@ -387,7 +392,7 @@ export const FONT_CASES: readonly FontCase[] = [
 						atlasPath,
 						tablePath,
 						force: true,
-						requireOutput: true,
+						requireArtifactPaths: true,
 					}),
 				);
 				check.equal(refused?.code, "FONT_CODEPOINT_CONFLICT");
@@ -410,12 +415,14 @@ export const FONT_CASES: readonly FontCase[] = [
 				const specPath = await writeSpec(dir, spec);
 				const outputPath = join(dir, "font.json");
 				const atlasPath = join(dir, "icons.png");
+				const tablePath = join(dir, "table.json");
 				const refused = await refusalCode(() =>
 					runFontRequest({
 						specPath,
 						outputPath,
 						atlasPath,
-						requireOutput: true,
+						tablePath,
+						requireArtifactPaths: true,
 					}),
 				);
 				check.equal(refused?.code, "FONT_INVALID");
@@ -425,6 +432,7 @@ export const FONT_CASES: readonly FontCase[] = [
 				);
 				check.equal(await exists(outputPath), false);
 				check.equal(await exists(atlasPath), false);
+				check.equal(await exists(tablePath), false);
 			});
 		},
 	},
@@ -444,7 +452,7 @@ export const FONT_CASES: readonly FontCase[] = [
 				const specPath = await writeSpec(dir, spec);
 				const outcome = await runFontRequest({
 					specPath,
-					requireOutput: false,
+					requireArtifactPaths: false,
 				});
 				const table = JSON.parse(outcome.result.tableText ?? "") as {
 					icons: Array<{ name: string; codePoint: number }>;
@@ -487,9 +495,12 @@ export const FONT_CASES: readonly FontCase[] = [
 				const specPath = await writeSpec(dir, spec);
 				const outcome = await runFontRequest({
 					specPath,
-					requireOutput: false,
+					requireArtifactPaths: false,
 				});
-				check.equal(outcome.result.texture, "example:font/custom.png");
+				check.equal(
+					outcome.result.atlases[0]?.texture,
+					"example:font/custom.png",
+				);
 				check.deepEqual(outcome.result.space, {
 					character: " ",
 					codePoint: 0x20,
@@ -548,22 +559,28 @@ export const FONT_CASES: readonly FontCase[] = [
 				const specPath = await writeSpec(dir, spec);
 				const outcome = await runFontRequest({
 					specPath,
-					requireOutput: false,
+					requireArtifactPaths: false,
 				});
 				const result = outcome.result;
-				check.equal(result.columns, 2);
-				check.equal(result.rows, 3);
-				check.equal(result.atlas, undefined);
+				const atlas = result.atlases[0];
+				check.equal(atlas?.columns, 2);
+				check.equal(atlas?.rows, 3);
+				check.equal(atlas?.atlas, undefined);
 				const definition = JSON.parse(result.definitionText ?? "") as {
 					providers: Array<{ chars: string[] }>;
 				};
 				check.deepEqual(definition.providers[0]?.chars, [
 					"\uE000\uE001",
 					"\uE002\uE003",
-					"\uE004",
+					"\uE004\u0000",
 				]);
+				// Minecraft rejects a provider whose rows differ in cell
+				// count, so the short last row is padded with U+0000.
+				for (const row of definition.providers[0]?.chars ?? []) {
+					check.equal([...row].length, 2, "every row has two cells");
+				}
 				const decoded = decodePng(
-					Buffer.from(result.pngBase64 ?? "", "base64"),
+					Buffer.from(atlas?.pngBase64 ?? "", "base64"),
 				);
 				check.equal(decoded.canvas.width, 12);
 				check.equal(decoded.canvas.height, 24);
@@ -584,7 +601,7 @@ export const FONT_CASES: readonly FontCase[] = [
 				spec.icons = [{ name: "apple", path: "icons/apple.png" }];
 				const specPath = await writeSpec(dir, spec);
 				const refused = await refusalCode(() =>
-					runFontRequest({ specPath, requireOutput: false }),
+					runFontRequest({ specPath, requireArtifactPaths: false }),
 				);
 				check.equal(refused?.code, "FONT_INVALID");
 				check.ok(
@@ -684,7 +701,9 @@ export const FONT_CASES: readonly FontCase[] = [
 						runFontRequest({
 							specPath,
 							outputPath,
-							requireOutput: true,
+							atlasPath: join(dir, `case-${index}.png.out`),
+							tablePath: join(dir, `case-${index}.table.out`),
+							requireArtifactPaths: true,
 						}),
 					);
 					check.equal(
@@ -709,21 +728,21 @@ export const FONT_CASES: readonly FontCase[] = [
 		name: "the shared pipeline requires exactly one spec source",
 		async run(check) {
 			const missing = await refusalCode(() =>
-				runFontRequest({ requireOutput: false }),
+				runFontRequest({ requireArtifactPaths: false }),
 			);
 			check.equal(missing?.code, "INVALID_ARGUMENT");
 			const both = await refusalCode(() =>
 				runFontRequest({
 					specPath: "a.json",
 					spec: { formatVersion: 1 },
-					requireOutput: false,
+					requireArtifactPaths: false,
 				}),
 			);
 			check.equal(both?.code, "INVALID_ARGUMENT");
 			const noOutput = await refusalCode(() =>
 				runFontRequest({
 					spec: { formatVersion: 1 },
-					requireOutput: true,
+					requireArtifactPaths: true,
 				}),
 			);
 			check.equal(noOutput?.code, "INVALID_ARGUMENT");
@@ -745,7 +764,8 @@ export const FONT_CASES: readonly FontCase[] = [
 					specPath,
 					outputPath,
 					atlasPath,
-					requireOutput: true,
+					tablePath: join(dir, "table-out.json"),
+					requireArtifactPaths: true,
 				};
 				await runFontRequest(request);
 				const before = await readFile(outputPath);
@@ -770,11 +790,11 @@ export const FONT_CASES: readonly FontCase[] = [
 					outputPath: join(dir, "font.json"),
 					atlasPath: join(dir, "icons.png"),
 					tablePath: join(dir, "table.json"),
-					requireOutput: true,
+					requireArtifactPaths: true,
 				});
 				const embedded = await runFontRequest({
 					specPath,
-					requireOutput: false,
+					requireArtifactPaths: false,
 				});
 				check.equal(
 					embedded.result.definitionText,
@@ -783,7 +803,7 @@ export const FONT_CASES: readonly FontCase[] = [
 				);
 				check.equal(embedded.result.tableText, TABLE_THREE);
 				check.equal(
-					embedded.result.pngBase64,
+					embedded.result.atlases[0]?.pngBase64,
 					Buffer.from(
 						new Uint8Array(await readFile(join(dir, "icons.png"))),
 					).toString("base64"),
@@ -801,10 +821,11 @@ export const FONT_CASES: readonly FontCase[] = [
 					command: string;
 					font: string;
 					output: string;
-					atlas: string;
+					atlases: Array<{ atlas: string }>;
 				};
 				check.equal(body.command, "font");
 				check.equal(body.font, "example:icons");
+				check.equal(body.atlases[0]?.atlas, join(dir, "mcp-icons.png"));
 				check.equal(
 					await readFile(join(dir, "mcp-font.json"), "utf8"),
 					DEFINITION_THREE,
@@ -820,6 +841,565 @@ export const FONT_CASES: readonly FontCase[] = [
 				check.ok(
 					mismatch.isError === true,
 					"two spec sources are refused by the tool",
+				);
+			});
+		},
+	},
+	{
+		name: "every chars row of a multi-row provider has the same cell count",
+		async run(check) {
+			await withTempDir(async (dir) => {
+				const icons: Array<{ name: string; path: string }> = [];
+				for (let index = 0; index < 17; index += 1) {
+					const name = `icon-${String(index).padStart(2, "0")}`;
+					const path = await writeIcon(dir, name, RED, 4);
+					icons.push({ name, path });
+				}
+				const spec = {
+					formatVersion: 1,
+					namespace: "example",
+					id: "many",
+					height: 8,
+					ascent: 7,
+					icons,
+				};
+				const specPath = await writeSpec(dir, spec);
+				const outcome = await runFontRequest({
+					specPath,
+					requireArtifactPaths: false,
+				});
+				const definition = JSON.parse(outcome.result.definitionText ?? "") as {
+					providers: Array<{ chars: string[] }>;
+				};
+				const rows = definition.providers[0]?.chars ?? [];
+				check.equal(rows.length, 2, "17 icons over 16 columns make two rows");
+				for (const row of rows) {
+					check.equal([...row].length, 16, "each row has 16 cells");
+				}
+				const lastRow = [...(rows[1] as string)];
+				check.deepEqual(
+					lastRow.map((character) => character.codePointAt(0)),
+					[0xe010, ...Array.from({ length: 15 }, () => 0)],
+					"the second row holds the last icon and 15 U+0000 cells",
+				);
+			});
+		},
+	},
+	{
+		name: "the spec file and the icon images are never writable, even with force",
+		async run(check) {
+			await withTempDir(async (dir) => {
+				const iconPath = join(dir, await writeIcon(dir, "apple", RED));
+				const specPath = await writeSpec(dir, {
+					...baseSpec(),
+					icons: [{ name: "apple", path: "icons/apple.png" }],
+				});
+				const specHash = sha256(await readFile(specPath));
+				const iconHash = sha256(await readFile(iconPath));
+				const atlasPath = join(dir, "atlas.png");
+				const tablePath = join(dir, "table.json");
+				const refusals = [
+					{ label: "--output", extra: { outputPath: specPath } },
+					{ label: "--table", extra: { tablePath: specPath } },
+					{ label: "--atlas", extra: { atlasPath: iconPath } },
+				];
+				for (const refusal of refusals) {
+					const refused = await refusalCode(() =>
+						runFontRequest({
+							specPath,
+							outputPath: join(dir, "font.json"),
+							atlasPath,
+							tablePath,
+							force: true,
+							requireArtifactPaths: true,
+							...refusal.extra,
+						}),
+					);
+					check.equal(
+						refused?.code,
+						"ARGUMENT_CONFLICT",
+						`${refusal.label} may not alias an input`,
+					);
+				}
+				check.equal(sha256(await readFile(specPath)), specHash);
+				check.equal(sha256(await readFile(iconPath)), iconHash);
+				for (const path of [join(dir, "font.json"), atlasPath, tablePath]) {
+					check.equal(
+						await exists(path),
+						false,
+						"the refused batch wrote nothing",
+					);
+				}
+			});
+		},
+	},
+	{
+		name: "icons with different height and ascent pairs get one atlas each",
+		async run(check) {
+			await withTempDir(async (dir) => {
+				await writeIcon(dir, "apple", RED, 8);
+				await writeIcon(dir, "banana", GREEN, 16);
+				await writeIcon(dir, "cherry", BLUE, 12);
+				const icons = [
+					{ name: "apple", path: "icons/apple.png" },
+					{ name: "banana", path: "icons/banana.png", height: 16, ascent: 16 },
+					{ name: "cherry", path: "icons/cherry.png", height: 12, ascent: -4 },
+				];
+				const spec = {
+					formatVersion: 1,
+					namespace: "example",
+					id: "mixed",
+					height: 8,
+					ascent: 7,
+					icons,
+				};
+				const reversed = { ...spec, icons: [icons[2], icons[0], icons[1]] };
+				const forwardPath = await writeSpec(dir, spec, "mixed.json");
+				const reversedPath = await writeSpec(
+					dir,
+					reversed,
+					"mixed-reversed.json",
+				);
+				const runInto = async (specPath: string, stem: string) => {
+					const pack = join(dir, stem);
+					const outcome = await runFontRequest({
+						specPath,
+						outputPath: join(pack, "assets/example/font/mixed.json"),
+						atlasDirPath: join(pack, "assets/example/textures/font"),
+						tablePath: join(dir, `${stem}-table.json`),
+						mkdir: true,
+						requireArtifactPaths: true,
+					});
+					return {
+						outcome,
+						pack,
+						definition: await readFile(
+							join(pack, "assets/example/font/mixed.json"),
+						),
+						table: await readFile(join(dir, `${stem}-table.json`)),
+					};
+				};
+				const first = await runInto(forwardPath, "forward");
+				const second = await runInto(reversedPath, "reversed");
+				const result = first.outcome.result;
+				check.deepEqual(
+					result.atlases.map((atlas) => [
+						atlas.texture,
+						atlas.height,
+						atlas.ascent,
+					]),
+					[
+						["example:font/mixed_h8a7.png", 8, 7],
+						["example:font/mixed_h12a-4.png", 12, -4],
+						["example:font/mixed_h16a16.png", 16, 16],
+					],
+					"one atlas per pair, smallest height first",
+				);
+				check.deepEqual(
+					result.atlases.map((atlas) => [
+						atlas.icons,
+						atlas.atlasWidth,
+						atlas.atlasHeight,
+					]),
+					[
+						[1, 8, 8],
+						[1, 12, 12],
+						[1, 16, 16],
+					],
+				);
+				check.equal(
+					first.definition.toString("utf8"),
+					`{
+  "providers": [
+    {
+      "ascent": 7,
+      "chars": [
+        "\uE000"
+      ],
+      "file": "example:font/mixed_h8a7.png",
+      "height": 8,
+      "type": "bitmap"
+    },
+    {
+      "ascent": -4,
+      "chars": [
+        "\uE002"
+      ],
+      "file": "example:font/mixed_h12a-4.png",
+      "height": 12,
+      "type": "bitmap"
+    },
+    {
+      "ascent": 16,
+      "chars": [
+        "\uE001"
+      ],
+      "file": "example:font/mixed_h16a16.png",
+      "height": 16,
+      "type": "bitmap"
+    }
+  ]
+}
+`,
+				);
+				const table = JSON.parse(first.table.toString("utf8")) as {
+					icons: Array<{ name: string; codePoint: number }>;
+				};
+				check.deepEqual(
+					table.icons.map((icon) => [icon.name, icon.codePoint]),
+					[
+						["apple", 0xe000],
+						["banana", 0xe001],
+						["cherry", 0xe002],
+					],
+					"one code-point space across every group",
+				);
+				check.equal(
+					sha256(first.definition),
+					sha256(second.definition),
+					"the definition does not depend on the icon order",
+				);
+				check.equal(sha256(first.table), sha256(second.table));
+				for (const name of [
+					"mixed_h8a7.png",
+					"mixed_h12a-4.png",
+					"mixed_h16a16.png",
+				]) {
+					check.equal(
+						sha256(
+							new Uint8Array(
+								await readFile(
+									join(first.pack, "assets/example/textures/font", name),
+								),
+							),
+						),
+						sha256(
+							new Uint8Array(
+								await readFile(
+									join(second.pack, "assets/example/textures/font", name),
+								),
+							),
+						),
+						`${name} is byte-identical`,
+					);
+				}
+				// The pack sees each provider's texture: every bitmap file
+				// resolves, so a spec with mixed geometries validates.
+				const captured = captureStreams();
+				const code = await runValidatePack(
+					first.pack,
+					{ resourcePackVersion: "46" },
+					true,
+					captured.streams,
+				);
+				check.equal(code, 0, "validate-pack exits 0");
+				const envelope = JSON.parse(captured.stdoutText()) as {
+					result: {
+						verdict: string;
+						findings: Array<{ code: string; level: string }>;
+					};
+				};
+				check.equal(envelope.result.verdict, "pass");
+				check.deepEqual(
+					envelope.result.findings.filter(
+						(finding) => finding.level === "error",
+					),
+					[],
+					"no error findings",
+				);
+
+				// Without any path every atlas embeds; a directory sink is
+				// the tool's form for writing several atlases at once.
+				const embedded = await runFontRequest({
+					specPath: forwardPath,
+					requireArtifactPaths: false,
+				});
+				check.equal(embedded.result.atlases.length, 3);
+				check.ok(
+					embedded.result.atlases.every(
+						(atlas) => (atlas.pngBase64 ?? "").length > 0,
+					),
+					"every atlas embeds when no path is given",
+				);
+				const mcpDir = join(dir, "mcp-atlases");
+				const mcp = await handleFontAsset({
+					specPath: forwardPath,
+					atlasDirPath: mcpDir,
+					mkdir: true,
+				});
+				const mcpText = mcp.content.find((entry) => entry.type === "text");
+				const mcpBody = JSON.parse(
+					mcpText?.type === "text" ? mcpText.text : "{}",
+				) as { atlases: Array<{ atlas: string; texture: string }> };
+				check.deepEqual(
+					mcpBody.atlases.map((atlas) => atlas.texture),
+					[
+						"example:font/mixed_h8a7.png",
+						"example:font/mixed_h12a-4.png",
+						"example:font/mixed_h16a16.png",
+					],
+				);
+				for (const atlas of mcpBody.atlases) {
+					check.equal(await exists(atlas.atlas), true, atlas.atlas);
+				}
+			});
+		},
+	},
+	{
+		name: "an icon inherits the top-level geometry it does not override",
+		async run(check) {
+			await withTempDir(async (dir) => {
+				await writeIcon(dir, "apple", RED, 8);
+				await writeIcon(dir, "banana", GREEN, 12);
+				await writeIcon(dir, "cherry", BLUE, 8);
+				const spec = {
+					formatVersion: 1,
+					namespace: "example",
+					id: "inherit",
+					height: 8,
+					ascent: 7,
+					icons: [
+						{ name: "apple", path: "icons/apple.png" },
+						{ name: "banana", path: "icons/banana.png", height: 12 },
+						{ name: "cherry", path: "icons/cherry.png", ascent: 4 },
+					],
+				};
+				const specPath = await writeSpec(dir, spec);
+				const outcome = await runFontRequest({
+					specPath,
+					requireArtifactPaths: false,
+				});
+				check.deepEqual(
+					outcome.result.atlases.map((atlas) => [
+						atlas.height,
+						atlas.ascent,
+						atlas.icons,
+					]),
+					[
+						[8, 4, 1],
+						[8, 7, 1],
+						[12, 7, 1],
+					],
+					"cherry keeps height 8 and takes ascent 4; banana keeps ascent 7",
+				);
+				// Without any top-level pair the icons must each name one.
+				const perIcon = {
+					formatVersion: 1,
+					namespace: "example",
+					id: "per-icon",
+					icons: [
+						{ name: "apple", path: "icons/apple.png", height: 8, ascent: 7 },
+						{ name: "cherry", path: "icons/cherry.png", height: 8, ascent: 7 },
+					],
+				};
+				const perIconPath = await writeSpec(dir, perIcon, "per-icon.json");
+				const perIconOutcome = await runFontRequest({
+					specPath: perIconPath,
+					requireArtifactPaths: false,
+				});
+				check.equal(
+					perIconOutcome.result.atlases.length,
+					1,
+					"one shared pair stays one atlas",
+				);
+				check.equal(
+					perIconOutcome.result.atlases[0]?.texture,
+					"example:font/per-icon.png",
+					"a single group keeps the base texture",
+				);
+				const missing = await refusalCode(() =>
+					runFontRequest({
+						spec: {
+							formatVersion: 1,
+							namespace: "example",
+							id: "missing",
+							icons: [{ name: "apple", path: "icons/apple.png", height: 8 }],
+						},
+						requireArtifactPaths: false,
+					}),
+				);
+				check.equal(missing?.code, "FONT_INVALID");
+				check.ok(
+					missing?.message.includes("ascent"),
+					"the message names the missing ascent",
+				);
+			});
+		},
+	},
+	{
+		name: "negative ascent and negative space advance are accepted",
+		async run(check) {
+			await withTempDir(async (dir) => {
+				await writeIcon(dir, "apple", RED);
+				const spec = {
+					...baseSpec(),
+					ascent: -13,
+					space: { advance: -8 },
+					icons: [{ name: "apple", path: "icons/apple.png" }],
+				};
+				const specPath = await writeSpec(dir, spec);
+				const outcome = await runFontRequest({
+					specPath,
+					requireArtifactPaths: false,
+				});
+				const definition = JSON.parse(outcome.result.definitionText ?? "") as {
+					providers: Array<{
+						type: string;
+						ascent?: number;
+						advances?: Record<string, number>;
+					}>;
+				};
+				check.equal(definition.providers[0]?.ascent, -13);
+				check.deepEqual(definition.providers[1]?.advances, { " ": -8 });
+				check.deepEqual(outcome.result.space, {
+					character: " ",
+					codePoint: 0x20,
+					advance: -8,
+				});
+			});
+		},
+	},
+	{
+		name: "a lone surrogate code point is refused, a non-BMP one is not",
+		async run(check) {
+			await withTempDir(async (dir) => {
+				await writeIcon(dir, "apple", RED);
+				const spec = {
+					...baseSpec(),
+					space: { advance: 4, codePoint: "\u{1F600}" },
+					icons: [{ name: "apple", path: "icons/apple.png" }],
+				};
+				const specPath = await writeSpec(dir, spec);
+				const outcome = await runFontRequest({
+					specPath,
+					requireArtifactPaths: false,
+				});
+				const definition = JSON.parse(outcome.result.definitionText ?? "") as {
+					providers: Array<{ advances?: Record<string, number> }>;
+				};
+				check.deepEqual(
+					definition.providers[1]?.advances,
+					{ "\u{1F600}": 4 },
+					"a surrogate pair counts as one character",
+				);
+
+				const loneSurrogate = {
+					...baseSpec(),
+					space: { advance: 4, codePoint: "\uD800" },
+					icons: [{ name: "apple", path: "icons/apple.png" }],
+				};
+				const lonePath = await writeSpec(dir, loneSurrogate, "lone.json");
+				const outputPath = join(dir, "lone-out.json");
+				const refused = await refusalCode(() =>
+					runFontRequest({
+						specPath: lonePath,
+						outputPath,
+						atlasPath: join(dir, "lone.png"),
+						tablePath: join(dir, "lone-table.json"),
+						requireArtifactPaths: true,
+					}),
+				);
+				check.equal(refused?.code, "FONT_INVALID");
+				check.ok(
+					refused?.message.includes("Unicode scalar value"),
+					"the message explains the surrogate problem",
+				);
+				check.equal(await exists(outputPath), false);
+			});
+		},
+	},
+	{
+		name: "the CLI shape requires the definition, an atlas sink, and the table",
+		async run(check) {
+			await withTempDir(async (dir) => {
+				await writeIcon(dir, "apple", RED);
+				const specPath = await writeSpec(dir, {
+					...baseSpec(),
+					icons: [{ name: "apple", path: "icons/apple.png" }],
+				});
+				const outputPath = join(dir, "font.json");
+				const atlasPath = join(dir, "atlas.png");
+				const tablePath = join(dir, "table.json");
+				const partialRequests: Array<
+					Omit<FontRequest, "specPath" | "requireArtifactPaths">
+				> = [
+					{ atlasPath, tablePath },
+					{ outputPath, atlasPath },
+					{ outputPath, tablePath },
+				];
+				for (const [index, partial] of partialRequests.entries()) {
+					const refused = await refusalCode(() =>
+						runFontRequest({
+							specPath,
+							requireArtifactPaths: true,
+							...partial,
+						}),
+					);
+					check.equal(
+						refused?.code,
+						"INVALID_ARGUMENT",
+						`missing paths ${index} is refused`,
+					);
+				}
+				for (const path of [outputPath, atlasPath, tablePath]) {
+					check.equal(await exists(path), false, "nothing is written");
+				}
+			});
+		},
+	},
+	{
+		name: "a single atlas path is refused when the spec needs several",
+		async run(check) {
+			await withTempDir(async (dir) => {
+				await writeIcon(dir, "apple", RED, 8);
+				await writeIcon(dir, "banana", GREEN, 16);
+				const spec = {
+					...baseSpec(),
+					icons: [
+						{ name: "apple", path: "icons/apple.png" },
+						{
+							name: "banana",
+							path: "icons/banana.png",
+							height: 16,
+							ascent: 16,
+						},
+					],
+				};
+				const specPath = await writeSpec(dir, spec);
+				const outputPath = join(dir, "font.json");
+				const atlasPath = join(dir, "atlas.png");
+				const tablePath = join(dir, "table.json");
+				const refused = await refusalCode(() =>
+					runFontRequest({
+						specPath,
+						outputPath,
+						atlasPath,
+						tablePath,
+						requireArtifactPaths: true,
+					}),
+				);
+				check.equal(refused?.code, "ARGUMENT_CONFLICT");
+				check.ok(
+					refused?.message.includes("--output-dir"),
+					"the message names the directory option",
+				);
+				for (const path of [outputPath, atlasPath, tablePath]) {
+					check.equal(await exists(path), false, "nothing is written");
+				}
+				const both = await refusalCode(() =>
+					runFontRequest({
+						specPath,
+						outputPath,
+						atlasPath,
+						atlasDirPath: dir,
+						tablePath,
+						requireArtifactPaths: true,
+					}),
+				);
+				check.equal(both?.code, "ARGUMENT_CONFLICT");
+				check.ok(
+					both?.message.includes("one atlas sink"),
+					"the message explains the exclusive choice",
 				);
 			});
 		},

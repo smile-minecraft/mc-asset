@@ -178,7 +178,7 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 	{
 		name: "font_asset",
 		description:
-			"Lay icon images (PNG or .mcpx) into one grid-aligned bitmap font atlas and build the font definition (bitmap plus optional space and reference providers) and the icon-to-character table. Icons are sorted by name and code points are allocated deterministically, so shuffled input produces byte-identical artifacts. A duplicate code point, an ascent above height, or an over-tall icon is refused before anything is written.",
+			"Lay icon images (PNG or .mcpx) into grid-aligned bitmap font atlases and build the font definition (one bitmap provider per height/ascent group, plus optional space and reference providers) and the icon-to-character table. Each icon may set its own height and ascent; icons that share a pair share one atlas, and a spec with several pairs writes one atlas per pair. Icons are sorted by name and code points are allocated deterministically, so shuffled input produces byte-identical artifacts. Every chars row is padded to the column count with U+0000, ascent may be negative, and space advances are signed. A duplicate code point, an ascent above its height, or an over-tall icon is refused before anything is written.",
 		inputSchema: TOOL_INPUT_SCHEMAS.font_asset,
 	},
 ];

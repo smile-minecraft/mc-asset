@@ -3248,11 +3248,12 @@ export async function handlePackAsset(
 }
 
 /**
- * font_asset: build one icon font from a spec document. The atlas, the
+ * font_asset: build one icon font from a spec document. The atlases, the
  * font definition, and the icon table come from the same `runFontRequest`
  * pipeline the CLI uses, so the embedded bytes and the written files are
  * identical. Without an explicit path an artifact is embedded instead of
- * written; a rejected spec, a code-point collision, or an over-tall icon
+ * written; a directory sink covers a spec with several height/ascent
+ * groups. A rejected spec, a code-point collision, or an over-tall icon
  * refuses before any output is planned.
  */
 export async function handleFontAsset(
@@ -3264,10 +3265,13 @@ export async function handleFontAsset(
 			...(args.spec === undefined ? {} : { spec: args.spec }),
 			...(args.outputPath === undefined ? {} : { outputPath: args.outputPath }),
 			...(args.atlasPath === undefined ? {} : { atlasPath: args.atlasPath }),
+			...(args.atlasDirPath === undefined
+				? {}
+				: { atlasDirPath: args.atlasDirPath }),
 			...(args.tablePath === undefined ? {} : { tablePath: args.tablePath }),
 			...(args.force === undefined ? {} : { force: args.force }),
 			...(args.mkdir === undefined ? {} : { mkdir: args.mkdir }),
-			requireOutput: false,
+			requireArtifactPaths: false,
 		});
 		return textResult({ ...outcome.result });
 	} catch (error) {

@@ -1751,11 +1751,18 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 	program
 		.command("font <spec>")
 		.description(
-			"Lay icon images into one bitmap font atlas and write the font definition, the atlas PNG, and the icon-to-character table.",
+			"Lay icon images into grid-aligned bitmap font atlases and write the font definition, one atlas PNG per height/ascent group, and the icon-to-character table.",
 		)
-		.option("--output <path>", "Explicit font definition .json output path.")
-		.option("--atlas <path>", "Explicit atlas .png output path.")
-		.option("--table <path>", "Explicit icon table .json output path.")
+		.option("--output <path>", "Font definition .json output path (required).")
+		.option("--atlas <path>", "Atlas .png output path; one atlas group only.")
+		.option(
+			"--output-dir <dir>",
+			"Directory receiving one atlas .png per height/ascent group.",
+		)
+		.option(
+			"--table <path>",
+			"Icon-to-character table .json output path (required).",
+		)
 		.option("--force", "Allow overwriting existing output files.")
 		.option("--mkdir", "Create missing parent directories.")
 		.action(async (spec: string, options: FontCliOptions, command: Command) => {

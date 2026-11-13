@@ -1,5 +1,6 @@
 export {
 	type FontAtlas,
+	type FontAtlasPlan,
 	type FontBitmapProvider,
 	type FontDefinition,
 	type FontGlyphSource,
