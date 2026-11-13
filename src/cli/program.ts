@@ -14,6 +14,7 @@ import { type AnimateOptions, runAnimate } from "./cmd-animate.ts";
 import { type BuildOptions, runBuild } from "./cmd-build.ts";
 import { type CleanupOptions, runCleanup } from "./cmd-cleanup.ts";
 import { type CompareCliOptions, runCompare } from "./cmd-compare.ts";
+import { type FontCliOptions, runFont } from "./cmd-font.ts";
 import { type GenerateOptions, runGenerate } from "./cmd-generate.ts";
 import { type GuiScaleOptions, runGuiScale } from "./cmd-gui-scale.ts";
 import { type ImportOptions, runImport } from "./cmd-import.ts";
@@ -1746,6 +1747,22 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 			);
 		});
 	}
+
+	program
+		.command("font <spec>")
+		.description(
+			"Lay icon images into one bitmap font atlas and write the font definition, the atlas PNG, and the icon-to-character table.",
+		)
+		.option("--output <path>", "Explicit font definition .json output path.")
+		.option("--atlas <path>", "Explicit atlas .png output path.")
+		.option("--table <path>", "Explicit icon table .json output path.")
+		.option("--force", "Allow overwriting existing output files.")
+		.option("--mkdir", "Create missing parent directories.")
+		.action(async (spec: string, options: FontCliOptions, command: Command) => {
+			const globals = command.optsWithGlobals<{ json?: boolean }>();
+			const code = await runFont(spec, options, globals.json === true, streams);
+			process.exitCode = code;
+		});
 
 	return program;
 }

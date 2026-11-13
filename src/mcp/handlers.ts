@@ -28,6 +28,7 @@ import {
 	restoreUnselectedPixels,
 	snapshotLayerBytes,
 } from "../cli/canvas-input.ts";
+import { runFontRequest } from "../cli/cmd-font.ts";
 import { resolveStyleFamilyRamps } from "../cli/cmd-recolor.ts";
 import { writeStyleFile, writeStylePalette } from "../cli/cmd-style.ts";
 import { expandVariantName } from "../cli/cmd-variant.ts";
@@ -172,6 +173,7 @@ import { validateCanvas } from "../validate/checks.ts";
 import { scanPack } from "../validate/pack.ts";
 import type {
 	CompareAssetsInput,
+	FontAssetInput,
 	McmetaAssetInput,
 	TOOL_INPUT_SCHEMAS,
 } from "./schema.ts";
@@ -3240,6 +3242,34 @@ export async function handlePackAsset(
 			"pack_asset mode must be init, build, catalog, extract, check, or package.",
 			{ mode: args.mode },
 		);
+	} catch (error) {
+		return errorResult(error);
+	}
+}
+
+/**
+ * font_asset: build one icon font from a spec document. The atlas, the
+ * font definition, and the icon table come from the same `runFontRequest`
+ * pipeline the CLI uses, so the embedded bytes and the written files are
+ * identical. Without an explicit path an artifact is embedded instead of
+ * written; a rejected spec, a code-point collision, or an over-tall icon
+ * refuses before any output is planned.
+ */
+export async function handleFontAsset(
+	args: FontAssetInput,
+): Promise<McpTextResult> {
+	try {
+		const outcome = await runFontRequest({
+			...(args.specPath === undefined ? {} : { specPath: args.specPath }),
+			...(args.spec === undefined ? {} : { spec: args.spec }),
+			...(args.outputPath === undefined ? {} : { outputPath: args.outputPath }),
+			...(args.atlasPath === undefined ? {} : { atlasPath: args.atlasPath }),
+			...(args.tablePath === undefined ? {} : { tablePath: args.tablePath }),
+			...(args.force === undefined ? {} : { force: args.force }),
+			...(args.mkdir === undefined ? {} : { mkdir: args.mkdir }),
+			requireOutput: false,
+		});
+		return textResult({ ...outcome.result });
 	} catch (error) {
 		return errorResult(error);
 	}

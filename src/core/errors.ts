@@ -54,6 +54,9 @@ export type ErrorCode =
 	| "PACK_LOCK_UNSUPPORTED_VERSION"
 	| "PACK_CATALOG_INVALID"
 	| "PACK_ARCHIVE_INVALID"
+	| "FONT_INVALID"
+	| "FONT_CODEPOINT_CONFLICT"
+	| "FONT_UNSUPPORTED_VERSION"
 	| "FILESYSTEM_ERROR"
 	| "OUTPUT_EXISTS"
 	| "MCPX_UNSUPPORTED_VERSION"
@@ -212,6 +215,13 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	// archive or an unsafe entry refuses before any byte is written.
 	PACK_CATALOG_INVALID: 4,
 	PACK_ARCHIVE_INVALID: 2,
+	// Font icon specs. An invalid field, a code-point collision, or an
+	// over-tall icon refuses before any output path; a newer spec format
+	// is the one font code that exits 5, because guessing a newer document
+	// would silently change its meaning.
+	FONT_INVALID: 2,
+	FONT_CODEPOINT_CONFLICT: 2,
+	FONT_UNSUPPORTED_VERSION: 5,
 };
 
 export function isErrorCode(value: unknown): value is ErrorCode {

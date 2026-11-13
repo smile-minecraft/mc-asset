@@ -7,9 +7,10 @@ export interface McpToolDefinition {
 }
 
 /**
- * Frozen tool surface: the twenty-seven names in `MCP_TOOL_NAMES`, each with
- * its final description and input schema. Descriptions state the read/write
- * contract so agents pick batch or grid paths instead of per-pixel calls.
+ * Frozen tool surface: the twenty-eight names in `MCP_TOOL_NAMES`, each
+ * with its final description and input schema. Descriptions state the
+ * read/write contract so agents pick batch or grid paths instead of
+ * per-pixel calls.
  */
 export const MCP_TOOLS: readonly McpToolDefinition[] = [
 	{
@@ -173,5 +174,11 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 		description:
 			"Create a resource pack project: init writes the project document, the pack root metadata for the pinned release version, a 64x64 placeholder icon, and the assets directory skeleton in one preflighted batch. An occupied target refuses the whole batch and reports every conflicting path; nothing is overwritten. The project document is written once and then read only.",
 		inputSchema: TOOL_INPUT_SCHEMAS.pack_asset,
+	},
+	{
+		name: "font_asset",
+		description:
+			"Lay icon images (PNG or .mcpx) into one grid-aligned bitmap font atlas and build the font definition (bitmap plus optional space and reference providers) and the icon-to-character table. Icons are sorted by name and code points are allocated deterministically, so shuffled input produces byte-identical artifacts. A duplicate code point, an ascent above height, or an over-tall icon is refused before anything is written.",
+		inputSchema: TOOL_INPUT_SCHEMAS.font_asset,
 	},
 ];
