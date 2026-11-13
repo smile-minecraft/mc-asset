@@ -1,0 +1,13 @@
+{
+	"allowMinecraftNamespace": false,
+	"description": "Aurelian forge demo pack",
+	"formatVersion": 1,
+	"minecraftVersion": "1.21.9",
+	"name": "aurelian-forge",
+	"namespace": "aurelian",
+	"outputDir": "pack",
+	"recipeDir": "recipes",
+	"resourcePackVersion": "69.0",
+	"style": "vanilla",
+	"vanillaSource": null
+}

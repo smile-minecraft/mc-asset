@@ -1,0 +1,139 @@
+{
+	"formatVersion": 3,
+	"id": "aurelian-demo",
+	"description": "Block, layered item, armor, entity, font icon, and particle from one recipe",
+	"style": "vanilla",
+	"sources": {
+		"block_grid": { "kind": "grid", "path": "sources/block.grid" },
+		"blade_base_grid": { "kind": "grid", "path": "sources/blade_base.grid" },
+		"blade_overlay_grid": {
+			"kind": "grid",
+			"path": "sources/blade_overlay.grid"
+		}
+	},
+	"targets": [
+		{
+			"id": "aurelian_block",
+			"source": "block_grid",
+			"output": "assets/{namespace}/textures/block/aurelian_block.png",
+			"steps": [
+				{
+					"type": "blockModel",
+					"item": "aurelian_block",
+					"modelSpec": {
+						"textures": { "all": "{namespace}:block/aurelian_block" },
+						"elements": [
+							{
+								"from": [0, 0, 0],
+								"to": [16, 16, 16],
+								"faces": {
+									"down": { "texture": "#all" },
+									"up": { "texture": "#all" },
+									"north": { "texture": "#all" },
+									"south": { "texture": "#all" },
+									"west": { "texture": "#all" },
+									"east": { "texture": "#all" }
+								}
+							}
+						]
+					}
+				},
+				{
+					"type": "blockstate",
+					"block": "aurelian_block",
+					"variants": {
+						"": { "model": "{namespace}:block/aurelian_block" }
+					}
+				}
+			]
+		},
+		{
+			"id": "aurelian_blade",
+			"category": "sword",
+			"source": "blade_base_grid",
+			"output": "assets/{namespace}/textures/item/aurelian_blade.png",
+			"steps": [
+				{
+					"type": "model",
+					"item": "aurelian_blade",
+					"modelSpec": {
+						"textures": { "layer0": "{namespace}:item/aurelian_blade" },
+						"elements": [
+							{
+								"from": [0, 0, 7.5],
+								"to": [16, 16, 8],
+								"faces": {
+									"south": { "texture": "#layer0" },
+									"north": { "texture": "#layer0" }
+								}
+							}
+						]
+					}
+				},
+				{
+					"type": "itemDefinition",
+					"item": "aurelian_blade",
+					"definition": {
+						"type": "composite",
+						"models": [
+							{ "type": "model", "model": "{namespace}:item/aurelian_blade" },
+							{
+								"type": "model",
+								"model": "{namespace}:item/aurelian_blade_overlay"
+							}
+						]
+					}
+				}
+			]
+		},
+		{
+			"id": "aurelian_blade_overlay",
+			"source": "blade_overlay_grid",
+			"output": "assets/{namespace}/textures/item/aurelian_blade_overlay.png",
+			"steps": [
+				{
+					"type": "model",
+					"item": "aurelian_blade_overlay",
+					"modelSpec": {
+						"textures": { "layer0": "{namespace}:item/aurelian_blade_overlay" },
+						"elements": [
+							{
+								"from": [0, 0, 8],
+								"to": [16, 16, 8.5],
+								"faces": { "south": { "texture": "#layer0" } }
+							}
+						]
+					}
+				}
+			]
+		},
+		{
+			"id": "aurelian_hero",
+			"steps": [
+				{
+					"type": "entityTemplate",
+					"layout": "player_wide",
+					"output": "assets/{namespace}/textures/entity/aurelian_hero.png"
+				}
+			]
+		},
+		{
+			"id": "aurelian_gear",
+			"steps": [
+				{
+					"type": "equipment",
+					"id": "aurelian_gear",
+					"layers": ["humanoid", "humanoid_leggings"]
+				}
+			]
+		},
+		{
+			"id": "aurelian_icons",
+			"steps": [{ "type": "font", "spec": "sources/icons.font.json" }]
+		},
+		{
+			"id": "aurelian_spark",
+			"steps": [{ "type": "particle", "frames": "sources/spark" }]
+		}
+	]
+}

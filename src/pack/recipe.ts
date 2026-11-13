@@ -74,6 +74,14 @@ const FORMAT_VERSION_2_STEP_TYPES: ReadonlySet<string> = new Set([
 	"blockstate",
 ]);
 
+/** Steps formatVersion 3 adds; earlier recipes keep refusing them. */
+const FORMAT_VERSION_3_STEP_TYPES: ReadonlySet<string> = new Set([
+	"entityTemplate",
+	"equipment",
+	"font",
+	"particle",
+]);
+
 const IMAGE_STEP_TYPES: ReadonlySet<string> = new Set([
 	"recolor",
 	"outline",
@@ -148,7 +156,7 @@ export function parseRecipeText(text: string): RecipeDocument {
 			{ field: "formatVersion" },
 		);
 	}
-	if (formatVersion > 2) {
+	if (formatVersion > 3) {
 		throw new McAssetError(
 			"RECIPE_UNSUPPORTED_VERSION",
 			`Unsupported recipe formatVersion: ${formatVersion}`,
@@ -379,7 +387,10 @@ export function parseRecipeText(text: string): RecipeDocument {
 			}
 			if (
 				!SUPPORTED_STEP_TYPES.has(rawStep.type) &&
-				!(formatVersion >= 2 && FORMAT_VERSION_2_STEP_TYPES.has(rawStep.type))
+				!(
+					formatVersion >= 2 && FORMAT_VERSION_2_STEP_TYPES.has(rawStep.type)
+				) &&
+				!(formatVersion >= 3 && FORMAT_VERSION_3_STEP_TYPES.has(rawStep.type))
 			) {
 				if (
 					formatVersion < 2 &&
@@ -393,6 +404,21 @@ export function parseRecipeText(text: string): RecipeDocument {
 							stepIndex,
 							stepType: rawStep.type,
 							requiredFormatVersion: 2,
+						},
+					);
+				}
+				if (
+					formatVersion < 3 &&
+					FORMAT_VERSION_3_STEP_TYPES.has(rawStep.type)
+				) {
+					throw new McAssetError(
+						"RECIPE_INVALID",
+						`Target '${rawTarget.id}' step at index ${stepIndex} uses '${rawStep.type}', which requires recipe formatVersion 3.`,
+						{
+							targetId: rawTarget.id,
+							stepIndex,
+							stepType: rawStep.type,
+							requiredFormatVersion: 3,
 						},
 					);
 				}

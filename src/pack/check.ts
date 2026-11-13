@@ -5,6 +5,7 @@ import { decodePng } from "../io/png.ts";
 import { lintStyle } from "../style/lint.ts";
 import { resolveStyle } from "../style/load.ts";
 import { scanPack } from "../validate/pack.ts";
+import { parseLockText } from "./lock.ts";
 
 /**
  * Whole-pack check summary: pack validation plus per-texture style
@@ -63,6 +64,59 @@ function inferCategoryFromFilename(filename: string): string {
 	return "generic";
 }
 
+/**
+ * Lock kinds a recipe generator writes as a PNG texture. A generated armor
+ * sheet, icon atlas, particle sprite, or entity template is judged by its
+ * generator, not by the hand-painted sprite rules of the style presets, and
+ * the client binds some of these families from its renderers rather than from
+ * a document inside the pack, so the scan can never observe a reference.
+ * The lock is what tells them apart from a hand-drawn file: a texture the
+ * lock does not name under one of these kinds keeps exactly the findings the
+ * check reported before generator steps existed, and so does a project with
+ * no lock at all.
+ */
+const GENERATED_TEXTURE_KINDS: ReadonlySet<string> = new Set([
+	"entityTemplate",
+	"equipmentTexture",
+	"fontAtlas",
+	"particleTexture",
+]);
+
+/**
+ * Pack-relative paths of the textures a recipe generator wrote, read from the
+ * lock document. An absent, unreadable, or unparsable lock suppresses
+ * nothing: the lock belongs to the build, and a check that cannot read it
+ * still reports what the pack holds, byte for byte as before.
+ */
+function lockGeneratedTextures(
+	projectDir: string,
+	packDir: string,
+): ReadonlySet<string> {
+	const generated = new Set<string>();
+	const lockPath = join(projectDir, "mc-asset.lock.json");
+	if (!existsSync(lockPath)) {
+		return generated;
+	}
+	try {
+		const lock = parseLockText(readFileSync(lockPath, "utf8"));
+		for (const [path, entry] of Object.entries(lock.outputs)) {
+			if (!GENERATED_TEXTURE_KINDS.has(entry.kind)) {
+				continue;
+			}
+			const rel = relative(packDir, resolve(projectDir, path)).replace(
+				/\\/g,
+				"/",
+			);
+			if (rel !== "" && rel !== ".." && !rel.startsWith("../")) {
+				generated.add(rel);
+			}
+		}
+	} catch {
+		return new Set();
+	}
+	return generated;
+}
+
 /** Check a pack project and summarize what to fix first. */
 export async function checkResourcePack(
 	input: PackCheckInput,
@@ -118,6 +172,7 @@ export async function checkResourcePack(
 	}
 
 	const packDir = resolve(projectDir, outputDir);
+	const generatedTextures = lockGeneratedTextures(projectDir, packDir);
 	const mcmetaPath = join(packDir, "pack.mcmeta");
 	if (!existsSync(mcmetaPath)) {
 		findings.push({
@@ -138,6 +193,13 @@ export async function checkResourcePack(
 		try {
 			const scanResult = await scanPack(packDir, { vanillaPath: vanilla });
 			for (const f of scanResult.findings) {
+				if (
+					f.code === "PACK_ORPHAN_TEXTURE" &&
+					f.path !== undefined &&
+					generatedTextures.has(f.path)
+				) {
+					continue;
+				}
 				findings.push({
 					code: f.code,
 					level: f.level,
@@ -195,6 +257,9 @@ export async function checkResourcePack(
 					} else if (st.isFile() && name.toLowerCase().endsWith(".png")) {
 						textureCount += 1;
 						const rel = relative(packDir, full).replace(/\\/g, "/");
+						if (generatedTextures.has(rel)) {
+							continue;
+						}
 						const bytes = readFileSync(full);
 						const decoded = decodePng(new Uint8Array(bytes));
 						const category = inferCategoryFromFilename(name);

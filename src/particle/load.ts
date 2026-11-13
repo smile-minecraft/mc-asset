@@ -26,7 +26,20 @@ export interface LoadedParticleFrames {
 	readonly inputFiles: readonly string[];
 	/** Byte-ordered frames. */
 	readonly frames: readonly ParticleFrame[];
+	/** Total bytes of the frame files that were read. */
+	readonly sourceBytes: number;
+	/** Width times height over every decoded frame. */
+	readonly decodedPixels: number;
 	readonly warnings: readonly ParticleWarning[];
+}
+
+export interface ParticleFrameLoadOptions {
+	/**
+	 * Refuse as soon as the decoded frames pass this many pixels. The pack
+	 * build passes its public decode budget so a directory of large frames
+	 * stops while reading instead of filling memory first.
+	 */
+	readonly maxDecodedPixels?: number | undefined;
 }
 
 function frameFormat(name: string): "png" | "mcpx" | undefined {
@@ -57,18 +70,23 @@ async function readFrameBytes(path: string): Promise<Uint8Array> {
 async function decodeFrame(
 	path: string,
 	name: string,
-): Promise<{ frame: ParticleFrame; warnings: ParticleWarning[] }> {
+): Promise<{
+	frame: ParticleFrame;
+	warnings: ParticleWarning[];
+	sourceBytes: number;
+}> {
+	const bytes = await readFrameBytes(path);
 	if (frameFormat(name) === "png") {
-		const decoded = decodePng(await readFrameBytes(path));
+		const decoded = decodePng(bytes);
 		return {
 			frame: { name, canvas: decoded.canvas },
 			warnings: decoded.warnings.map((warning) => ({
 				code: warning.code,
 				message: `${name}: ${warning.message}`,
 			})),
+			sourceBytes: bytes.length,
 		};
 	}
-	const bytes = await readFrameBytes(path);
 	let text: string;
 	try {
 		text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -82,10 +100,27 @@ async function decodeFrame(
 	return {
 		frame: { name, canvas: parseMcpx(text) },
 		warnings: [],
+		sourceBytes: bytes.length,
 	};
 }
 
-async function loadDirectory(inputPath: string): Promise<LoadedParticleFrames> {
+function assertDecodedPixels(
+	decodedPixels: number,
+	maxDecodedPixels: number | undefined,
+): void {
+	if (maxDecodedPixels !== undefined && decodedPixels > maxDecodedPixels) {
+		throw new McAssetError(
+			"RESOURCE_LIMIT_EXCEEDED",
+			`Particle frames decode to ${decodedPixels} pixels, over the budget of ${maxDecodedPixels}.`,
+			{ limit: maxDecodedPixels, actual: decodedPixels },
+		);
+	}
+}
+
+async function loadDirectory(
+	inputPath: string,
+	options: ParticleFrameLoadOptions,
+): Promise<LoadedParticleFrames> {
 	let entries: Array<{ name: string; isFile(): boolean }>;
 	try {
 		entries = await readdir(inputPath, { withFileTypes: true });
@@ -120,14 +155,27 @@ async function loadDirectory(inputPath: string): Promise<LoadedParticleFrames> {
 	}
 	const frames: ParticleFrame[] = [];
 	const inputFiles: string[] = [];
+	let sourceBytes = 0;
+	let decodedPixels = 0;
 	for (const name of names) {
 		const framePath = join(inputPath, name);
 		const decoded = await decodeFrame(framePath, name);
 		frames.push(decoded.frame);
 		inputFiles.push(framePath);
 		warnings.push(...decoded.warnings);
+		sourceBytes += decoded.sourceBytes;
+		decodedPixels += decoded.frame.canvas.width * decoded.frame.canvas.height;
+		assertDecodedPixels(decodedPixels, options.maxDecodedPixels);
 	}
-	return { inputPath, inputKind: "directory", inputFiles, frames, warnings };
+	return {
+		inputPath,
+		inputKind: "directory",
+		inputFiles,
+		frames,
+		sourceBytes,
+		decodedPixels,
+		warnings,
+	};
 }
 
 /**
@@ -137,6 +185,7 @@ async function loadDirectory(inputPath: string): Promise<LoadedParticleFrames> {
  */
 export async function loadParticleFrames(
 	inputPath: string,
+	options: ParticleFrameLoadOptions = {},
 ): Promise<LoadedParticleFrames> {
 	let info: Awaited<ReturnType<typeof stat>>;
 	try {
@@ -151,7 +200,7 @@ export async function loadParticleFrames(
 		);
 	}
 	if (info.isDirectory()) {
-		return loadDirectory(inputPath);
+		return loadDirectory(inputPath, options);
 	}
 	if (!info.isFile()) {
 		throw new McAssetError(
@@ -169,11 +218,16 @@ export async function loadParticleFrames(
 		);
 	}
 	const decoded = await decodeFrame(inputPath, name);
+	const decodedPixels =
+		decoded.frame.canvas.width * decoded.frame.canvas.height;
+	assertDecodedPixels(decodedPixels, options.maxDecodedPixels);
 	return {
 		inputPath,
 		inputKind: "file",
 		inputFiles: [inputPath],
 		frames: [decoded.frame],
+		sourceBytes: decoded.sourceBytes,
+		decodedPixels,
 		warnings: decoded.warnings,
 	};
 }

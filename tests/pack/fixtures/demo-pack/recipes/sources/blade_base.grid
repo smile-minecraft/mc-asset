@@ -1,0 +1,27 @@
+[palette]
+. = transparent
+A = #181818FF
+B = #ffffffFF
+C = #f0f0f0FF
+D = #bebebeFF
+E = #969696FF
+F = #6b6b6bFF
+G = #444444FF
+
+[grid]
+................
+................
+..AAAAAAAAAAAA..
+..ABCDDDDDDDDA..
+..ABDDDDDDDDDA..
+..ADDDDDDDDDDA..
+..AEEEEEEEEEEA..
+..AEEEEEEEEEEA..
+..AFFFFFFFFFFA..
+..AFFFFFFFFFFA..
+..AFFFFFFFFFFA..
+..AGGGGGGGGGGA..
+..AGGGGGGGGGGA..
+..AAAAAAAAAAAA..
+................
+................
