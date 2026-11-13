@@ -24,7 +24,11 @@ import {
 	type PreviewDisplaySlot,
 	type RgbTint,
 } from "./display.ts";
-import { isItemLayerName, itemLayerElements } from "./item-layers.ts";
+import {
+	isGeneratedItemTemplate,
+	isItemLayerName,
+	itemLayerElements,
+} from "./item-layers.ts";
 import {
 	autoUv,
 	checkerColor,
@@ -91,12 +95,16 @@ export type {
  *
  * A recipe-built item model has no `elements` at all: it is a `parent` plus
  * `layer0` .. `layer4` textures, and the client generates its flat geometry
- * from them. When a display slot, lighting or a tint is requested, the preview
- * generates the same layer planes (`item-layers.ts`) and sends them through
- * the geometry renderer, so a two-dimensional item is drawn and its `display`
- * rotation, scale and translation are visible. Without one of those options
- * such a model keeps its historical fully transparent image, because that is
- * what the compatibility renderer produced before item layers existed.
+ * from them. When a display slot, lighting or a tint is requested and the
+ * resolved parent chain ends at one of the four builtin generated-item
+ * templates, the preview resolves the effective layer textures of the whole
+ * chain, generates the same layer planes (`item-layers.ts`) and sends them
+ * through the geometry renderer, so a two-dimensional item is drawn and its
+ * `display` rotation, scale and translation are visible. Without one of those
+ * options such a model keeps its historical fully transparent image, because
+ * that is what the compatibility renderer produced before item layers
+ * existed. A chain with no generated terminus gets no invented planes; the
+ * report lists the ungenerated geometry in `coverage.skipped`.
  *
  * The report stays honest: anything not faithfully rendered is listed in
  * `coverage.skipped` (including a panel the content is clipped by), every
@@ -304,6 +312,17 @@ export async function renderModelPreview(
 		options.display === undefined
 			? (options.view ?? { kind: "three-view" })
 			: { kind: "display", slot: options.display };
+	// The layer generation, display pose, lighting and tints are the only
+	// reasons to look through a namespace-less builtin parent or to
+	// synthesise geometry. A caller that passes none of them must keep the
+	// historical resolution exactly: `parent: "item/generated"` stays an
+	// unresolved parent and `#missing` stays `external`, so both the PNG and
+	// the report bytes are unchanged from before the preview features.
+	const newPreviewOptions =
+		options.display !== undefined ||
+		options.lighting === true ||
+		options.tint !== undefined ||
+		options.tints !== undefined;
 	const inspectionResult = await inspectModelWithBuiltinTerminus(text, {
 		path: options.path,
 		...(options.modelId === undefined ? {} : { modelId: options.modelId }),
@@ -318,7 +337,7 @@ export async function renderModelPreview(
 		// that as `minecraft:item/generated`. Only the preview follows the
 		// default namespace into the builtin template table, so the inspect and
 		// validate reports keep their existing result for that spelling.
-		builtinParentAliases: true,
+		builtinParentAliases: newPreviewOptions,
 	});
 	const inspection = inspectionResult.report;
 	const builtinTerminus = inspectionResult.builtinTerminus;
@@ -441,44 +460,46 @@ export async function renderModelPreview(
 	// A recipe-built item model is `parent` plus `textures.layer0` with no
 	// `elements` of its own; the client generates its flat geometry from the
 	// layer textures. The preview synthesises those planes only when one of
-	// the preview features that motivate them is requested: the historical
-	// preview of such a model is a fully transparent image, and a caller that
-	// passes none of the new options keeps that exact output. With a display
-	// slot, lighting or a tint, the planes go through the same element,
-	// rasterisation and blending pipeline as authored elements, so the item is
-	// drawn and its pose is visible. A model that declares `elements` itself —
-	// even an empty array — keeps them; generation only applies when the chain
-	// has no elements at all.
-	const newPreviewOptions =
-		options.display !== undefined ||
-		options.lighting === true ||
-		options.tint !== undefined ||
-		options.tints !== undefined;
+	// the preview features that motivate them is requested *and* the parent
+	// chain ends at one of the four builtin templates that make the game
+	// generate geometry. A chain that stops at a missing, cyclic, unreadable
+	// or non-generated builtin parent has no such terminus; guessing a plane
+	// from `layer0` would draw an item the game never builds. A caller that
+	// passes none of the new options keeps the historical fully transparent
+	// image and report. A model that declares `elements` itself — even an
+	// empty array — keeps them; generation only applies when the chain has no
+	// elements at all.
 	const noElements = inspection.elementsSource.from === "none";
+	const generatedItemTemplate =
+		builtinTerminus !== undefined && isGeneratedItemTemplate(builtinTerminus);
+	const effectiveLayers = inspectionResult.effectiveTextures.filter((texture) =>
+		isItemLayerName(texture.name),
+	);
 	const generatedLayers =
-		noElements && newPreviewOptions
-			? itemLayerElements(inspection.textures)
+		noElements && newPreviewOptions && generatedItemTemplate
+			? itemLayerElements(effectiveLayers)
 			: [];
 	const elements: readonly ModelElementView[] = [
 		...inspection.elements,
 		...generatedLayers,
 	];
-	// The generator reads the effective texture map, but the inspection report
-	// only carries a resolution for the model's own textures. A layer that only
-	// a parent declares ends the generated run, so name it instead of returning
-	// a transparent image that claims complete coverage.
-	if (noElements && newPreviewOptions) {
-		const nextLayer = generatedLayers.length;
-		for (const texture of inspection.inheritedTextures) {
-			if (!isItemLayerName(texture.name)) continue;
-			if (Number(texture.name.slice("layer".length)) !== nextLayer) continue;
-			addSkip(
-				skipped,
-				"generated-item-layer",
-				"inherited-texture",
-				texture.name,
-				`Layer ${texture.name} is declared by ${texture.from}; the preview generates layers from the model's own textures only.`,
-			);
+	if (noElements && newPreviewOptions && !generatedItemTemplate) {
+		addSkip(
+			skipped,
+			"generated-item-layer",
+			"no-generated-template",
+			options.path,
+			"The parent chain does not end at a builtin generated-item template, so no layer planes were synthesised.",
+		);
+	}
+	// The generator reads the effective texture map, so a layer a parent
+	// declares is generated too. Carry its `force_translucent` flag into the
+	// translucent scan, or the generated plane would blend as if opaque.
+	if (generatedLayers.length > 0) {
+		for (const texture of effectiveLayers) {
+			if (texture.forceTranslucent === true) {
+				translucentVars.add(texture.name);
+			}
 		}
 	}
 
@@ -621,12 +642,14 @@ export async function renderModelPreview(
 	let uncoloredFaces = 0;
 
 	if (needsGeometry) {
+		const generatedElements = new Set<ModelElementView>(generatedLayers);
 		const scene = await renderPreviewScene({
 			elements: drawn.map((entry) => ({
 				index: entry.index,
 				element: entry.element,
 				min: [entry.minXFixed, entry.minYFixed, entry.minZFixed],
 				max: [entry.maxXFixed, entry.maxYFixed, entry.maxZFixed],
+				...(generatedElements.has(entry.element) ? { cullBackface: true } : {}),
 			})),
 			view,
 			size,

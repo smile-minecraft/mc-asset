@@ -48,6 +48,25 @@ export function isItemLayerName(name: string): boolean {
 	return (ITEM_LAYER_NAMES as readonly string[]).includes(name);
 }
 
+/**
+ * The builtin templates that make the client generate item layer geometry.
+ *
+ * A parent chain that ends anywhere else (a missing file, `builtin/entity`,
+ * a plain model without elements) never produces layers in the game, so the
+ * preview must not invent them from a stray `layer0` texture.
+ */
+export const GENERATED_ITEM_TEMPLATES = [
+	"minecraft:builtin/generated",
+	"minecraft:item/generated",
+	"minecraft:item/handheld",
+	"minecraft:item/handheld_rod",
+] as const;
+
+/** True when the builtin terminus is one of the generated-item templates. */
+export function isGeneratedItemTemplate(id: string): boolean {
+	return (GENERATED_ITEM_TEMPLATES as readonly string[]).includes(id);
+}
+
 /** The box every layer is wrapped around, in model units (vanilla z range). */
 export const ITEM_LAYER_PLANE = {
 	from: [0, 0, 7.5] as Vec3,
@@ -75,6 +94,8 @@ export interface ItemLayerTexture {
  * missing layer ends the run, matching the generator, so a model that only
  * declares `layer1` generates nothing. Both faces carry the same tint index
  * as the layer, and the upper layer's near face is in front on either side.
+ * The scene marks these elements `cullBackface`, so only the side facing the
+ * panel camera is drawn; the geometry keeps both sides for the depth order.
  */
 export function itemLayerElements(
 	textures: readonly ItemLayerTexture[],

@@ -5,6 +5,7 @@ import {
 	divRound,
 	type FixedVec3,
 	IDENTITY_MAT3,
+	isometricYawMatrix,
 	type Mat3,
 	multiplyMat3,
 	type ProjectedPoint,
@@ -58,10 +59,15 @@ import type {
  * axis first) around its origin. Each declared face becomes a textured quad
  * with four world corners, the texture rectangle from `uv` or the vanilla
  * auto-UV, and the face rotation applied as a permutation of the texture
- * corners. Faces are never culled by their normal and are never culled by
- * `cullface`: an orthographic or isometric projection keeps the depth order,
- * so a z-buffer resolves hidden faces and both sides of a zero-thickness
- * plane stay visible, matching how Minecraft draws model quads.
+ * corners. Authored faces are never culled by their normal and are never
+ * culled by `cullface`: an orthographic or isometric projection keeps the
+ * depth order, so a z-buffer resolves hidden faces and both sides of a
+ * zero-thickness plane stay visible, matching how Minecraft draws model
+ * quads. The synthesised generated-item layers are the exception: their two
+ * faces are the front and back of one sprite, so they set `cullBackface` and
+ * only the side facing the panel camera is drawn or collected. Blending both
+ * sides would composite the same texel twice and make a half-transparent
+ * layer opaque.
  *
  * Opaque faces are drawn first in document order (element order, then
  * DIRECTIONS order) and win depth ties like the three-view compatibility
@@ -96,6 +102,14 @@ export interface PreviewSceneElement {
 	/** Element box in 1/256 model units, before rotation. */
 	readonly min: FixedVec3;
 	readonly max: FixedVec3;
+	/**
+	 * Drop the faces whose transformed normal points away from the panel
+	 * camera. Only the synthesised generated-item layers set this: their two
+	 * faces are the two sides of one sprite, and blending both would composite
+	 * the same texel twice. Authored elements keep the historical double-sided
+	 * behaviour.
+	 */
+	readonly cullBackface?: boolean;
 }
 
 export interface PreviewSceneOptions {
@@ -146,6 +160,7 @@ interface ElementBox {
 	readonly worldCorners: readonly FixedVec3[];
 	readonly matrix: Mat3 | undefined;
 	readonly origin: FixedVec3;
+	readonly cullBackface: boolean;
 }
 
 interface SceneFace {
@@ -158,6 +173,10 @@ interface SceneFace {
 	readonly translucent: boolean;
 	/** Shade factor in thousandths, from the final face normal. */
 	readonly shade: number;
+	/** Outward normal after the element and display transforms. */
+	readonly normal: FixedVec3;
+	/** Drop this face when the normal points away from the panel camera. */
+	readonly cullBackface: boolean;
 	/** Resolved tint, when the face declares `tintindex` and a colour exists. */
 	readonly tint: RgbTint | undefined;
 }
@@ -465,6 +484,33 @@ function projectionFor(
 		projectOrthographic(panel as "front" | "right" | "top", point);
 }
 
+/**
+ * Whether a face normal points toward the camera of one panel.
+ *
+ * The camera sits on +z for the display panel, on -z / +x / +y for the
+ * front / right / top orthographic panels, and in the positive octant (rotated
+ * by the view's yaw) for an isometric panel with depth = x + y + z. A normal
+ * exactly perpendicular to the view axis returns false, matching the `<= 0`
+ * rule: a face seen edge-on covers no pixel anyway.
+ */
+function faceFacesCamera(
+	normal: FixedVec3,
+	view: ModelPreviewView,
+	panel: ModelPreviewPanel["name"],
+): boolean {
+	if (view.kind === "display") return (normal[2] as number) > 0;
+	if (view.kind === "isometric") {
+		const rotated = applyMat3(isometricYawMatrix(view.direction), normal);
+		return (
+			(rotated[0] as number) + (rotated[1] as number) + (rotated[2] as number) >
+			0
+		);
+	}
+	if (panel === "front") return (normal[2] as number) < 0;
+	if (panel === "right") return (normal[0] as number) > 0;
+	return (normal[1] as number) > 0;
+}
+
 function panelListFor(
 	view: ModelPreviewView,
 	size: ModelPreviewSize,
@@ -569,6 +615,7 @@ export async function renderPreviewScene(
 			worldCorners,
 			matrix,
 			origin,
+			cullBackface: entry.cullBackface === true,
 		});
 	}
 
@@ -694,6 +741,8 @@ export async function renderPreviewScene(
 				texture,
 				translucent,
 				shade,
+				normal,
+				cullBackface: box.cullBackface,
 				tint,
 			});
 		}
@@ -733,18 +782,12 @@ export async function renderPreviewScene(
 	} else if (view.kind === "display") {
 		// The display camera does not refit to the transformed bounds: the
 		// model is framed once from its un-transformed size (times 7/4 so any
-		// rotation of the box still fits) and the display translation grows
-		// the frame symmetrically around the pivot. Rotation, scale and
-		// translation all stay visible, because none of them can shrink the
-		// frame back around the result.
-		const translation = display?.translationFixed ?? [0, 0, 0];
-		const maxTranslation = Math.max(
-			Math.abs(translation[0] as number),
-			Math.abs(translation[1] as number),
-			Math.abs(translation[2] as number),
-		);
-		const frameExtent =
-			baseExtent > 0 ? Math.ceil((baseExtent * 7) / 4) + 2 * maxTranslation : 1;
+		// rotation of the box still fits). Rotation, scale and translation all
+		// stay visible, but none of them changes the camera scale: the same
+		// model keeps one pixels-per-unit across poses, so two display values
+		// can be compared. A translation that pushes the model out of the
+		// panel is reported as clipped instead of shrinking the camera to fit.
+		const frameExtent = baseExtent > 0 ? Math.ceil((baseExtent * 7) / 4) : 1;
 		pixelsPerUnit = Math.max(1, Math.floor((available * UNIT) / frameExtent));
 	} else {
 		pixelsPerUnit =
@@ -860,6 +903,12 @@ export async function renderPreviewScene(
 
 		for (const face of faces) {
 			if (face.translucent) continue;
+			if (
+				face.cullBackface &&
+				!faceFacesCamera(face.normal, view, panel.name)
+			) {
+				continue;
+			}
 			const vertices = verticesOf(
 				face,
 				displayView ? 0 : (bounds.min[0] as number),
@@ -885,6 +934,12 @@ export async function renderPreviewScene(
 		const opaqueDepth = target.depth;
 		for (const face of faces) {
 			if (!face.translucent) continue;
+			if (
+				face.cullBackface &&
+				!faceFacesCamera(face.normal, view, panel.name)
+			) {
+				continue;
+			}
 			const vertices = verticesOf(
 				face,
 				displayView ? 0 : (bounds.min[0] as number),

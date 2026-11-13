@@ -1046,6 +1046,64 @@ export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
 		},
 	},
 	{
+		name: "display translation never changes the camera scale",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
+			const base = JSON.parse(testCube());
+			const render = (translation: readonly [number, number, number]) =>
+				renderModelPreview(
+					JSON.stringify({
+						...base,
+						display: { gui: { rotation: [0, 0, 0], translation } },
+					}),
+					{ path: PREVIEW_PATH, context, size: 64, display: "gui" },
+				);
+			const still = await render([0, 0, 0]);
+			const depth = await render([0, 0, 2]);
+			const sideways = await render([2, 0, 0]);
+			const labelled = [
+				["no translation", still],
+				["a z translation", depth],
+				["an x translation", sideways],
+			] as const;
+			for (const [label, rendered] of labelled) {
+				check.equal(
+					rendered.report.range.pixelsPerUnit,
+					2,
+					`${label} keeps the camera at 2 pixels per unit`,
+				);
+			}
+			check.equal(
+				sha256(depth.png),
+				sha256(still.png),
+				"a z translation does not change the orthographic image",
+			);
+			const stillBox = panelBox(flatOf(still.png).flat, 64, 0, 0, 63, 63);
+			const depthBox = panelBox(flatOf(depth.png).flat, 64, 0, 0, 63, 63);
+			check.deepEqual(
+				[depthBox.minX, depthBox.minY, depthBox.width, depthBox.height],
+				[stillBox.minX, stillBox.minY, stillBox.width, stillBox.height],
+				"a z translation keeps the same 32x32 image box",
+			);
+			const sidewaysBox = panelBox(flatOf(sideways.png).flat, 64, 0, 0, 63, 63);
+			check.deepEqual(
+				[sidewaysBox.width, sidewaysBox.height],
+				[32, 32],
+				"an x translation keeps the model at 32x32 pixels",
+			);
+			check.equal(
+				sidewaysBox.minX - stillBox.minX,
+				4,
+				"an x translation of two units moves the model four pixels right",
+			);
+			check.equal(
+				sidewaysBox.minY,
+				stillBox.minY,
+				"an x translation leaves the vertical position alone",
+			);
+		},
+	},
+	{
 		name: "mirrored display scales flip the shading normal",
 		async run(check) {
 			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
@@ -1878,8 +1936,10 @@ export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
 				"a layer after a gap is not generated",
 			);
 
-			// A layer texture only the parent declares has no resolved texture
-			// in the inspection report, so it is reported instead of drawn.
+			// A layer texture only the parent declares is part of the effective
+			// texture map the client's generator reads, so the preview resolves
+			// the whole chain and draws it instead of returning a transparent
+			// image with a skip.
 			const inherited = await renderModelPreview(
 				JSON.stringify({ parent: "demo:item/base" }),
 				{
@@ -1899,17 +1959,27 @@ export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
 			);
 			check.equal(
 				inherited.report.coverage.status,
-				"partial",
-				"an inherited layer ends the drawn run and is reported",
+				"complete",
+				"the inherited layer is generated from the effective texture map",
 			);
-			check.ok(
-				inherited.report.coverage.skipped.some(
-					(entry) =>
-						entry.kind === "generated-item-layer" &&
-						entry.reason === "inherited-texture" &&
-						entry.target === "layer0",
-				),
-				"the undrawn inherited layer is named",
+			const inheritedPixels = flatOf(inherited.png);
+			assertRgba(
+				check,
+				inheritedPixels.flat,
+				inheritedPixels.width,
+				20,
+				32,
+				[255, 0, 0, 255],
+				"the parent-declared layer0's left half is drawn",
+			);
+			assertRgba(
+				check,
+				inheritedPixels.flat,
+				inheritedPixels.width,
+				43,
+				32,
+				[0, 255, 0, 255],
+				"the parent-declared layer0's right half is drawn",
 			);
 		},
 	},
@@ -2276,6 +2346,482 @@ export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
 				[0, 0, 1, 1],
 				"both faces carry the layer's tint index",
 			);
+		},
+	},
+	{
+		name: "generated item layers draw one face so translucent pixels blend once",
+		async run(check) {
+			const modelPath = "assets/demo/models/item/translucent.json";
+			const context = memoryContext({
+				"assets/demo/textures/item/red.png": solidPng(255, 0, 0, 128),
+				"assets/demo/textures/item/blue.png": solidPng(0, 0, 255, 128),
+			});
+			const single = (display?: unknown): string =>
+				JSON.stringify({
+					parent: "minecraft:item/generated",
+					textures: {
+						layer0: {
+							sprite: "demo:item/red",
+							force_translucent: true,
+						},
+					},
+					...(display === undefined ? {} : { display }),
+				});
+			const singleTurns = [
+				{ label: "gui 0", text: single(), slot: "gui" as const },
+				{
+					label: "gui 180",
+					text: single({ gui: { rotation: [0, 180, 0] } }),
+					slot: "gui" as const,
+				},
+				{ label: "fixed", text: single(), slot: "fixed" as const },
+			];
+			for (const turn of singleTurns) {
+				const rendered = await renderModelPreview(turn.text, {
+					path: modelPath,
+					context,
+					size: 64,
+					display: turn.slot,
+				});
+				const pixels = flatOf(rendered.png);
+				assertRgba(
+					check,
+					pixels.flat,
+					pixels.width,
+					32,
+					32,
+					[255, 0, 0, 128],
+					`${turn.label}: the single layer's one visible face blends once`,
+				);
+				check.equal(
+					rendered.report.coverage.status,
+					"complete",
+					`${turn.label}: the generated plane covers the panel`,
+				);
+			}
+
+			const double = (display?: unknown): string =>
+				JSON.stringify({
+					parent: "minecraft:item/generated",
+					textures: {
+						layer0: {
+							sprite: "demo:item/red",
+							force_translucent: true,
+						},
+						layer1: {
+							sprite: "demo:item/blue",
+							force_translucent: true,
+						},
+					},
+					...(display === undefined ? {} : { display }),
+				});
+			const doubleTurns = [
+				{ label: "gui 0", text: double(), slot: "gui" as const },
+				{
+					label: "gui 180",
+					text: double({ gui: { rotation: [0, 180, 0] } }),
+					slot: "gui" as const,
+				},
+				{ label: "fixed", text: double(), slot: "fixed" as const },
+			];
+			for (const turn of doubleTurns) {
+				const rendered = await renderModelPreview(turn.text, {
+					path: modelPath,
+					context,
+					size: 64,
+					display: turn.slot,
+				});
+				const pixels = flatOf(rendered.png);
+				// Red (alpha 128) then blue (alpha 128), each exactly once:
+				//   weights 32640 / 16256 over 48896, out alpha
+				//   round(48896 / 255) = 192, R = round(255 * 16256 / 48896) = 85,
+				//   B = round(255 * 32640 / 48896) = 170.
+				assertRgba(
+					check,
+					pixels.flat,
+					pixels.width,
+					32,
+					32,
+					[85, 0, 170, 192],
+					`${turn.label}: both layers blend once each`,
+				);
+				check.equal(
+					rendered.report.coverage.status,
+					"complete",
+					`${turn.label}: both layers are covered`,
+				);
+			}
+
+			// Authored elements keep the historical double-sided behaviour: the
+			// cull marker belongs to the synthesised layers only.
+			const authored = JSON.stringify({
+				textures: {
+					red: { sprite: "demo:item/red", force_translucent: true },
+				},
+				elements: [
+					{
+						from: [0, 0, 0],
+						to: [16, 16, 16],
+						faces: {
+							south: { texture: "#red" },
+							north: { texture: "#red" },
+						},
+					},
+				],
+			});
+			const authoredRendered = await renderModelPreview(authored, {
+				path: modelPath,
+				context,
+				size: 64,
+				display: "gui",
+			});
+			const authoredPixels = flatOf(authoredRendered.png);
+			assertRgba(
+				check,
+				authoredPixels.flat,
+				authoredPixels.width,
+				32,
+				32,
+				[255, 0, 0, 192],
+				"an authored double-sided element still blends both faces",
+			);
+		},
+	},
+	{
+		name: "a model without a generated-item terminus never invents layer geometry",
+		async run(check) {
+			const context = memoryContext({
+				"assets/demo/textures/item/ruby.png": solidPng(255, 0, 0),
+			});
+			for (const entry of [
+				{
+					label: "missing parent",
+					text: JSON.stringify({
+						parent: "demo:item/missing_base",
+						textures: { layer0: "demo:item/ruby" },
+					}),
+				},
+				{
+					label: "no parent",
+					text: JSON.stringify({
+						textures: { layer0: "demo:item/ruby" },
+					}),
+				},
+			]) {
+				const rendered = await renderModelPreview(entry.text, {
+					path: "assets/demo/models/item/missing-parent.json",
+					context,
+					size: 64,
+					display: "gui",
+				});
+				check.equal(
+					rendered.report.coverage.status,
+					"partial",
+					`${entry.label}: the ungenerated geometry is reported`,
+				);
+				check.ok(
+					rendered.report.coverage.skipped.some(
+						(skip) =>
+							skip.kind === "generated-item-layer" &&
+							skip.reason === "no-generated-template",
+					),
+					`${entry.label}: the skip names the missing generated terminus`,
+				);
+				const pixels = flatOf(rendered.png);
+				check.equal(
+					panelBox(
+						pixels.flat,
+						pixels.width,
+						0,
+						0,
+						pixels.width - 1,
+						pixels.height - 1,
+					).count,
+					0,
+					`${entry.label}: the image stays fully transparent`,
+				);
+				check.equal(
+					rendered.report.display?.applied,
+					false,
+					`${entry.label}: no display transform could be resolved`,
+				);
+				check.ok(
+					rendered.report.unapplied.includes("display-slot-missing"),
+					`${entry.label}: the report names the missing display slot`,
+				);
+			}
+		},
+	},
+	{
+		name: "a child draws the generated layers and pose its parent declares",
+		async run(check) {
+			const childPath = "assets/demo/models/item/child.json";
+			const context = memoryContext({
+				"assets/demo/models/item/base.json": encoder.encode(
+					JSON.stringify({
+						parent: "minecraft:item/generated",
+						textures: { layer0: "demo:item/ruby" },
+						display: { gui: { rotation: [0, 180, 0] } },
+					}),
+				),
+				"assets/demo/textures/item/ruby.png": splitPng(),
+				"assets/demo/textures/item/ruby_top.png": twoToneBandPng(),
+			});
+			const options = { path: childPath, context, size: 64 as const };
+
+			const inherited = await renderModelPreview(
+				JSON.stringify({ parent: "demo:item/base" }),
+				{ ...options, display: "gui" },
+			);
+			check.equal(
+				inherited.report.coverage.status,
+				"complete",
+				"the inherited layer resolves and is drawn",
+			);
+			check.equal(
+				inherited.report.display?.from,
+				"demo:item/base",
+				"the parent's display entry supplies the pose",
+			);
+			check.deepEqual(
+				[...(inherited.report.display?.rotation ?? [])],
+				[0, 180, 0],
+				"the parent's gui rotation is applied",
+			);
+			const inheritedPixels = flatOf(inherited.png);
+			assertRgba(
+				check,
+				inheritedPixels.flat,
+				inheritedPixels.width,
+				20,
+				32,
+				[0, 255, 0, 255],
+				"the 180 degree pose mirrors layer0: green on the left",
+			);
+			assertRgba(
+				check,
+				inheritedPixels.flat,
+				inheritedPixels.width,
+				43,
+				32,
+				[255, 0, 0, 255],
+				"the 180 degree pose mirrors layer0: red on the right",
+			);
+
+			const overridden = await renderModelPreview(
+				JSON.stringify({
+					parent: "demo:item/base",
+					textures: { layer1: "demo:item/ruby_top" },
+				}),
+				{ ...options, display: "gui" },
+			);
+			check.equal(
+				overridden.report.coverage.status,
+				"complete",
+				"the child's layer1 sits on the inherited layer0",
+			);
+			const overriddenPixels = flatOf(overridden.png);
+			assertRgba(
+				check,
+				overriddenPixels.flat,
+				overriddenPixels.width,
+				20,
+				18,
+				[0, 255, 255, 255],
+				"the child's layer1 is mirrored by the inherited pose: cyan left",
+			);
+			assertRgba(
+				check,
+				overriddenPixels.flat,
+				overriddenPixels.width,
+				43,
+				18,
+				[0, 0, 255, 255],
+				"the child's layer1 is mirrored by the inherited pose: blue right",
+			);
+			assertRgba(
+				check,
+				overriddenPixels.flat,
+				overriddenPixels.width,
+				20,
+				32,
+				[0, 255, 0, 255],
+				"the inherited layer0 still shows below the band",
+			);
+		},
+	},
+	{
+		name: "legacy previews of item models stay byte-identical to 77c78fd",
+		async run(check) {
+			const panels = [
+				{ name: "front", x: 0, y: 0, width: 64, height: 64 },
+				{ name: "right", x: 64, y: 0, width: 64, height: 64 },
+				{ name: "top", x: 128, y: 0, width: 64, height: 64 },
+			];
+			const base = {
+				command: "model",
+				mode: "preview",
+				path: "assets/demo/models/item/cube.json",
+				modelId: "demo:item/cube",
+				size: 64,
+				version: {
+					rules: "undetermined",
+					rulesReason: "version-not-determined",
+				},
+				image: { width: 192, height: 64 },
+				panels,
+			};
+			// The expected report bytes are the output of 77c78fd for the same
+			// two inputs. The namespace-less parent must stay unresolved there,
+			// so `#missing` is `external` in the report and it is not treated as
+			// an undefined variable of a builtin template.
+			const legacyReport = JSON.stringify({
+				...base,
+				range: { min: [0, 0, 0], max: [16, 16, 16], pixelsPerUnit: 3 },
+				coverage: {
+					status: "partial",
+					skipped: [
+						{ kind: "texture", reason: "external", target: "#missing" },
+					],
+				},
+				warnings: [
+					{
+						code: "MODEL_PREVIEW_TEXTURE_UNRESOLVED",
+						level: "warning",
+						message: "Texture #missing could not be resolved (external).",
+						target: "#missing",
+					},
+				],
+				unapplied: ["display", "lighting"],
+			});
+			const layerReport = JSON.stringify({
+				...base,
+				range: { min: [0, 0, 0], max: [0, 0, 0], pixelsPerUnit: 1 },
+				coverage: { status: "complete", skipped: [] },
+				warnings: [],
+				unapplied: ["display", "lighting"],
+			});
+			await withTempRoot(async (root) => {
+				const legacyText = JSON.stringify({
+					parent: "item/generated",
+					textures: { particle: "minecraft:item/generated" },
+					elements: [
+						{
+							from: [0, 0, 0],
+							to: [16, 16, 16],
+							faces: {
+								north: { texture: "#missing" },
+								east: { texture: "#missing" },
+								up: { texture: "#missing" },
+							},
+						},
+					],
+				});
+				const layerText = JSON.stringify({
+					parent: "minecraft:item/generated",
+					textures: { layer0: "demo:stone" },
+				});
+				const legacy = await makePack(
+					join(root, "legacy"),
+					solidPng(200, 200, 200),
+					legacyText,
+				);
+				const layer = await makePack(
+					join(root, "layer"),
+					solidPng(200, 200, 200),
+					layerText,
+				);
+				for (const entry of [
+					{
+						label: "namespace-less parent",
+						pack: legacy.pack,
+						model: legacy.model,
+						png: "5d3a552396bed2a4a4e75618113fc0b4ed7a85c6e33a95e9d5eb178b3e0e566c",
+						report: legacyReport,
+					},
+					{
+						label: "generated template with layer0",
+						pack: layer.pack,
+						model: layer.model,
+						png: "2e2042bece3f9ace257124fb50362318091fa9315bc0647c1355bf40fba579f1",
+						report: layerReport,
+					},
+				]) {
+					const outcome = await runModelRequest({
+						mode: "preview",
+						inputPath: entry.model,
+						packPath: entry.pack,
+						size: 64,
+						stdout: true,
+						requireOutput: true,
+					});
+					check.equal(outcome.failed, false, `${entry.label}: cli succeeds`);
+					const cliBytes = outcome.artifact as Uint8Array;
+					check.equal(
+						sha256(cliBytes),
+						entry.png,
+						`${entry.label}: the cli PNG matches 77c78fd`,
+					);
+					const cliReport = JSON.stringify(outcome.result);
+					check.equal(
+						cliReport,
+						entry.report,
+						`${entry.label}: the cli report matches 77c78fd byte for byte`,
+					);
+					const mcp = await handleModelAsset({
+						mode: "preview",
+						inputPath: entry.model,
+						packPath: entry.pack,
+						size: 64,
+					});
+					check.equal(mcp.isError, undefined, `${entry.label}: mcp succeeds`);
+					const textBlock = mcp.content.find((block) => block.type === "text");
+					const imageBlock = mcp.content.find(
+						(block) => block.type === "image",
+					);
+					check.ok(textBlock?.type === "text", `${entry.label}: mcp report`);
+					check.ok(imageBlock?.type === "image", `${entry.label}: mcp image`);
+					if (textBlock?.type !== "text" || imageBlock?.type !== "image")
+						return;
+					check.equal(
+						textBlock.text,
+						entry.report,
+						`${entry.label}: the mcp report matches 77c78fd byte for byte`,
+					);
+					check.equal(
+						sha256(new Uint8Array(Buffer.from(imageBlock.data, "base64"))),
+						entry.png,
+						`${entry.label}: the mcp PNG matches 77c78fd`,
+					);
+				}
+
+				// The alias is still followed once a preview feature asks for it.
+				const alias = await runModelRequest({
+					mode: "preview",
+					inputPath: legacy.model,
+					packPath: legacy.pack,
+					size: 64,
+					display: "fixed",
+					lighting: true,
+					stdout: true,
+					requireOutput: true,
+				});
+				check.equal(alias.failed, false, "alias preview succeeds");
+				const aliasReport = alias.result as {
+					display?: { from?: string };
+					lighting?: { guiLight?: string };
+				};
+				check.equal(
+					aliasReport.display?.from,
+					"minecraft:item/generated",
+					"a namespace-less parent still resolves to the builtin template",
+				);
+				check.equal(
+					aliasReport.lighting?.guiLight,
+					"front",
+					"the builtin template's gui_light is still inherited",
+				);
+			});
 		},
 	},
 	{

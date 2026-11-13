@@ -61,6 +61,12 @@ export interface ModelTextureResolution {
 	readonly source?: ResolutionSource;
 	readonly via: readonly string[];
 }
+/** One texture after the whole parent-chain inheritance, with its resolution. */
+export interface ModelEffectiveTexture {
+	readonly name: string;
+	readonly forceTranslucent?: boolean;
+	readonly resolution: ModelTextureResolution;
+}
 export interface ModelFaceView {
 	readonly face: Direction;
 	readonly texture: string;
@@ -352,10 +358,12 @@ function addResolutionFinding(
 async function analyze(
 	text: string,
 	options: ModelAnalyzeOptions,
+	collectEffectiveTextures = false,
 ): Promise<{
 	root: JsonNode;
 	report: ModelInspectReport;
 	builtinTerminus?: string;
+	effectiveTextures: readonly ModelEffectiveTexture[];
 }> {
 	const root = parseJsonDocument(text);
 	const rules = resolveModelRules(options.packFormat);
@@ -714,6 +722,37 @@ async function analyze(
 			);
 	}
 	textureReports.sort((a, b) => byteCompare(a.name, b.name));
+	const ownResolutions = new Map<string, ModelTextureResolution>(
+		textureReports.map((entry) => [entry.name, entry.resolution]),
+	);
+	// `inspectModelWithBuiltinTerminus` reads the effective texture map the
+	// generated-item layer synthesis needs: the first definition in the own ->
+	// parent chain wins, exactly like the game, and `#variable` chains are
+	// resolved through the same maps. Public `inspectModel` skips this work so
+	// its report keeps its historical shape and findings.
+	const effectiveTextures: ModelEffectiveTexture[] = [];
+	if (collectEffectiveTextures) {
+		const effectiveNames = new Set<string>();
+		for (const map of textureMaps) {
+			for (const [name, entry] of map) {
+				if (effectiveNames.has(name)) continue;
+				effectiveNames.add(name);
+				const resolution =
+					ownResolutions.get(name) ??
+					(entry.invalidReference || entry.value === undefined
+						? { status: "missing" as const, via: [] }
+						: resolveTextureValue(`#${name}`, jsonPointer(["textures", name])));
+				effectiveTextures.push({
+					name,
+					...(entry.forceTranslucent === undefined
+						? {}
+						: { forceTranslucent: entry.forceTranslucent }),
+					resolution,
+				});
+			}
+		}
+		effectiveTextures.sort((a, b) => byteCompare(a.name, b.name));
+	}
 
 	let elementsSource: ModelInspectReport["elementsSource"] = { from: "none" };
 	let effectiveElements: JsonNode | undefined;
@@ -998,6 +1037,7 @@ async function analyze(
 		root,
 		report,
 		...(builtinTerminus === undefined ? {} : { builtinTerminus }),
+		effectiveTextures,
 	};
 }
 
@@ -1010,7 +1050,7 @@ export async function inspectModel(
 
 /**
  * `inspectModel` plus the builtin template id that terminated the parent
- * chain.
+ * chain and the effective textures of the whole chain.
  *
  * `ModelInspectReport.parentChain` records only parents with a file to read,
  * so a chain that ends at a builtin template (`minecraft:builtin/generated`,
@@ -1020,6 +1060,12 @@ export async function inspectModel(
  * returned beside the report. A chain that stops at a missing, unresolved or
  * cyclic parent has no terminus: the game could not know where the chain
  * continues either, so the preview must not guess.
+ *
+ * `effectiveTextures` applies the own -> parent override order to every
+ * texture variable and resolves `#variable` chains through the same maps, so
+ * the generated-item layer synthesis can read a layer a parent declares. The
+ * public `inspectModel` report keeps its own-texture `textures` and
+ * `inheritedTextures` shape and does not resolve the inherited entries.
  */
 export async function inspectModelWithBuiltinTerminus(
 	text: string,
@@ -1027,11 +1073,17 @@ export async function inspectModelWithBuiltinTerminus(
 ): Promise<{
 	readonly report: ModelInspectReport;
 	readonly builtinTerminus?: string;
+	readonly effectiveTextures: readonly ModelEffectiveTexture[];
 }> {
-	const { report, builtinTerminus } = await analyze(text, options);
+	const { report, builtinTerminus, effectiveTextures } = await analyze(
+		text,
+		options,
+		true,
+	);
 	return {
 		report,
 		...(builtinTerminus === undefined ? {} : { builtinTerminus }),
+		effectiveTextures,
 	};
 }
 
