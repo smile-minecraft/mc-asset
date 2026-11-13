@@ -19,6 +19,7 @@ import {
 	type EntityMode,
 	runEntity,
 } from "./cmd-entity.ts";
+import { type EquipmentCliOptions, runEquipment } from "./cmd-equipment.ts";
 import { type FontCliOptions, runFont } from "./cmd-font.ts";
 import { type GenerateOptions, runGenerate } from "./cmd-generate.ts";
 import { type GuiScaleOptions, runGuiScale } from "./cmd-gui-scale.ts";
@@ -1906,6 +1907,66 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 					streams,
 				);
 				process.exitCode = code;
+			},
+		);
+
+	program
+		.command("equipment <id>")
+		.description(
+			"Generate an equipment definition and one armor or elytra texture template per layer entry, for the target pack format.",
+		)
+		.option("--namespace <namespace>", "Asset namespace (required).")
+		.option(
+			"--output-dir <dir>",
+			"Resource pack root receiving assets/ (required).",
+		)
+		.option(
+			"--minecraft-version <v>",
+			"Minecraft version",
+			singleUseOption("--minecraft-version"),
+		)
+		.option(
+			"--resource-pack-version <v>",
+			"Pack version",
+			singleUseOption("--resource-pack-version"),
+		)
+		.option(
+			"--layer <type[=texture]>",
+			"Layer entry as a layer type, optionally with its texture leaf; repeat for more entries (required).",
+			(value: string, previous: string[]) => [...previous, value],
+			[],
+		)
+		.option(
+			"--dyeable <type[=#RRGGBB]>",
+			"Mark a layer type's entries dyeable, optionally with the undyed color; repeatable.",
+			(value: string, previous: string[]) => [...previous, value],
+			[],
+		)
+		.option(
+			"--player-texture <type>",
+			"Set use_player_texture on a layer type (the wings layer reads it); repeatable.",
+			(value: string, previous: string[]) => [...previous, value],
+			[],
+		)
+		.option(
+			"--no-template",
+			"Write the definition only, without texture templates.",
+		)
+		.option(
+			"--no-fill",
+			"Leave template face areas transparent instead of filling them with face colors.",
+		)
+		.option("--force", "Allow overwriting existing output files.")
+		.option("--mkdir", "Create missing parent directories.")
+		.action(
+			async (id: string, options: EquipmentCliOptions, command: Command) => {
+				const globals = command.optsWithGlobals<{ json?: boolean }>();
+				process.exitCode = await runEquipment(
+					id,
+					options,
+					globals.json === true,
+					streams,
+				);
 			},
 		);
 

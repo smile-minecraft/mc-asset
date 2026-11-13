@@ -100,6 +100,8 @@ export type ErrorCode =
 	| "ENTITY_LAYOUT_INVALID"
 	| "ENTITY_LAYOUT_UNSUPPORTED_VERSION"
 	| "ENTITY_LAYOUT_OVERLAP"
+	| "EQUIPMENT_INVALID"
+	| "EQUIPMENT_VERSION_UNSUPPORTED"
 	| "EMPTY_SELECTION"
 	| "SELF_INTERSECTING_POLYGON"
 	| "TRANSACTION_FAILED";
@@ -197,6 +199,14 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	ENTITY_LAYOUT_INVALID: 2,
 	ENTITY_LAYOUT_UNSUPPORTED_VERSION: 5,
 	ENTITY_LAYOUT_OVERLAP: 2,
+	// Equipment definitions and their texture templates. An unknown layer
+	// type, a malformed path, or a layer type with no verified layout refuses
+	// before any output path is planned; a target format without equipment
+	// definitions (or before the layer type existed) is the one equipment
+	// code that exits 5, because guessing the version would write a document
+	// the client refuses to parse.
+	EQUIPMENT_INVALID: 2,
+	EQUIPMENT_VERSION_UNSUPPORTED: 5,
 	// A selection-scoped write whose read scope matched no pixels.
 	EMPTY_SELECTION: 2,
 	// A polygon whose nonadjacent edges touch or cross (holes unsupported).

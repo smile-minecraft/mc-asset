@@ -291,7 +291,7 @@ function toMcpMessage(code: string, message: string): string {
 	return message;
 }
 
-function errorResult(error: unknown): McpTextResult {
+export function errorResult(error: unknown): McpTextResult {
 	if (error instanceof McAssetError) {
 		const message = toMcpMessage(error.code, stripCodePrefix(error.message));
 		return {
@@ -2955,6 +2955,7 @@ export async function handleMcmetaAsset(
 }
 
 export { handleEntityAsset } from "./handlers-entity.ts";
+export { handleEquipmentAsset } from "./handlers-equipment.ts";
 export {
 	handleModelAsset,
 	handleOptimizeAsset,
