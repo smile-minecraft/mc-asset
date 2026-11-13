@@ -443,10 +443,6 @@ export const GEOMETRY_CASES: ModelCase[] = [
 		name: "rasteriser never double-paints the diagonal of a split quad",
 		run(check) {
 			const target = createRasterTarget(64, 64);
-			const half = {
-				color: [120, 140, 160, 128] as const,
-				blend: "alpha" as const,
-			};
 			const vertices = [
 				{ x: 0, y: 0, z: 50, u: 0, v: 0 },
 				{ x: 48 * SUBPIXEL, y: 0, z: 50, u: 0, v: 0 },
@@ -459,12 +455,23 @@ export const GEOMETRY_CASES: ModelCase[] = [
 				vertices[1],
 				vertices[2],
 				vertices[3],
-				half,
+				{ color: [120, 140, 160, 128] },
+				{ blend: "alpha" },
 			);
 			let wrong = 0;
-			for (let index = 3; index < target.pixels.length; index += 4) {
-				const alpha = target.pixels[index] as number;
-				if (alpha !== 0 && alpha !== 128) wrong += 1;
+			for (let index = 0; index < target.pixels.length; index += 4) {
+				const alpha = target.pixels[index + 3] as number;
+				if (alpha === 0) continue;
+				if (alpha !== 128) wrong += 1;
+				// Straight alpha keeps the colour of a half-transparent fragment
+				// over a transparent pixel; a premultiplied blend would halve it.
+				if (
+					target.pixels[index] !== 120 ||
+					target.pixels[index + 1] !== 140 ||
+					target.pixels[index + 2] !== 160
+				) {
+					wrong += 1;
+				}
 			}
 			check.equal(
 				wrong,
@@ -574,8 +581,38 @@ export const GEOMETRY_CASES: ModelCase[] = [
 				{ color: [200, 100, 50, 128] },
 				{ blend: "alpha" },
 			);
-			// 0 + divRound((200, 100, 50) * 128 / 255) = (100, 50, 25); alpha stays 255.
+			// srcWeight = 32640, dstWeight = 255 * 127 = 32385, so the divisor
+			// (outAlphaScaled) is 65025 and (200, 100, 50) rounds to (100, 50, 25);
+			// the resulting alpha stays 255.
 			check.deepEqual(Array.from(target.pixels), [100, 50, 25, 255]);
+		},
+	},
+	{
+		name: "rasteriser keeps straight alpha when blending translucent over translucent",
+		run(check) {
+			const target = createRasterTarget(1, 1);
+			// Half-transparent blue underneath; draw half-transparent red on top.
+			target.depth[0] = 5;
+			target.pixels[0] = 0;
+			target.pixels[1] = 0;
+			target.pixels[2] = 255;
+			target.pixels[3] = 128;
+			const vertices = [
+				{ x: 0, y: 0, z: 5, u: 0, v: 0 },
+				{ x: 64 * SUBPIXEL, y: 0, z: 5, u: 0, v: 0 },
+				{ x: 0, y: 64 * SUBPIXEL, z: 5, u: 0, v: 0 },
+			] as const;
+			rasterizeTriangle(
+				target,
+				vertices[0],
+				vertices[1],
+				vertices[2],
+				{ color: [255, 0, 0, 128] },
+				{ blend: "alpha" },
+			);
+			// srcWeight 32640, dstWeight 16256, outAlphaScaled 48896:
+			// red = divRound(8323200 / 48896) = 170, blue = 85, alpha = 192.
+			check.deepEqual(Array.from(target.pixels), [170, 0, 85, 192]);
 		},
 	},
 	{

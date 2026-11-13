@@ -80,7 +80,9 @@ export type RasterSource =
 export interface RasterOptions {
 	/**
 	 * `replace` copies the fragment RGBA verbatim; `alpha` composes the colour
-	 * over the current pixel with integer src-over. Defaults to `replace`.
+	 * over the current pixel with integer straight-alpha src-over (the same
+	 * straight-alpha convention the canvas and PNG layers use). Defaults to
+	 * `replace`.
 	 */
 	readonly blend?: "replace" | "alpha";
 	/**
@@ -126,21 +128,37 @@ function textureAt(texture: RgbaTexture, u: number, v: number): RgbaColor {
 	];
 }
 
+/**
+ * Porter-Duff `src-over` in straight alpha.
+ *
+ * The whole toolchain keeps straight RGBA8 (`PixelCanvas`, `flattenCanvas`,
+ * the PNG encoder), so the colour must be divided by the resulting alpha
+ * instead of being weighted against the destination as if it were already
+ * premultiplied: a half-transparent fragment over a transparent pixel keeps
+ * its own colour, and over a half-transparent pixel the weights are
+ * `sa * 255` against `da * (255 - sa)`. All weights are integers, and the
+ * largest intermediate (`65025 * 255`) is far below 2**53.
+ */
 function blendSrcOver(
 	dst: readonly [number, number, number, number],
 	src: RgbaColor,
 ): RgbaColor {
 	const sourceAlpha = src[3];
-	if (sourceAlpha === 0) return [dst[0], dst[1], dst[2], dst[3]];
-	if (sourceAlpha === 255) return [src[0], src[1], src[2], src[3]];
 	const dstAlpha = dst[3];
+	if (sourceAlpha === 0) return [dst[0], dst[1], dst[2], dst[3]];
+	if (sourceAlpha === 255 || dstAlpha === 0) {
+		return [src[0], src[1], src[2], sourceAlpha];
+	}
+	const srcWeight = sourceAlpha * 255;
+	const dstWeight = dstAlpha * (255 - sourceAlpha);
+	const outAlphaScaled = srcWeight + dstWeight;
 	const channel = (s: number, d: number): number =>
-		d + divRound((s - d) * sourceAlpha, 255);
+		divRound(s * srcWeight + d * dstWeight, outAlphaScaled);
 	return [
 		channel(src[0], dst[0]),
 		channel(src[1], dst[1]),
 		channel(src[2], dst[2]),
-		dstAlpha + divRound((255 - dstAlpha) * sourceAlpha, 255),
+		divRound(outAlphaScaled, 255),
 	];
 }
 
