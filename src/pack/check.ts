@@ -5,7 +5,20 @@ import { decodePng } from "../io/png.ts";
 import { lintStyle } from "../style/lint.ts";
 import { resolveStyle } from "../style/load.ts";
 import { scanPack } from "../validate/pack.ts";
+import {
+	GENERATED_STEP_TYPES,
+	generatedOutputPath,
+	planGeneratedStep,
+} from "./generate.ts";
+import { parsePackProjectText } from "./load.ts";
 import { parseLockText } from "./lock.ts";
+import {
+	expandRecipeTargets,
+	parseRecipeText,
+	type RecipeDocument,
+	type RecipeTarget,
+} from "./recipe.ts";
+import type { PackProjectDocument } from "./types.ts";
 
 /**
  * Whole-pack check summary: pack validation plus per-texture style
@@ -106,6 +119,8 @@ interface LockedGeneratedOutputs {
 	readonly missing: ReadonlyArray<{
 		readonly path: string;
 		readonly kind: string;
+		readonly recipeId: string;
+		readonly targetId: string;
 	}>;
 }
 
@@ -129,7 +144,12 @@ function readLockedGeneratedOutputs(
 	packDir: string,
 ): LockedGeneratedOutputs {
 	const textures = new Set<string>();
-	const missing: Array<{ path: string; kind: string }> = [];
+	const missing: Array<{
+		path: string;
+		kind: string;
+		recipeId: string;
+		targetId: string;
+	}> = [];
 	const lockPath = join(projectDir, "mc-asset.lock.json");
 	if (!existsSync(lockPath)) {
 		return { textures, missing };
@@ -141,7 +161,12 @@ function readLockedGeneratedOutputs(
 				continue;
 			}
 			if (lockedFileMissing(projectDir, path)) {
-				missing.push({ path, kind: entry.kind });
+				missing.push({
+					path,
+					kind: entry.kind,
+					recipeId: entry.recipeId,
+					targetId: entry.targetId,
+				});
 			}
 			if (!GENERATED_TEXTURE_KINDS.has(entry.kind)) {
 				continue;
@@ -160,6 +185,83 @@ function readLockedGeneratedOutputs(
 	return { textures, missing };
 }
 
+interface ActiveGeneratedOutputs {
+	/** Project-root paths the project's current recipes still plan. */
+	readonly paths: ReadonlySet<string>;
+	/** `recipeId\0targetId` pairs a recipe declares but this scan could not plan. */
+	readonly unresolvedTargets: ReadonlySet<string>;
+}
+
+/**
+ * Generated outputs the project's current recipe files still declare.
+ *
+ * A lock entry whose file is gone is only a defect while a recipe still plans
+ * that path. Renaming a recipe id or dropping its target leaves the old entry
+ * behind, and the pack no longer misses the file, so it must not fail the
+ * check. The lock is trusted unchanged when no recipe set can be read as a
+ * whole (the directory or its files are gone, or a recipe cannot be parsed):
+ * a check that cannot see the recipes keeps reporting what the lock records.
+ * A single target this scan cannot plan keeps its own lock entries, so a
+ * missing icon or frame never hides a missing output.
+ */
+async function readActiveGeneratedOutputs(
+	projectDir: string,
+	project: PackProjectDocument,
+): Promise<ActiveGeneratedOutputs | undefined> {
+	const recipeDir = join(projectDir, project.recipeDir);
+	if (!existsSync(recipeDir)) {
+		return undefined;
+	}
+	let entries: string[];
+	try {
+		entries = readdirSync(recipeDir).filter((f) => f.endsWith(".recipe.json"));
+	} catch {
+		return undefined;
+	}
+	if (entries.length === 0) {
+		return undefined;
+	}
+	const paths = new Set<string>();
+	const unresolvedTargets = new Set<string>();
+	for (const entry of entries) {
+		let recipe: RecipeDocument;
+		let expanded: readonly RecipeTarget[];
+		try {
+			recipe = parseRecipeText(readFileSync(join(recipeDir, entry), "utf8"));
+			expanded = expandRecipeTargets(
+				recipe,
+				project.namespace,
+				project.outputDir,
+			);
+		} catch {
+			return undefined;
+		}
+		for (const target of expanded) {
+			for (const [stepIndex, step] of target.steps.entries()) {
+				if (!GENERATED_STEP_TYPES.has(step.type)) {
+					continue;
+				}
+				try {
+					const planned = await planGeneratedStep({
+						targetId: target.id,
+						stepIndex,
+						step,
+						namespace: project.namespace,
+						packFormat: project.resourcePackVersion,
+						recipeDir,
+					});
+					for (const output of planned.outputs) {
+						paths.add(generatedOutputPath(output, project.outputDir));
+					}
+				} catch {
+					unresolvedTargets.add(`${recipe.id}\0${target.id}`);
+				}
+			}
+		}
+	}
+	return { paths, unresolvedTargets };
+}
+
 /** Check a pack project and summarize what to fix first. */
 export async function checkResourcePack(
 	input: PackCheckInput,
@@ -171,6 +273,8 @@ export async function checkResourcePack(
 	let outputDir = "pack";
 	let styleName = "vanilla";
 	let vanillaSource: string | undefined;
+	/** The strictly parsed document; absent disables the recipe cross-check. */
+	let project: PackProjectDocument | undefined;
 
 	if (!existsSync(resolvedProject)) {
 		findings.push({
@@ -203,6 +307,13 @@ export async function checkResourcePack(
 			) {
 				vanillaSource = projectDoc.vanillaSource.path;
 			}
+			try {
+				project = parsePackProjectText(projectText, resolvedProject);
+			} catch {
+				// A document the strict reader refuses keeps the lenient fields
+				// above; the lock is trusted instead of cross-checked.
+				project = undefined;
+			}
 		} catch {
 			findings.push({
 				code: "PACK_PROJECT_INVALID",
@@ -217,7 +328,20 @@ export async function checkResourcePack(
 	const packDir = resolve(projectDir, outputDir);
 	const lockedOutputs = readLockedGeneratedOutputs(projectDir, packDir);
 	const generatedTextures = lockedOutputs.textures;
+	const activeGeneratedOutputs =
+		project === undefined
+			? undefined
+			: await readActiveGeneratedOutputs(projectDir, project);
 	for (const missing of lockedOutputs.missing) {
+		if (
+			activeGeneratedOutputs !== undefined &&
+			!activeGeneratedOutputs.paths.has(missing.path) &&
+			!activeGeneratedOutputs.unresolvedTargets.has(
+				`${missing.recipeId}\0${missing.targetId}`,
+			)
+		) {
+			continue;
+		}
 		findings.push({
 			code: "PACK_GENERATED_OUTPUT_MISSING",
 			level: "error",

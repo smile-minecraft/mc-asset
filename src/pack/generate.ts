@@ -100,6 +100,21 @@ function generatedOutput(
 	};
 }
 
+/**
+ * The project path a generated output is recorded at: pack-scoped outputs sit
+ * below the project's output directory, project-scoped ones below the project
+ * root. The build, the sibling-recipe scan, and `pack check` all read the
+ * same anchor here, so no family can drift into a second path rule.
+ */
+export function generatedOutputPath(
+	output: GeneratedOutput,
+	outputDir: string,
+): string {
+	return output.scope === "project"
+		? output.relativePath
+		: `${outputDir}/${output.relativePath}`;
+}
+
 /** One input file a step read, recorded in the target input hash. */
 export interface GeneratedInput {
 	/** Declared reference, never an absolute path. */

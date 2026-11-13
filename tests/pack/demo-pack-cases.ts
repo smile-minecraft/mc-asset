@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
 	cp,
+	mkdir,
 	mkdtemp,
 	readdir,
 	readFile,
@@ -205,6 +206,26 @@ async function writeExtraRecipe(
 		`${JSON.stringify(recipe, null, "\t")}\n`,
 		"utf8",
 	);
+}
+
+/**
+ * Move the hero target out of the demo recipe into a second recipe file,
+ * leaving the same output path and bytes behind: exactly what a user does
+ * when they reorganize recipes.
+ */
+async function moveHeroToSecondRecipe(projectDir: string): Promise<void> {
+	const recipe = await readRecipe(projectDir);
+	const hero = recipe.targets.find((target) => target.id === "aurelian_hero");
+	assert.ok(hero, "the demo recipe declares the hero target");
+	await writeRecipe(projectDir, {
+		...recipe,
+		targets: recipe.targets.filter((target) => target.id !== "aurelian_hero"),
+	});
+	await writeExtraRecipe(projectDir, "second.recipe.json", {
+		formatVersion: 3,
+		id: "second-demo",
+		targets: [hero],
+	});
 }
 
 /** Change the demo recipe id, as a user renaming the recipe would. */
@@ -482,6 +503,32 @@ export const DEMO_PACK_CASES: readonly DemoCase[] = [
 		},
 	},
 	{
+		name: "a generated target the check cannot plan keeps its missing output reported",
+		async run() {
+			await withDemoProject(async (projectDir) => {
+				await buildDemo(projectDir);
+				// The font step no longer plans, so the check cannot know which
+				// paths that target owns; its lock entries must keep reporting.
+				await unlink(join(projectDir, "recipes", "sources", "icon_gem.mcpx"));
+				const definitionRel = "pack/assets/aurelian/font/icons.json";
+				await unlink(join(projectDir, definitionRel));
+
+				const summary = await checkResourcePack({
+					projectPath: projectPath(projectDir),
+				});
+				assert.equal(summary.verdict, "fail");
+				const fix = summary.fixList.find(
+					(candidate) => candidate.code === "PACK_GENERATED_OUTPUT_MISSING",
+				);
+				assert.ok(fix, "the missing output is still reported");
+				assert.ok(
+					fix.samplePaths.includes(definitionRel),
+					"the fix points at the planned font definition",
+				);
+			});
+		},
+	},
+	{
 		name: "a target removed from the recipe stops being locked and pack check recovers",
 		async run() {
 			await withDemoProject(async (projectDir) => {
@@ -637,22 +684,7 @@ export const DEMO_PACK_CASES: readonly DemoCase[] = [
 				assert.ok(heroBefore, "the first recipe owns the hero texture");
 				const heroBytes = await readFile(join(projectDir, HERO_TEXTURE_REL));
 
-				const recipe = await readRecipe(projectDir);
-				const hero = recipe.targets.find(
-					(target) => target.id === "aurelian_hero",
-				);
-				assert.ok(hero, "the demo recipe declares the hero target");
-				await writeRecipe(projectDir, {
-					...recipe,
-					targets: recipe.targets.filter(
-						(target) => target.id !== "aurelian_hero",
-					),
-				});
-				await writeExtraRecipe(projectDir, "second.recipe.json", {
-					formatVersion: 3,
-					id: "second-demo",
-					targets: [hero],
-				});
+				await moveHeroToSecondRecipe(projectDir);
 
 				const moved = await buildDemo(projectDir);
 				assert.deepEqual(
@@ -711,6 +743,150 @@ export const DEMO_PACK_CASES: readonly DemoCase[] = [
 					secondOnly.completed,
 					[],
 					"the new recipe rewrites nothing",
+				);
+			});
+		},
+	},
+	{
+		name: "a moved target survives building the old recipe first and the new one second",
+		async run() {
+			await withDemoProject(async (projectDir) => {
+				await buildDemo(projectDir);
+				const lockPath = join(projectDir, "mc-asset.lock.json");
+				const before = parseLockText(await readFile(lockPath, "utf8"));
+				const heroBefore = before.outputs[HERO_TEXTURE_REL];
+				assert.ok(heroBefore, "the first recipe owns the hero texture");
+				const heroBytes = await readFile(join(projectDir, HERO_TEXTURE_REL));
+
+				await moveHeroToSecondRecipe(projectDir);
+				const firstRecipePath = join(projectDir, RECIPE_REL);
+				const secondRecipePath = join(
+					projectDir,
+					"recipes",
+					"second.recipe.json",
+				);
+
+				// No full build in between: the old recipe must not mistake the
+				// moved target's entry for one of its own stale files.
+				const firstOnly = await buildDemo(projectDir, firstRecipePath);
+				assert.deepEqual(firstOnly.completed, []);
+				const afterFirst = parseLockText(await readFile(lockPath, "utf8"));
+				assert.deepEqual(
+					afterFirst.outputs[HERO_TEXTURE_REL],
+					heroBefore,
+					"building the old recipe first keeps the moved entry",
+				);
+
+				const secondPlan = await planPackBuild(projectPath(projectDir), {
+					recipe: secondRecipePath,
+				});
+				assert.ok(
+					secondPlan.outputs.every(
+						(output) => output.judgement === "own-clean",
+					),
+					"the new recipe sees only its own clean output",
+				);
+				const secondOnly = await executePackBuild(secondPlan);
+				assert.deepEqual(
+					secondOnly.completed,
+					[],
+					"the new recipe rewrites nothing",
+				);
+				const afterSecond = parseLockText(await readFile(lockPath, "utf8"));
+				assert.equal(
+					afterSecond.outputs[HERO_TEXTURE_REL]?.recipeId,
+					"second-demo",
+					"the new recipe now owns the moved entry",
+				);
+				assert.equal(
+					afterSecond.outputs[HERO_TEXTURE_REL]?.outputHash,
+					heroBefore.outputHash,
+					"the recorded output stays the same",
+				);
+				assert.deepEqual(
+					await readFile(join(projectDir, HERO_TEXTURE_REL)),
+					heroBytes,
+					"the asset file is unchanged",
+				);
+			});
+		},
+	},
+	{
+		name: "a recipe outside the project keeps its lock entries across a full build",
+		async run() {
+			await withDemoProject(async (projectDir, root) => {
+				const externalDir = join(root, "external");
+				await mkdir(externalDir, { recursive: true });
+				const externalRecipePath = join(externalDir, "ext.recipe.json");
+				await writeFile(
+					externalRecipePath,
+					`${JSON.stringify(
+						{
+							formatVersion: 3,
+							id: "ext",
+							targets: [
+								{
+									id: "ext_hero",
+									steps: [
+										{
+											type: "entityTemplate",
+											layout: "player_wide",
+											output: "assets/{namespace}/textures/entity/ext_hero.png",
+										},
+									],
+								},
+							],
+						},
+						null,
+						"\t",
+					)}\n`,
+					"utf8",
+				);
+				const externalHeroRel =
+					"pack/assets/aurelian/textures/entity/ext_hero.png";
+				const lockPath = join(projectDir, "mc-asset.lock.json");
+
+				const externalOnly = await buildDemo(projectDir, externalRecipePath);
+				assert.deepEqual(
+					externalOnly.completed,
+					[externalHeroRel],
+					"the external recipe builds its output",
+				);
+				const afterExternal = parseLockText(await readFile(lockPath, "utf8"));
+				const extEntry = afterExternal.outputs[externalHeroRel];
+				assert.ok(extEntry, "the external recipe is locked");
+				assert.equal(extEntry.recipeId, "ext", "the lock records its id");
+				const extBytes = await readFile(join(projectDir, externalHeroRel));
+
+				const full = await buildDemo(projectDir);
+				assert.equal(
+					full.completed.length,
+					20,
+					"the full build plans every demo output",
+				);
+				const afterFull = parseLockText(await readFile(lockPath, "utf8"));
+				assert.deepEqual(
+					afterFull.outputs[externalHeroRel],
+					extEntry,
+					"the full build keeps the external entry",
+				);
+
+				const again = await buildDemo(projectDir, externalRecipePath);
+				assert.deepEqual(
+					again.completed,
+					[],
+					"the external recipe is still own-clean",
+				);
+				const final = parseLockText(await readFile(lockPath, "utf8"));
+				assert.deepEqual(
+					final.outputs[externalHeroRel],
+					extEntry,
+					"the entry survives the round trip unchanged",
+				);
+				assert.deepEqual(
+					await readFile(join(projectDir, externalHeroRel)),
+					extBytes,
+					"the external asset is unchanged",
 				);
 			});
 		},
@@ -777,38 +953,60 @@ export const DEMO_PACK_CASES: readonly DemoCase[] = [
 		},
 	},
 	{
-		name: "renaming the recipe id prunes the old id's stale entries in a full build",
+		name: "renaming the recipe id and dropping a target keeps pack check passing before any lock cleanup",
 		async run() {
 			await withDemoProject(async (projectDir) => {
 				await buildDemo(projectDir);
 				const lockPath = join(projectDir, "mc-asset.lock.json");
 				const before = parseLockText(await readFile(lockPath, "utf8"));
-				assert.ok(before.outputs[HERO_TEXTURE_REL], "the hero starts locked");
+				const heroBefore = before.outputs[HERO_TEXTURE_REL];
+				assert.ok(heroBefore, "the hero starts locked");
 
 				await renameRecipeId(projectDir, "aurelian-demo-v2");
 				await removeRecipeTarget(projectDir, "aurelian_hero");
 				await unlink(join(projectDir, HERO_TEXTURE_REL));
 
-				const rebuilt = await buildDemo(projectDir);
-				assert.deepEqual(rebuilt.completed, [], "only lock records change");
-				const after = parseLockText(await readFile(lockPath, "utf8"));
-				assert.equal(
-					after.outputs[HERO_TEXTURE_REL],
-					undefined,
-					"the removed target leaves the lock",
+				// Nothing has cleaned the lock: it still names the old id and a
+				// file that no recipe plans anymore, which is not a pack defect.
+				const stale = parseLockText(await readFile(lockPath, "utf8"));
+				assert.deepEqual(
+					stale.outputs[HERO_TEXTURE_REL],
+					heroBefore,
+					"the old entry is still recorded",
 				);
-				assert.ok(
-					Object.values(after.outputs).every(
-						(entry) => entry.recipeId === "aurelian-demo-v2",
-					),
-					"every surviving entry records the new id",
-				);
-
 				const summary = await checkResourcePack({
 					projectPath: projectPath(projectDir),
 				});
-				assert.equal(summary.verdict, "pass", "pack check passes again");
+				assert.equal(
+					summary.verdict,
+					"pass",
+					"the dropped target is not reported as missing",
+				);
 				assert.deepEqual(summary.fixList, [], "nothing to fix");
+
+				// A full build renames the planned entries but cannot prove the
+				// old id is gone rather than owned by a recipe outside the
+				// project, so the old entry stays until the lock is cleaned.
+				const rebuilt = await buildDemo(projectDir);
+				assert.deepEqual(rebuilt.completed, [], "only lock records change");
+				const after = parseLockText(await readFile(lockPath, "utf8"));
+				assert.deepEqual(
+					after.outputs[HERO_TEXTURE_REL],
+					heroBefore,
+					"the removed target's old entry stays for a manual cleanup",
+				);
+				assert.ok(
+					Object.entries(after.outputs)
+						.filter(([path]) => path !== HERO_TEXTURE_REL)
+						.every(([, entry]) => entry.recipeId === "aurelian-demo-v2"),
+					"every surviving planned entry records the new id",
+				);
+
+				const finalCheck = await checkResourcePack({
+					projectPath: projectPath(projectDir),
+				});
+				assert.equal(finalCheck.verdict, "pass", "pack check still passes");
+				assert.deepEqual(finalCheck.fixList, [], "nothing to fix");
 			});
 		},
 	},
@@ -832,14 +1030,20 @@ export const DEMO_PACK_CASES: readonly DemoCase[] = [
 					lockBytes,
 					"a dry run writes no lock",
 				);
-				const stillBroken = await checkResourcePack({
+				const afterDryRun = parseLockText(await readFile(lockPath, "utf8"));
+				assert.ok(
+					afterDryRun.outputs[HERO_TEXTURE_REL],
+					"the dropped target is not committed yet",
+				);
+				const meanwhile = await checkResourcePack({
 					projectPath: projectPath(projectDir),
 				});
 				assert.equal(
-					stillBroken.verdict,
-					"fail",
-					"the stale entry keeps reporting until a real build",
+					meanwhile.verdict,
+					"pass",
+					"the dropped target is reconciled by the recipes, not the lock",
 				);
+				assert.deepEqual(meanwhile.fixList, [], "nothing to fix");
 
 				// A hand-edited generated file conflicts before anything is staged,
 				// so the conflict must not prune the entry either.
@@ -856,6 +1060,11 @@ export const DEMO_PACK_CASES: readonly DemoCase[] = [
 					await readFile(lockPath),
 					lockBytes,
 					"the conflict writes no lock",
+				);
+				const afterConflict = parseLockText(await readFile(lockPath, "utf8"));
+				assert.ok(
+					afterConflict.outputs[HERO_TEXTURE_REL],
+					"the conflict leaves the stale entry",
 				);
 			});
 		},

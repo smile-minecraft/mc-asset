@@ -82,6 +82,7 @@ import {
 	GENERATED_STEP_TYPES,
 	type GeneratedInput,
 	type GeneratedOutputKind,
+	generatedOutputPath,
 	planGeneratedStep,
 } from "./generate.ts";
 import {
@@ -209,6 +210,12 @@ export interface PackBuildPlan {
 	 * unreadable one disables pruning, so those records survive.
 	 */
 	readonly prunableRecipeIds?: readonly string[];
+	/**
+	 * Paths unplanned recipe files still plan. A single-recipe build never
+	 * prunes one of these, so a target just moved to a sibling keeps its lock
+	 * entry until that sibling's own build takes the entry over.
+	 */
+	readonly otherRecipeOutputPaths?: readonly string[];
 	/** True when this run scanned every recipe file in the project. */
 	readonly fullPack?: boolean;
 	/** Every output path this run planned, across all four output families. */
@@ -415,46 +422,140 @@ function assertOutputInsideOutputDir(
 }
 
 /**
- * Recipe ids a single-recipe build may prune.
- *
- * The run planned one file, so any id a sibling recipe file also declares
- * could own lock entries this run never planned. An unreadable sibling could
- * hide such an id, so it disables pruning entirely rather than guess.
+ * Every non-generator output a recipe target declares, at the project path
+ * the build records it under: the texture half, sweep `mcmetaOutput`, and the
+ * JSON documents its steps write. Sibling recipes use this to claim their
+ * paths before anything is read; a planned target still goes through
+ * `plannedPathsOfTarget` once its bytes exist.
  */
-function recipeIdsSafeToPrune(
+function declaredOutputPaths(
+	target: RecipeTarget,
+	namespace: string,
+	outputDir: string,
+): string[] {
+	const paths: string[] = [];
+	if (hasPlannedTexture(target)) {
+		paths.push(
+			target.output
+				? `${outputDir}/${target.output}`
+				: `${outputDir}/assets/${namespace}/textures/item/${target.id}.png`,
+		);
+	}
+	for (const [stepIndex, step] of target.steps.entries()) {
+		if (step.type === "sweep" && typeof step.mcmetaOutput === "string") {
+			paths.push(`${outputDir}/${step.mcmetaOutput}`);
+		}
+		for (const output of collectJsonOutputsForStep(
+			step,
+			target.id,
+			namespace,
+			stepIndex,
+		)) {
+			paths.push(`${outputDir}/${output.path}`);
+		}
+	}
+	return paths;
+}
+
+/** What the recipe files a single-recipe build leaves out still own. */
+interface UnplannedRecipeScan {
+	/** Recipe ids this run may prune; an id a sibling declares is kept. */
+	readonly prunableRecipeIds: readonly string[];
+	/** Paths an unplanned sibling plans, so they are never stale here. */
+	readonly otherRecipeOutputPaths: readonly string[];
+}
+
+/**
+ * A recipe set this run cannot see is not guessed at: no id is pruned and no
+ * path is protected, because either answer could delete a lock entry whose
+ * owner merely lives outside the planned files.
+ */
+const NOTHING_UNPLANNED: UnplannedRecipeScan = {
+	prunableRecipeIds: [],
+	otherRecipeOutputPaths: [],
+};
+
+/**
+ * Scan the recipe files a single-recipe build did not plan.
+ *
+ * A sibling's planned paths protect them from this run's stale-entry pruning:
+ * a target moved from the planned recipe to a sibling still owns its lock
+ * entry until that sibling's own build takes it over. A sibling that cannot
+ * be read or planned stops pruning entirely rather than risk deleting an
+ * entry whose owner this run cannot see.
+ */
+async function scanUnplannedRecipes(
 	projectDir: string,
 	recipeDirName: string,
 	plannedFiles: readonly string[],
 	plannedRecipeIds: readonly string[],
-): string[] {
+	namespace: string,
+	outputDir: string,
+	packFormat: string,
+): Promise<UnplannedRecipeScan> {
 	const recipeDir = join(projectDir, recipeDirName);
 	if (!existsSync(recipeDir)) {
-		return [...plannedRecipeIds];
+		return {
+			prunableRecipeIds: [...plannedRecipeIds],
+			otherRecipeOutputPaths: [],
+		};
 	}
-	const planned = new Set(plannedFiles.map((file) => resolve(file)));
-	const siblingIds = new Set<string>();
 	let entries: string[];
 	try {
 		entries = readdirSync(recipeDir)
 			.filter((f) => f.endsWith(".recipe.json"))
 			.sort(compareCodeUnits);
 	} catch {
-		return [];
+		return NOTHING_UNPLANNED;
 	}
+	const planned = new Set(plannedFiles.map((file) => resolve(file)));
+	const siblingIds = new Set<string>();
+	const outputPaths = new Set<string>();
 	for (const entry of entries) {
 		const file = resolve(join(recipeDir, entry));
 		if (planned.has(file)) {
 			continue;
 		}
-		let siblingId: string;
+		let recipe: RecipeDocument;
+		let expanded: readonly RecipeTarget[];
 		try {
-			siblingId = parseRecipeText(readFileSync(file, "utf8")).id;
+			recipe = parseRecipeText(readFileSync(file, "utf8"));
+			expanded = expandRecipeTargets(recipe, namespace, outputDir);
 		} catch {
-			return [];
+			return NOTHING_UNPLANNED;
 		}
-		siblingIds.add(siblingId);
+		siblingIds.add(recipe.id);
+		for (const target of expanded) {
+			for (const path of declaredOutputPaths(target, namespace, outputDir)) {
+				outputPaths.add(path);
+			}
+			for (const [stepIndex, step] of target.steps.entries()) {
+				if (!GENERATED_STEP_TYPES.has(step.type)) {
+					continue;
+				}
+				let plannedStep: Awaited<ReturnType<typeof planGeneratedStep>>;
+				try {
+					plannedStep = await planGeneratedStep({
+						targetId: target.id,
+						stepIndex,
+						step,
+						namespace,
+						packFormat,
+						recipeDir: dirname(file),
+					});
+				} catch {
+					return NOTHING_UNPLANNED;
+				}
+				for (const output of plannedStep.outputs) {
+					outputPaths.add(generatedOutputPath(output, outputDir));
+				}
+			}
+		}
 	}
-	return plannedRecipeIds.filter((id) => !siblingIds.has(id));
+	return {
+		prunableRecipeIds: plannedRecipeIds.filter((id) => !siblingIds.has(id)),
+		otherRecipeOutputPaths: [...outputPaths].sort(compareCodeUnits),
+	};
 }
 
 /**
@@ -571,14 +672,17 @@ export async function planPackBuild(
 		recipes.push({ file, recipe, expanded });
 	}
 
-	const prunableRecipeIds = singleRecipe
-		? recipeIdsSafeToPrune(
+	const unplanned: UnplannedRecipeScan = singleRecipe
+		? await scanUnplannedRecipes(
 				projectDir,
 				project.recipeDir,
 				recipeFiles,
 				plannedRecipeIds,
+				project.namespace,
+				project.outputDir,
+				format,
 			)
-		: plannedRecipeIds;
+		: { prunableRecipeIds: plannedRecipeIds, otherRecipeOutputPaths: [] };
 
 	// Declared outputs are counted before any source is read, exactly as
 	// before; generator-backed outputs join the count during planning and the
@@ -855,10 +959,7 @@ export async function planPackBuild(
 				}
 				for (const output of planned.outputs) {
 					generatedPlans.push({
-						path:
-							output.scope === "project"
-								? output.relativePath
-								: `${project.outputDir}/${output.relativePath}`,
+						path: generatedOutputPath(output, project.outputDir),
 						kind: output.kind,
 						extension: output.extension,
 						scope: output.scope,
@@ -1147,7 +1248,8 @@ export async function planPackBuild(
 		targetPlans,
 		lock,
 		plannedRecipeIds,
-		prunableRecipeIds,
+		prunableRecipeIds: unplanned.prunableRecipeIds,
+		otherRecipeOutputPaths: unplanned.otherRecipeOutputPaths,
 		fullPack,
 		plannedOutputPaths,
 	};
@@ -1339,21 +1441,24 @@ function collectOwnershipUpdates(
  * so `--recipe one.recipe.json` builds one recipe without touching the records
  * of the others.
  *
- * A full-pack run scanned every recipe file, so a planned-path miss belongs to
- * no recipe at all; it is stale whatever `recipeId` the old entry recorded.
+ * A path an unplanned sibling still plans is never stale here: a target may
+ * have just moved to that sibling, and only the sibling's own build can take
+ * the entry over. An id no recipe file in the run declares is never pruned
+ * either, because the run cannot prove who owns it; a recipe built from a
+ * path outside the project keeps its records across a full build that way.
  */
 function collectStaleLockPaths(plan: PackBuildPlan): string[] {
 	const prunableRecipeIds = new Set(
 		plan.prunableRecipeIds ?? plan.plannedRecipeIds ?? [],
 	);
 	const plannedOutputPaths = new Set(plan.plannedOutputPaths ?? []);
-	const fullPack = plan.fullPack === true;
+	const otherRecipeOutputPaths = new Set(plan.otherRecipeOutputPaths ?? []);
 	const stale: string[] = [];
 	for (const [path, entry] of Object.entries(plan.lock?.outputs ?? {})) {
-		if (plannedOutputPaths.has(path)) {
+		if (plannedOutputPaths.has(path) || otherRecipeOutputPaths.has(path)) {
 			continue;
 		}
-		if (fullPack || prunableRecipeIds.has(entry.recipeId)) {
+		if (prunableRecipeIds.has(entry.recipeId)) {
 			stale.push(path);
 		}
 	}
