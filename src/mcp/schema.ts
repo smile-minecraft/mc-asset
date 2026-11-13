@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ISOMETRIC_DIRECTIONS } from "../model/geometry/index.ts";
 
 /**
  * Frozen MCP tool surface: twenty-seven tools for agent authoring — the
@@ -464,7 +465,7 @@ export const modelAssetInput = {
 	mode: z
 		.enum(MODEL_MODES)
 		.describe(
-			"inspect and validate are read-only; create and apply produce a model document; export places a model and optional bindings; preview renders a diagnostic three-view PNG.",
+			"inspect and validate are read-only; create and apply produce a model document; export places a model and optional bindings; preview renders a diagnostic PNG in the three-view or isometric layout selected by view.",
 		),
 	inputPath: z
 		.string()
@@ -533,6 +534,18 @@ export const modelAssetInput = {
 		.optional()
 		.describe(
 			"preview only: panel edge in pixels, one of 64, 128, or 256 (default 64).",
+		),
+	view: z
+		.enum(["three-view", "isometric"])
+		.optional()
+		.describe(
+			"preview only: three-view (default) renders front/right/top panels; isometric renders one 2:1 panel from viewDirection.",
+		),
+	viewDirection: z
+		.enum(ISOMETRIC_DIRECTIONS)
+		.optional()
+		.describe(
+			"preview only: isometric camera direction (default south-east); refused when view is three-view.",
 		),
 	outputPngPath: z
 		.string()

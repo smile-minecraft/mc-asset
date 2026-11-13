@@ -153,7 +153,7 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 	{
 		name: "model_asset",
 		description:
-			"Inspect, validate, create, apply, export, or preview Java models. Preview renders a diagnostic three-view PNG, never writes without outputPath, and never claims game rendering.",
+			"Inspect, validate, create, apply, export, or preview Java models. Preview renders a diagnostic three-view PNG, or one isometric panel when view is isometric and viewDirection picks the camera; it never writes without outputPath and never claims game rendering.",
 		inputSchema: TOOL_INPUT_SCHEMAS.model_asset,
 	},
 	{

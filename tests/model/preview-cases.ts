@@ -1,4 +1,5 @@
 import { Buffer } from "node:buffer";
+import { createHash } from "node:crypto";
 import {
 	mkdir,
 	mkdtemp,
@@ -9,7 +10,8 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { runModelRequest } from "../../src/cli/cmd-model.ts";
 import {
 	addLayer,
@@ -32,6 +34,8 @@ const RED_REL = "assets/demo/textures/red.png";
 const GREEN_REL = "assets/demo/textures/green.png";
 const BLUE_REL = "assets/demo/textures/blue.png";
 const YELLOW_REL = "assets/demo/textures/yellow.png";
+const MAGENTA_REL = "assets/demo/textures/magenta.png";
+const CYAN_REL = "assets/demo/textures/cyan.png";
 const MIX_REL = "assets/demo/textures/mix.png";
 const PARENT_REL = "assets/demo/models/block/base.json";
 
@@ -41,6 +45,76 @@ const BLUE: readonly [number, number, number, number] = [0, 0, 255, 255];
 const MAGENTA: readonly [number, number, number, number] = [255, 0, 255, 255];
 
 const encoder = new TextEncoder();
+
+function sha256(value: Uint8Array | string): string {
+	return createHash("sha256").update(value).digest("hex");
+}
+
+interface PixelBox {
+	readonly minX: number;
+	readonly minY: number;
+	readonly maxX: number;
+	readonly maxY: number;
+	readonly width: number;
+	readonly height: number;
+	readonly count: number;
+}
+
+/** The non-transparent bounding box inside one panel. */
+function panelBox(
+	flat: Uint8Array,
+	width: number,
+	x0: number,
+	y0: number,
+	x1: number,
+	y1: number,
+): PixelBox {
+	let minX = x1 + 1;
+	let minY = y1 + 1;
+	let maxX = x0 - 1;
+	let maxY = y0 - 1;
+	let count = 0;
+	for (let y = y0; y <= y1; y += 1) {
+		for (let x = x0; x <= x1; x += 1) {
+			const o = (y * width + x) * 4;
+			if ((flat[o + 3] as number) === 0) continue;
+			count += 1;
+			if (x < minX) minX = x;
+			if (x > maxX) maxX = x;
+			if (y < minY) minY = y;
+			if (y > maxY) maxY = y;
+		}
+	}
+	return {
+		minX,
+		minY,
+		maxX,
+		maxY,
+		width: maxX - minX + 1,
+		height: maxY - minY + 1,
+		count,
+	};
+}
+
+/** Every opaque colour inside one panel, as r,g,b strings. */
+function panelColors(
+	flat: Uint8Array,
+	width: number,
+	x0: number,
+	y0: number,
+	x1: number,
+	y1: number,
+): string[] {
+	const colors = new Set<string>();
+	for (let y = y0; y <= y1; y += 1) {
+		for (let x = x0; x <= x1; x += 1) {
+			const [r, g, b, a] = at(flat, width, x, y);
+			if (a === 0) continue;
+			colors.add(`${r},${g},${b}`);
+		}
+	}
+	return [...colors].sort();
+}
 
 function solidPng(r: number, g: number, b: number, a = 255): Uint8Array {
 	const size = 16;
@@ -165,6 +239,94 @@ function cubeModel(
 	return JSON.stringify({
 		textures: { all: "demo:stone" },
 		elements: [{ from, to, faces: fullCubeFaces(texture) }],
+	});
+}
+
+/** A deterministic patterned 16x16 texture: base colour with a seam colour. */
+function patternPng(
+	base: readonly [number, number, number],
+	seam: readonly [number, number, number],
+): Uint8Array {
+	const size = 16;
+	const canvas = createCanvas(size, size);
+	const layer = addLayer(canvas, { id: "base" });
+	const pixels = new Uint8Array(size * size * 4);
+	for (let y = 0; y < size; y += 1) {
+		for (let x = 0; x < size; x += 1) {
+			const color = x === 0 || y === 0 || (x + y) % 7 === 0 ? seam : base;
+			const o = (y * size + x) * 4;
+			pixels[o] = color[0];
+			pixels[o + 1] = color[1];
+			pixels[o + 2] = color[2];
+			pixels[o + 3] = 255;
+		}
+	}
+	replaceLayerPixels(canvas, layer.id, pixels);
+	return encodePng(canvas);
+}
+
+/** The four showcase textures the shrine model references, one per material. */
+function shrineContext(): ModelResolutionContext {
+	return memoryContext({
+		"assets/mypack/textures/block/bricks.png": patternPng(
+			[178, 82, 62],
+			[92, 42, 34],
+		),
+		"assets/mypack/textures/block/planks.png": patternPng(
+			[176, 142, 88],
+			[120, 92, 50],
+		),
+		"assets/mypack/textures/block/stone.png": patternPng(
+			[128, 128, 128],
+			[86, 86, 86],
+		),
+		"assets/mypack/textures/block/ore.png": patternPng(
+			[120, 120, 120],
+			[96, 240, 220],
+		),
+	});
+}
+
+const SHRINE_PATH = join(
+	dirname(fileURLToPath(import.meta.url)),
+	"../../docs/assets/showcase/model-shrine.json",
+);
+
+function coloredCubeModel(): string {
+	return JSON.stringify({
+		textures: {
+			n: "demo:red",
+			s: "demo:green",
+			w: "demo:blue",
+			e: "demo:yellow",
+			u: "demo:magenta",
+			d: "demo:cyan",
+		},
+		elements: [
+			{
+				from: [0, 0, 0],
+				to: [16, 16, 16],
+				faces: {
+					north: { texture: "#n" },
+					south: { texture: "#s" },
+					west: { texture: "#w" },
+					east: { texture: "#e" },
+					up: { texture: "#u" },
+					down: { texture: "#d" },
+				},
+			},
+		],
+	});
+}
+
+function coloredCubeContext(): ModelResolutionContext {
+	return memoryContext({
+		[RED_REL]: solidPng(255, 0, 0),
+		[GREEN_REL]: solidPng(0, 255, 0),
+		[BLUE_REL]: solidPng(0, 0, 255),
+		[YELLOW_REL]: solidPng(255, 255, 0),
+		[MAGENTA_REL]: solidPng(255, 0, 255),
+		[CYAN_REL]: solidPng(0, 255, 255),
 	});
 }
 
@@ -603,7 +765,7 @@ export const PREVIEW_CASES: ModelCase[] = [
 		},
 	},
 	{
-		name: "element rotation is listed as partial",
+		name: "a rotated element is drawn in all three views",
 		async run(check) {
 			const context = memoryContext({ [STONE_REL]: solidPng(255, 0, 0) });
 			const text = JSON.stringify({
@@ -613,7 +775,7 @@ export const PREVIEW_CASES: ModelCase[] = [
 						from: [0, 0, 0],
 						to: [16, 16, 16],
 						rotation: { origin: [8, 8, 8], axis: "y", angle: 22.5 },
-						faces: { north: { texture: "#all" } },
+						faces: fullCubeFaces("#all"),
 					},
 				],
 			});
@@ -622,8 +784,85 @@ export const PREVIEW_CASES: ModelCase[] = [
 				context,
 				size: 64,
 			});
-			check.equal(rendered.report.coverage.status, "partial");
-			check.ok(rendered.report.coverage.skipped.length > 0, "rotation skipped");
+			check.equal(rendered.report.coverage.status, "complete");
+			check.equal(
+				rendered.report.coverage.skipped.some(
+					(skip) => skip.kind === "element-rotation",
+				),
+				false,
+				"rotation is no longer skipped",
+			);
+			const { flat, width } = flatOf(rendered.png);
+			const front = panelBox(flat, width, 0, 0, 63, 63);
+			const right = panelBox(flat, width, 64, 0, 127, 63);
+			const top = panelBox(flat, width, 128, 0, 191, 63);
+			for (const [name, box] of [
+				["front", front],
+				["right", right],
+				["top", top],
+			] as const) {
+				check.ok(box.count > 0, `${name} panel draws the rotated part`);
+			}
+			// A cube turned 22.5 degrees about y is wider than it is tall in the
+			// front and right views; from above the rotated square has a square
+			// axis-aligned bounding box.
+			check.ok(
+				front.width > front.height,
+				`front is wider than tall: ${front.width}x${front.height}`,
+			);
+			check.ok(
+				right.width > right.height,
+				`right is wider than tall: ${right.width}x${right.height}`,
+			);
+			check.ok(
+				Math.abs(top.width - top.height) <= 1,
+				`top stays square: ${top.width}x${top.height}`,
+			);
+		},
+	},
+	{
+		name: "rescale widens the rotated bounds and still renders",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(255, 0, 0) });
+			const model = (rescale: boolean) =>
+				JSON.stringify({
+					textures: { all: "demo:stone" },
+					elements: [
+						{
+							from: [0, 0, 0],
+							to: [16, 16, 16],
+							rotation: {
+								origin: [8, 8, 8],
+								axis: "y",
+								angle: 45,
+								rescale,
+							},
+							faces: fullCubeFaces("#all"),
+						},
+					],
+				});
+			const plain = await renderModelPreview(model(false), {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+			});
+			const rescaled = await renderModelPreview(model(true), {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+			});
+			check.equal(plain.report.coverage.status, "complete");
+			check.equal(rescaled.report.coverage.status, "complete");
+			// 1 / cos(45 degrees) scales the x and z extents from 16 * (cos + sin)
+			// to 32 model units, so the rotated bounds grow past 20.
+			check.ok(
+				(rescaled.report.range.max[0] as number) > 20,
+				`rescaled max x: ${String(rescaled.report.range.max[0])}`,
+			);
+			check.ok(
+				(plain.report.range.max[0] as number) < 20,
+				`plain max x: ${String(plain.report.range.max[0])}`,
+			);
 		},
 	},
 	{
@@ -653,29 +892,53 @@ export const PREVIEW_CASES: ModelCase[] = [
 		},
 	},
 	{
-		name: "translucent textures are listed as partial",
+		name: "translucent faces blend over opaque faces with integer alpha",
 		async run(check) {
-			const context = memoryContext({ [STONE_REL]: solidPng(255, 0, 0) });
+			const context = memoryContext({
+				[BLUE_REL]: solidPng(0, 0, 255),
+				[RED_REL]: solidPng(255, 0, 0, 128),
+			});
 			const text = JSON.stringify({
-				textures: { all: { sprite: "demo:stone", force_translucent: true } },
+				textures: { blue: "demo:blue", tint: "demo:red" },
 				elements: [
 					{
-						from: [0, 0, 0],
+						from: [0, 0, 8],
 						to: [16, 16, 16],
-						faces: { north: { texture: "#all" } },
+						faces: { north: { texture: "#blue" } },
+					},
+					{
+						from: [0, 0, 0],
+						to: [16, 16, 1],
+						faces: { north: { texture: "#tint" } },
 					},
 				],
 			});
 			const rendered = await renderModelPreview(text, {
 				path: PREVIEW_PATH,
 				context,
-				packFormat: "84.0",
 				size: 64,
 			});
-			check.equal(rendered.report.coverage.status, "partial");
-			check.ok(
-				rendered.report.coverage.skipped.length > 0,
-				"translucent skipped",
+			check.equal(rendered.report.coverage.status, "complete");
+			check.equal(
+				rendered.report.coverage.skipped.some(
+					(skip) => skip.kind === "face-translucent",
+				),
+				false,
+				"translucency is no longer skipped",
+			);
+			const { flat, width } = flatOf(rendered.png);
+			// src-over with sa = 128, da = 255:
+			//   outA = round(255 * (128 * 255 + 255 * 127) / 255 / 255) = 255
+			//   R = round(255 * 128 * 255 / (128 * 255 + 255 * 127)) = 128
+			//   B = round(255 * 255 * 127 / (128 * 255 + 255 * 127)) = 127
+			assertRgba(
+				check,
+				flat,
+				width,
+				32,
+				32,
+				[128, 0, 127, 255],
+				"hand-computed straight-alpha blend",
 			);
 		},
 	},
@@ -717,6 +980,301 @@ export const PREVIEW_CASES: ModelCase[] = [
 			assertRgba(check, flat, width, 128, 128, RED, "front center 256");
 			assertRgba(check, flat, width, 384, 128, RED, "right center 256");
 			assertRgba(check, flat, width, 640, 128, RED, "top center 256");
+		},
+	},
+	{
+		name: "isometric views show the three faces the camera points at",
+		async run(check) {
+			const context = coloredCubeContext();
+			const expected = {
+				"south-east": ["0,255,0", "255,0,255", "255,255,0"],
+				"south-west": ["0,0,255", "0,255,0", "255,0,255"],
+				"north-west": ["0,0,255", "255,0,0", "255,0,255"],
+				"north-east": ["255,0,0", "255,0,255", "255,255,0"],
+			} as const;
+			for (const direction of [
+				"south-east",
+				"south-west",
+				"north-west",
+				"north-east",
+			] as const) {
+				const rendered = await renderModelPreview(coloredCubeModel(), {
+					path: PREVIEW_PATH,
+					context,
+					size: 64,
+					view: { kind: "isometric", direction },
+				});
+				check.deepEqual(rendered.report.view, {
+					kind: "isometric",
+					direction,
+				});
+				check.deepEqual(
+					[rendered.report.image.width, rendered.report.image.height],
+					[64, 64],
+				);
+				check.deepEqual(
+					rendered.report.panels.map((panel) => [
+						panel.name,
+						panel.x,
+						panel.y,
+						panel.width,
+						panel.height,
+					]),
+					[["isometric", 0, 0, 64, 64]],
+				);
+				check.equal(rendered.report.coverage.status, "complete");
+				// A 16-unit cube projects 64 units wide; the panel keeps its
+				// margin, so the integer subpixel scale is 14 (0.875 px/unit).
+				check.equal(rendered.report.range.pixelsPerUnit, 0.875);
+				const { flat, width, height } = flatOf(rendered.png);
+				check.deepEqual(
+					panelColors(flat, width, 0, 0, width - 1, height - 1),
+					[...expected[direction]],
+					`${direction} shows south/up/east-like faces`,
+				);
+			}
+		},
+	},
+	{
+		name: "the isometric shrine preview matches its fixed hash",
+		async run(check) {
+			const text = await readFile(SHRINE_PATH, "utf8");
+			const rendered = await renderModelPreview(text, {
+				path: "docs/assets/showcase/model-shrine.json",
+				context: shrineContext(),
+				size: 128,
+				packFormat: "75.0",
+				view: { kind: "isometric", direction: "south-east" },
+			});
+			check.equal(rendered.report.coverage.status, "complete");
+			check.deepEqual([...rendered.report.range.min], [1, 0, 1]);
+			check.deepEqual([...rendered.report.range.max], [15, 16, 15]);
+			check.equal(rendered.report.range.pixelsPerUnit, 2);
+			check.equal(
+				sha256(rendered.png),
+				"bb3c54418ca8024e8ba2accabe44c6761f8715b146c59b29b365e12bcbc13ee0",
+				"isometric shrine PNG hash",
+			);
+		},
+	},
+	{
+		name: "models the three-view renderer already drew keep their bytes",
+		async run(check) {
+			const context = memoryContext({
+				[STONE_REL]: solidPng(255, 0, 0),
+				[MIX_REL]: splitPng(),
+			});
+			const allFaces = JSON.stringify({
+				textures: { all: "demo:stone" },
+				elements: [
+					{
+						from: [0, 0, 0],
+						to: [16, 16, 16],
+						faces: fullCubeFaces("#all"),
+					},
+				],
+			});
+			const cases: readonly {
+				readonly name: string;
+				readonly text: string;
+				readonly size: 64 | 128 | 256;
+				readonly context: ModelResolutionContext;
+				readonly packFormat?: string;
+				readonly path?: string;
+				readonly png: string;
+				readonly report: string;
+			}[] = [
+				{
+					name: "cube 64",
+					text: allFaces,
+					size: 64,
+					context,
+					png: "503193a50eaf67a74227413d0001c9517a6adf231583f96c3e927e7bc76a1167",
+					report:
+						"e2eddba201867b7f960395d924c239f058f49363a94f75d502ff4dee3844cc99",
+				},
+				{
+					name: "cube 128",
+					text: allFaces,
+					size: 128,
+					context,
+					png: "4d5bd09091d1da13601ddaf98d33415292d6db29cd91cf4684318e7e9640c1e3",
+					report:
+						"974dc228d2b95783296e4d5378dacab5d6dc2b7fb2ae307471f39bb9240453fe",
+				},
+				{
+					name: "cube 256",
+					text: allFaces,
+					size: 256,
+					context,
+					png: "e258494e5933ab5a4e0cc57f687bbd76c5681e0c2d70e3e84fdeabd5a2380a8c",
+					report:
+						"6a01b83e249bb1f87d56c7836d269b8b5a60517ea482cb19ac9c799674fa0247",
+				},
+				{
+					name: "split uv",
+					text: JSON.stringify({
+						textures: { mix: "demo:mix" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [16, 16, 16],
+								faces: {
+									north: { texture: "#mix", uv: [0, 0, 16, 16] },
+								},
+							},
+						],
+					}),
+					size: 64,
+					context,
+					png: "292a7edee8307ad012038e7f26cac87af996679be1fe6978223ba9e79641e097",
+					report:
+						"e2eddba201867b7f960395d924c239f058f49363a94f75d502ff4dee3844cc99",
+				},
+				{
+					name: "half uv",
+					text: JSON.stringify({
+						textures: { mix: "demo:mix" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [16, 16, 16],
+								faces: { north: { texture: "#mix", uv: [0, 0, 8, 16] } },
+							},
+						],
+					}),
+					size: 64,
+					context,
+					png: "c3897d83cbacd8575b499943a54c5b7b21fc9138f6d8b9039849665b0325d825",
+					report:
+						"e2eddba201867b7f960395d924c239f058f49363a94f75d502ff4dee3844cc99",
+				},
+				{
+					name: "face rotation",
+					text: JSON.stringify({
+						textures: { mix: "demo:mix" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [16, 16, 16],
+								faces: {
+									north: {
+										texture: "#mix",
+										uv: [0, 0, 16, 16],
+										rotation: 90,
+									},
+								},
+							},
+						],
+					}),
+					size: 64,
+					context,
+					png: "63c6060cbd966b6b635b9b7ad1bb29259c86c6740cddb63b8a308e803fd2f7a7",
+					report:
+						"e2eddba201867b7f960395d924c239f058f49363a94f75d502ff4dee3844cc99",
+				},
+				{
+					name: "auto uv",
+					text: JSON.stringify({
+						textures: { mix: "demo:mix" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [8, 16, 16],
+								faces: { north: { texture: "#mix" } },
+							},
+							{
+								from: [8, 0, 0],
+								to: [16, 16, 8],
+								faces: { east: { texture: "#mix" } },
+							},
+						],
+					}),
+					size: 64,
+					context,
+					png: "7d897407bb959ea5bf78a90aa31495f90714410a67eb73b5aff14ed31be26916",
+					report:
+						"e2eddba201867b7f960395d924c239f058f49363a94f75d502ff4dee3844cc99",
+				},
+				{
+					name: "checkerboard",
+					text: JSON.stringify({
+						textures: { all: "demo:missing" },
+						elements: [
+							{
+								from: [0, 0, 0],
+								to: [16, 16, 16],
+								faces: {
+									north: { texture: "#all" },
+									east: { texture: "#all" },
+									up: { texture: "#all" },
+								},
+							},
+						],
+					}),
+					size: 64,
+					context,
+					png: "5d3a552396bed2a4a4e75618113fc0b4ed7a85c6e33a95e9d5eb178b3e0e566c",
+					report:
+						"03c0c88b65e7df144265c93f15b9310102cc1638b73ba7007fea8aff9dedc71a",
+				},
+				{
+					name: "shrine three-view",
+					text: await readFile(SHRINE_PATH, "utf8"),
+					size: 128,
+					context: shrineContext(),
+					packFormat: "75.0",
+					path: "docs/assets/showcase/model-shrine.json",
+					png: "d8322d40aee8046e40fb433d797bee5f3d015e5cc414bdff6386573551b63e7f",
+					report:
+						"b962e0bbfd29ca90357ef485a14b3c8571425c8a06916b871d2b0b8b6f04c01f",
+				},
+			];
+			for (const entry of cases) {
+				const rendered = await renderModelPreview(entry.text, {
+					path: entry.path ?? PREVIEW_PATH,
+					context: entry.context,
+					size: entry.size,
+					...(entry.packFormat === undefined
+						? {}
+						: { packFormat: entry.packFormat }),
+				});
+				check.equal(
+					sha256(rendered.png),
+					entry.png,
+					`${entry.name}: PNG stays byte-identical`,
+				);
+				check.equal(
+					sha256(JSON.stringify(rendered.report)),
+					entry.report,
+					`${entry.name}: report stays byte-identical`,
+				);
+			}
+		},
+	},
+	{
+		name: "force_translucent textures render through the geometry pass",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(255, 0, 0) });
+			const text = JSON.stringify({
+				textures: { all: { sprite: "demo:stone", force_translucent: true } },
+				elements: [
+					{
+						from: [0, 0, 0],
+						to: [16, 16, 16],
+						faces: { north: { texture: "#all" } },
+					},
+				],
+			});
+			const rendered = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				packFormat: "84.0",
+				size: 64,
+			});
+			check.equal(rendered.report.coverage.status, "complete");
+			const { flat, width } = flatOf(rendered.png);
+			assertRgba(check, flat, width, 32, 32, RED, "force translucent front");
 		},
 	},
 	{
@@ -910,6 +1468,99 @@ export const PREVIEW_CASES: ModelCase[] = [
 				check.ok(bytes.length > 0, "mcp file written");
 				const { flat, width } = flatOf(bytes);
 				assertRgba(check, flat, width, 96, 32, RED, "mcp file right");
+			});
+		},
+	},
+	{
+		name: "cli preview selects the isometric view and refuses a stray direction",
+		async run(check) {
+			await withTempRoot(async (root) => {
+				const red = solidPng(255, 0, 0);
+				const { pack, model } = await makePack(root, red, cubeModel("#all"));
+				const out = join(root, "iso.png");
+				const outcome = await runModelRequest({
+					mode: "preview",
+					inputPath: model,
+					packPath: pack,
+					size: 64,
+					view: "isometric",
+					viewDirection: "north-east",
+					outputPath: out,
+					requireOutput: true,
+				});
+				check.equal(outcome.failed, false);
+				const report = outcome.result;
+				if (!("mode" in report) || report.mode !== "preview") {
+					return check.fail("expected a preview report");
+				}
+				check.deepEqual(report.view, {
+					kind: "isometric",
+					direction: "north-east",
+				});
+				check.deepEqual([report.image.width, report.image.height], [64, 64]);
+				const bytes = new Uint8Array(await readFile(out));
+				const { flat, width } = flatOf(bytes);
+				check.ok(
+					panelBox(flat, width, 0, 0, 63, 63).count > 0,
+					"isometric png has pixels",
+				);
+				let caught: unknown;
+				try {
+					await runModelRequest({
+						mode: "preview",
+						inputPath: model,
+						size: 64,
+						viewDirection: "south-west",
+						stdout: true,
+						requireOutput: true,
+					});
+				} catch (error) {
+					caught = error;
+				}
+				check.ok(
+					caught instanceof McAssetError && caught.code === "INVALID_ARGUMENT",
+					"viewDirection without the isometric view is refused",
+				);
+			});
+		},
+	},
+	{
+		name: "mcp preview selects the isometric view",
+		async run(check) {
+			await withTempRoot(async (root) => {
+				const red = solidPng(255, 0, 0);
+				const { pack, model } = await makePack(root, red, cubeModel("#all"));
+				const result = await handleModelAsset({
+					mode: "preview",
+					inputPath: model,
+					packPath: pack,
+					size: 64,
+					view: "isometric",
+					viewDirection: "south-west",
+				});
+				check.equal(result.isError, undefined);
+				const text = result.content.find((entry) => entry.type === "text");
+				if (text?.type !== "text") return check.fail("missing report");
+				const report = JSON.parse(text.text) as {
+					view?: { kind: string; direction: string };
+					image: { width: number; height: number };
+				};
+				check.deepEqual(report.view, {
+					kind: "isometric",
+					direction: "south-west",
+				});
+				check.deepEqual([report.image.width, report.image.height], [64, 64]);
+				const image = result.content.find((entry) => entry.type === "image");
+				check.ok(image?.type === "image", "image block");
+				const rejected = await handleModelAsset({
+					mode: "preview",
+					inputPath: model,
+					packPath: pack,
+					size: 64,
+					view: "three-view",
+					viewDirection: "south-west",
+				});
+				check.equal(rejected.isError, true);
 			});
 		},
 	},

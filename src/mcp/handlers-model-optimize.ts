@@ -206,6 +206,8 @@ export async function handleModelAsset(
 				minecraftVersion: input.minecraftVersion,
 				resourcePackVersion: input.resourcePackVersion,
 				size: input.size,
+				view: input.view,
+				viewDirection: input.viewDirection,
 				outputPath: input.outputPngPath,
 				stdout: !hasOutput,
 				force: false,
@@ -234,10 +236,15 @@ export async function handleModelAsset(
 				],
 			};
 		}
-		if (input.size !== undefined || input.outputPngPath !== undefined) {
+		if (
+			input.size !== undefined ||
+			input.outputPngPath !== undefined ||
+			input.view !== undefined ||
+			input.viewDirection !== undefined
+		) {
 			throw new McAssetError(
 				"INVALID_ARGUMENT",
-				`size and outputPngPath are only accepted by preview, not ${input.mode}.`,
+				`size, view, viewDirection, and outputPngPath are only accepted by preview, not ${input.mode}.`,
 				{ mode: input.mode },
 			);
 		}
