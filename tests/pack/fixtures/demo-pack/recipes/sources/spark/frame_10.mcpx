@@ -1,0 +1,19 @@
+mcpx 1
+
+[canvas]
+width = 4
+height = 4
+
+[palette]
+. = transparent
+S = #FFF6C0FF
+
+[layer base]
+visible = true
+opacity = 1
+
+[grid]
+.SS.
+SSSS
+SSSS
+.SS.

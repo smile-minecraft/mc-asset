@@ -82,6 +82,30 @@ function isStyleMeasuredTexture(rel: string): boolean {
 	);
 }
 
+/**
+ * The client binds entity textures from its entity renderers, not from a
+ * document inside the pack, so the pack scan can never observe a reference
+ * and marks every entity texture `PACK_ORPHAN_TEXTURE`. The scanner's own
+ * message says the warning is not a deletion signal; for `textures/entity/`
+ * it carries no action, so the check summary leaves it out while real
+ * defects on the same file (decode, references, filenames) still report.
+ */
+function isConventionallyLoadedTexture(
+	code: string,
+	path: string | undefined,
+): boolean {
+	if (code !== "PACK_ORPHAN_TEXTURE" || path === undefined) {
+		return false;
+	}
+	const segments = path.split("/");
+	return (
+		segments.length > 4 &&
+		segments[0] === "assets" &&
+		segments[2] === "textures" &&
+		segments[3] === "entity"
+	);
+}
+
 /** Check a pack project and summarize what to fix first. */
 export async function checkResourcePack(
 	input: PackCheckInput,
@@ -157,6 +181,9 @@ export async function checkResourcePack(
 		try {
 			const scanResult = await scanPack(packDir, { vanillaPath: vanilla });
 			for (const f of scanResult.findings) {
+				if (isConventionallyLoadedTexture(f.code, f.path)) {
+					continue;
+				}
 				findings.push({
 					code: f.code,
 					level: f.level,

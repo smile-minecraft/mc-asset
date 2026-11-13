@@ -740,7 +740,9 @@ export async function planPackBuild(
 					packFormat: format,
 					recipeDir: dirname(recipeFile),
 				});
-				stepInputs.push(...planned.inputs);
+				stepInputs.push(
+					...planned.inputs.map(({ ref, sha256 }) => ({ ref, sha256 })),
+				);
 				for (const input of planned.inputs) {
 					if (input.filePath !== undefined) {
 						generatedInputPaths.push(input.filePath);

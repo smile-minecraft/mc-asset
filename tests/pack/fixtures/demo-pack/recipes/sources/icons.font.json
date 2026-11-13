@@ -1,0 +1,9 @@
+{
+	"formatVersion": 1,
+	"namespace": "aurelian",
+	"id": "icons",
+	"height": 8,
+	"ascent": 7,
+	"texture": "aurelian:font/icons.png",
+	"icons": [{ "name": "gem", "path": "icon_gem.mcpx" }]
+}
