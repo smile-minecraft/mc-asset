@@ -6,7 +6,7 @@ import {
 import { McAssetError } from "../../core/errors.ts";
 import { decodePng, encodePng, flattenCanvas } from "../../io/png.ts";
 import {
-	inspectModel,
+	inspectModelWithBuiltinTerminus,
 	type ModelCoverage,
 	type ModelElementView,
 	type ModelFaceView,
@@ -94,9 +94,10 @@ export type {
  * diagnostic view still does not apply: display transforms or lighting when
  * not requested, uncoloured `tintindex` faces, ambient occlusion, world light,
  * shadows, perspective projection, the per-slot camera rig, left-hand
- * mirroring, and the hand, head, item-frame and dropped-item poses. The
- * compatibility renderer keeps its historical `display` / `lighting` list so
- * its reports stay byte-identical. This is a diagnostic view, not a game
+ * mirroring, the GUI item shader lighting (the fixed factors come from
+ * block-face shading), and the hand, head, item-frame and dropped-item poses.
+ * The compatibility renderer keeps its historical `display` / `lighting` list
+ * so its reports stay byte-identical. This is a diagnostic view, not a game
  * renderer, and it never rewrites the model.
  */
 
@@ -210,6 +211,7 @@ function previewUnapplied(input: {
 			input.guiLight === "front"
 				? "flat-item-lighting-variation"
 				: "dominant-axis-shading",
+			"gui-item-shader-lighting",
 		);
 	}
 	if (
@@ -232,10 +234,12 @@ function sortedTints(
 ): Record<string, string> {
 	const result: Record<string, string> = {};
 	for (const [key, value] of Object.entries(tints).sort(
-		(a, b) => Number(a) - Number(b),
+		(a, b) => Number(a[0]) - Number(b[0]),
 	)) {
-		// Keys are decimal tint indices; `Number` orders "2" before "10".
-
+		// Compare the numeric key explicitly: integer-like keys enumerate in
+		// ascending order already, but another spelling of the same index
+		// (for example "1e1") keeps insertion order and must still sort by
+		// value.
 		result[key] = formatTintColor(value);
 	}
 	return result;
@@ -279,7 +283,7 @@ export async function renderModelPreview(
 		options.display === undefined
 			? (options.view ?? { kind: "three-view" })
 			: { kind: "display", slot: options.display };
-	const inspection = await inspectModel(text, {
+	const inspectionResult = await inspectModelWithBuiltinTerminus(text, {
 		path: options.path,
 		...(options.modelId === undefined ? {} : { modelId: options.modelId }),
 		...(options.packFormat === undefined
@@ -290,6 +294,8 @@ export async function renderModelPreview(
 			: { minecraftVersion: options.minecraftVersion }),
 		...(options.context === undefined ? {} : { context: options.context }),
 	});
+	const inspection = inspectionResult.report;
+	const builtinTerminus = inspectionResult.builtinTerminus;
 
 	const skipped: {
 		kind: string;
@@ -299,10 +305,6 @@ export async function renderModelPreview(
 	}[] = [];
 	const warnings: ModelPreviewWarning[] = [];
 
-	const builtinParent =
-		inspection.parent?.status === "builtin"
-			? inspection.parent.value
-			: undefined;
 	const inspectionDisplay =
 		options.display === undefined
 			? undefined
@@ -312,9 +314,9 @@ export async function renderModelPreview(
 	if (
 		options.display !== undefined &&
 		displaySource === undefined &&
-		builtinParent !== undefined
+		builtinTerminus !== undefined
 	) {
-		const builtin = builtinDisplaySource(builtinParent, options.display);
+		const builtin = builtinDisplaySource(builtinTerminus, options.display);
 		if (builtin !== undefined) {
 			displaySource = builtin.source;
 			displayFrom = builtin.from;
@@ -326,9 +328,9 @@ export async function renderModelPreview(
 			: displayTransformFor(options.display, displaySource, displayFrom);
 	const guiLight =
 		inspection.properties.guiLight ??
-		(builtinParent === undefined
+		(builtinTerminus === undefined
 			? undefined
-			: builtinGuiLight(builtinParent)) ??
+			: builtinGuiLight(builtinTerminus)) ??
 		"side";
 	const lightingMode: LightingMode | undefined =
 		options.lighting === true

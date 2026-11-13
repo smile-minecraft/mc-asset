@@ -106,6 +106,7 @@ const ZERO_HASHES: Record<(typeof DISPLAY_SLOTS)[number], string> = {
 };
 
 const PARENT_PATH = "assets/demo/models/block/base.json";
+const ITEM_BASE_PATH = "assets/demo/models/item/base.json";
 
 function parentContext(parent: unknown): ReturnType<typeof memoryContext> {
 	return memoryContext({
@@ -510,6 +511,109 @@ export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
 		},
 	},
 	{
+		name: "a builtin template reached through an intermediate parent supplies display and gui_light",
+		async run(check) {
+			const context = memoryContext({
+				[ITEM_BASE_PATH]: encoder.encode(
+					JSON.stringify({ parent: "minecraft:item/generated" }),
+				),
+				[STONE_REL]: solidPng(200, 200, 200),
+			});
+			const options = {
+				path: PREVIEW_PATH,
+				context,
+				size: 64 as const,
+				display: "fixed" as const,
+				lighting: true,
+			};
+			const nested = await renderModelPreview(
+				childOf("demo:item/base"),
+				options,
+			);
+			const direct = await renderModelPreview(
+				childOf("minecraft:item/generated"),
+				options,
+			);
+			check.equal(
+				nested.report.display?.from,
+				"minecraft:item/generated",
+				"the template at the end of the chain is named as the source",
+			);
+			check.equal(
+				nested.report.display?.applied,
+				true,
+				"the template transform is applied",
+			);
+			check.deepEqual(
+				[...(nested.report.display?.rotation ?? [])],
+				[0, 180, 0],
+				"fixed rotation comes from item/generated",
+			);
+			check.equal(
+				nested.report.lighting?.guiLight,
+				"front",
+				"gui_light comes from item/generated",
+			);
+			check.equal(
+				nested.report.lighting?.mode,
+				"flat",
+				"front gui_light uses flat shading",
+			);
+			check.deepEqual(
+				nested.report.display,
+				direct.report.display,
+				"the nested chain reports the same display as a direct builtin parent",
+			);
+			check.deepEqual(
+				nested.report.lighting,
+				direct.report.lighting,
+				"the nested chain reports the same lighting as a direct builtin parent",
+			);
+			check.equal(
+				sha256(nested.png),
+				sha256(direct.png),
+				"the nested chain renders the same bytes as a direct builtin parent",
+			);
+		},
+	},
+	{
+		name: "an unresolved parent stops the builtin lookup instead of guessing",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
+			const rendered = await renderModelPreview(childOf("demo:item/missing"), {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				display: "fixed",
+				lighting: true,
+			});
+			check.equal(
+				rendered.report.display?.applied,
+				false,
+				"no transform is invented",
+			);
+			check.deepEqual(
+				[...(rendered.report.display?.rotation ?? [])],
+				[0, 0, 0],
+				"the missing slot keeps the identity rotation",
+			);
+			check.equal(
+				rendered.report.lighting?.guiLight,
+				"side",
+				"gui_light falls back to side",
+			);
+			check.equal(
+				rendered.report.lighting?.mode,
+				"directional",
+				"side gui_light is directional",
+			);
+			check.ok(
+				rendered.report.unapplied.includes("display-slot-missing"),
+				"the missing slot is still listed",
+			);
+		},
+	},
+	{
 		name: "side lighting applies the fixed per-direction shade factors",
 		async run(check) {
 			const normals: Record<string, FixedVec3> = {
@@ -789,6 +893,35 @@ export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
 				Object.keys(sorted.report.tint?.tints ?? {}),
 				["2", "10"],
 				"the report orders tint indices numerically, not by first digit",
+			);
+
+			const spellings = await renderModelPreview(
+				JSON.stringify({
+					textures: { all: "demo:stone" },
+					elements: [
+						{
+							from: [0, 0, 0],
+							to: [16, 16, 16],
+							faces: { south: { texture: "#all", tintindex: 2 } },
+						},
+					],
+				}),
+				{
+					path: PREVIEW_PATH,
+					context,
+					size: 64,
+					view: { kind: "isometric", direction: "south-east" },
+					tints: {
+						"0x10": [0x10, 0, 0],
+						"1e1": [0x0a, 0, 0],
+						"2.0": [0x02, 0, 0],
+					},
+				},
+			);
+			check.deepEqual(
+				Object.keys(spellings.report.tint?.tints ?? {}),
+				["2.0", "1e1", "0x10"],
+				"entries that are not array indices still sort by their numeric tint index",
 			);
 
 			await expectCode(
@@ -1072,6 +1205,10 @@ export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
 			check.ok(
 				lit.report.unapplied.includes("dominant-axis-shading"),
 				"the shading approximation is listed",
+			);
+			check.ok(
+				lit.report.unapplied.includes("gui-item-shader-lighting"),
+				"the unverified GUI item shader lighting is listed",
 			);
 		},
 	},

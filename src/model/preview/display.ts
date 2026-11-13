@@ -52,16 +52,34 @@ export const DISPLAY_CAMERA = "south" as const;
 export const DISPLAY_PIVOT = 8 * 256;
 
 /**
- * Fixed per-direction shade factors, in thousandths.
+ * Fixed per-direction shade factors, in thousandths, used as a diagnostic
+ * stand-in for the GUI item lighting.
  *
- * `ClientLevel.getShade(Direction, boolean)` returns these values for block
- * rendering when `Direction.getShade` is enabled (catch: `ModelBlockRenderer`
- * passes the baked quad's `isShade`):
- *   DOWN 0.5, UP 1.0, NORTH / SOUTH 0.8, WEST / EAST 0.6.
- * The same numbers are repeated in `ModelBlockRenderer.AdjacencyInfo`. The
- * game applies them to a face's own direction; this preview applies them to
- * the dominant axis of the face normal after the element and display
- * rotations, and says so in `unapplied`.
+ * The values are the block-face coefficients from the vanilla client. In the
+ * 1.21.4 client jar (Mojang mappings, `ClientLevel.java` 758:776),
+ * `ClientLevel.getShade(Direction, boolean)` returns DOWN 0.5, UP 1.0,
+ * NORTH / SOUTH 0.8, WEST / EAST 0.6 for the Overworld
+ * (`DimensionSpecialEffects.constantAmbientLight()` is false); the Nether,
+ * whose effects set that flag, uses 0.9 for DOWN / UP instead, and this
+ * preview always uses the Overworld values.
+ * `ModelBlockRenderer.renderModelFaceFlat` (line 219) applies them to a baked
+ * quad with the quad's own direction and `isShade` flag. The 26.3 client jar
+ * carries the same six values as `net.minecraft.world.level.CardinalLighting
+ * .DEFAULT`, read by `BlockModelLighter.getDirectionalBrightness` through
+ * `CardinalLighting.byFace`.
+ *
+ * GUI items are not drawn through that block path: in 1.21.4,
+ * `GuiGraphics.renderItem(LivingEntity, Level, ItemStack, int, int, int, int)`
+ * (lines 487:520) switches to `Lighting.setupForFlatItems()` for models whose
+ * `gui_light` is `front` and restores `Lighting.setupFor3DItems()` afterwards;
+ * both feed the fixed diffuse light directions `Lighting.DIFFUSE_LIGHT_0`
+ * (`normalize(0.2, 1, -0.7)`) and `DIFFUSE_LIGHT_1`
+ * (`normalize(-0.2, 1, 0.7)`) to the item shader, and 26.3 selects
+ * `Lighting.Entry.ITEMS_FLAT` / `ITEMS_3D` in `GuiItemAtlas.drawToSlot`.
+ * These factors are therefore the block-face coefficients applied to the
+ * dominant axis of the transformed face normal, not a measurement of the GUI
+ * item shader: the actual GUI item lighting was not verified face by face, and
+ * the report lists that gap as `gui-item-shader-lighting` in `unapplied`.
  */
 export const SHADE_SCALE = 1000;
 export const FACE_SHADE: Readonly<Record<Direction, number>> = {
@@ -186,8 +204,8 @@ interface BuiltinPreviewModel {
 /**
  * The builtin template models the preview may inherit from.
  *
- * `inspectModel` stops at a builtin parent because there is no file to parse
- * (`src/profiles/builtin-models.ts`), so the display transforms and
+ * `inspectModel` stops at a builtin template because there is no file to
+ * parse (`src/profiles/builtin-models.ts`), so the display transforms and
  * `gui_light` the template ids carry are repeated here (`builtin/entity` has
  * neither, and `builtin/generated` only terminates the chain). Values are
  * from the 1.21.4 vanilla assets mirror:

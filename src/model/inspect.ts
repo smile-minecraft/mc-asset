@@ -342,6 +342,7 @@ async function analyze(
 ): Promise<{
 	root: JsonNode;
 	report: ModelInspectReport;
+	builtinTerminus?: string;
 }> {
 	const root = parseJsonDocument(text);
 	const rules = resolveModelRules(options.packFormat);
@@ -377,6 +378,7 @@ async function analyze(
 			: { status: "complete", reason: "no-parent" };
 	let parentReport: ModelInspectReport["parent"];
 	const parentChain: ModelParentLink[] = [];
+	let builtinTerminus: string | undefined;
 	const documents: ModelDocument[] = [own];
 	const seen = new Set<string>([own.id]);
 	let nextParent = ownParent;
@@ -397,6 +399,7 @@ async function analyze(
 			};
 		}
 		if (resolution.status === "builtin") {
+			builtinTerminus = resolution.target ?? nextParent;
 			parentTermination = { status: "complete", reason: "builtin" };
 			break;
 		}
@@ -968,7 +971,11 @@ async function analyze(
 			textureCount: textureReports.length,
 		},
 	};
-	return { root, report };
+	return {
+		root,
+		report,
+		...(builtinTerminus === undefined ? {} : { builtinTerminus }),
+	};
 }
 
 export async function inspectModel(
@@ -977,6 +984,34 @@ export async function inspectModel(
 ): Promise<ModelInspectReport> {
 	return (await analyze(text, options)).report;
 }
+
+/**
+ * `inspectModel` plus the builtin template id that terminated the parent
+ * chain.
+ *
+ * `ModelInspectReport.parentChain` records only parents with a file to read,
+ * so a chain that ends at a builtin template (`minecraft:builtin/generated`,
+ * `minecraft:item/generated`, ...) keeps the historical report shape without
+ * the terminating id. The preview needs that id to continue the vanilla
+ * `display` / `gui_light` inheritance through the builtin templates, so it is
+ * returned beside the report. A chain that stops at a missing, unresolved or
+ * cyclic parent has no terminus: the game could not know where the chain
+ * continues either, so the preview must not guess.
+ */
+export async function inspectModelWithBuiltinTerminus(
+	text: string,
+	options: ModelAnalyzeOptions,
+): Promise<{
+	readonly report: ModelInspectReport;
+	readonly builtinTerminus?: string;
+}> {
+	const { report, builtinTerminus } = await analyze(text, options);
+	return {
+		report,
+		...(builtinTerminus === undefined ? {} : { builtinTerminus }),
+	};
+}
+
 export async function validateModel(
 	text: string,
 	options: ModelAnalyzeOptions,
