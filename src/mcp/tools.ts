@@ -189,7 +189,7 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 	{
 		name: "entity_asset",
 		description:
-			"Inspect a Minecraft box-UV entity layout, write a template PNG and/or an editable .mcpx with one named region per face (optionally face-colored), or validate a texture's size and report non-transparent pixels outside every face. Builtin player wide/slim layouts plus caller-supplied layout documents; reads only except template outputs.",
+			"Inspect a Minecraft box-UV entity layout, write a template PNG and/or an editable .mcpx with one named region per face (optionally face-colored), validate a texture's size and report non-transparent pixels outside every face, or render four isometric views of the texture wrapped around the layout's parts. Builtin player wide/slim layouts plus caller-supplied layout documents; reads only except template and preview outputs.",
 		inputSchema: TOOL_INPUT_SCHEMAS.entity_asset,
 	},
 ];

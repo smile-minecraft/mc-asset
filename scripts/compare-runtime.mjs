@@ -36,6 +36,9 @@
 //   - plus the model preview PNG bytes (fixed cube render with its texture,
 //   - and an isometric preview of a rotated two-part model with the same
 //   - texture, source model and texture untouched)
+//   - entity: the four-view preview PNG bytes for the player layout and for a
+//   - mirrored box layout, plus their reports in canonical JSON, with the
+//   - source skin and layout untouched
 // Any difference exits non-zero so CI fails. stderr, timing, and absolute
 // paths never enter the comparison. Temp dirs are always cleaned up.
 import { PNG } from "pngjs";
@@ -557,6 +560,119 @@ function compareModel(bunDir, nodeDir, workdir) {
 		join(bunDir, "model-preview-iso.png"),
 		join(nodeDir, "model-preview-iso.png"),
 	);
+}
+
+/**
+ * Entity preview: the same 64x64 skin file feeds both runtimes, and the four
+ * isometric panels must match byte for byte. A second 16x16 probe exercises a
+ * mirrored box (the left and right cells swap) and a caller-supplied layout,
+ * so the comparison covers both the builtin player and the mirror path.
+ */
+function compareEntity(bunDir, nodeDir, workdir) {
+	const playerSkin = new PNG({ width: 64, height: 64 });
+	for (let y = 0; y < 64; y += 1) {
+		for (let x = 0; x < 64; x += 1) {
+			const o = (y * 64 + x) * 4;
+			playerSkin.data[o] = (x * 11 + y * 7) & 0xff;
+			playerSkin.data[o + 1] = (x * 5 + y * 13) & 0xff;
+			playerSkin.data[o + 2] = (x * 3 + y * 17) & 0xff;
+			// A deterministic semi-transparent stripe exercises the fragment pass.
+			playerSkin.data[o + 3] = x % 13 === 0 ? 128 : 255;
+		}
+	}
+	const skinPath = join(workdir, "entity-player-skin.png");
+	writeFileSync(skinPath, PNG.sync.write(playerSkin));
+	const skinHash = sha256Hex(readFileSync(skinPath));
+
+	const previewArgs = (dir) => [
+		"entity",
+		"preview",
+		skinPath,
+		"--layout",
+		"player_wide",
+		"--size",
+		"128",
+		"--output",
+		join(dir, "entity-preview.png"),
+		"--json",
+	];
+	const bunPlayer = runBun(previewArgs(bunDir), "entity-preview");
+	const nodePlayer = runNode(previewArgs(nodeDir), "entity-preview");
+	compareFile(
+		"entity-preview.png",
+		join(bunDir, "entity-preview.png"),
+		join(nodeDir, "entity-preview.png"),
+	);
+	const normalize = (stdout, dir) => String(stdout).split(dir).join("<dir>");
+	compareCanonicalJson(
+		"entity-preview.json",
+		normalize(bunPlayer.stdout, bunDir),
+		normalize(nodePlayer.stdout, nodeDir),
+	);
+
+	const probeSkin = new PNG({ width: 16, height: 16 });
+	for (let y = 0; y < 16; y += 1) {
+		for (let x = 0; x < 16; x += 1) {
+			const o = (y * 16 + x) * 4;
+			probeSkin.data[o] = (x * 29 + y * 3) & 0xff;
+			probeSkin.data[o + 1] = (x * 7 + y * 31) & 0xff;
+			probeSkin.data[o + 2] = (x * 19 + y * 23) & 0xff;
+			probeSkin.data[o + 3] = 255;
+		}
+	}
+	const probeSkinPath = join(workdir, "entity-probe-skin.png");
+	writeFileSync(probeSkinPath, PNG.sync.write(probeSkin));
+	const layoutPath = join(workdir, "entity-mirror-layout.json");
+	writeFileSync(
+		layoutPath,
+		JSON.stringify({
+			format: "mc-asset/entity-layout",
+			version: 1,
+			id: "mirror-probe",
+			texture: { width: 16, height: 16 },
+			parts: [
+				{
+					id: "box",
+					size: [4, 4, 4],
+					uv: [0, 0],
+					origin: [0, 0, 0],
+					inflate: 0.25,
+					mirror: true,
+				},
+			],
+		}),
+	);
+	const probeHash = sha256Hex(readFileSync(layoutPath));
+	const probeArgs = (dir) => [
+		"entity",
+		"preview",
+		probeSkinPath,
+		"--layout",
+		layoutPath,
+		"--size",
+		"64",
+		"--output",
+		join(dir, "entity-preview-mirror.png"),
+		"--json",
+	];
+	const bunProbe = runBun(probeArgs(bunDir), "entity-preview-mirror");
+	const nodeProbe = runNode(probeArgs(nodeDir), "entity-preview-mirror");
+	compareFile(
+		"entity-preview-mirror.png",
+		join(bunDir, "entity-preview-mirror.png"),
+		join(nodeDir, "entity-preview-mirror.png"),
+	);
+	compareCanonicalJson(
+		"entity-preview-mirror.json",
+		normalize(bunProbe.stdout, bunDir),
+		normalize(nodeProbe.stdout, nodeDir),
+	);
+	if (sha256Hex(readFileSync(skinPath)) !== skinHash) {
+		fail("entity preview changed its source skin");
+	}
+	if (sha256Hex(readFileSync(layoutPath)) !== probeHash) {
+		fail("entity preview changed its source layout");
+	}
 }
 
 function main() {
@@ -1132,6 +1248,7 @@ function main() {
 		if (!buffersEqual(readFileSync(beforePath), beforeBytes) || !buffersEqual(readFileSync(afterPath), afterBytes)) fail("compare changed a source PNG");
 		compareOptimize(bunDir, nodeDir, workdir);
 		compareModel(bunDir, nodeDir, workdir);
+		compareEntity(bunDir, nodeDir, workdir);
 		process.stdout.write("compare-runtime: all outputs identical\n");
 	} finally {
 		rmSync(workdir, { recursive: true, force: true });

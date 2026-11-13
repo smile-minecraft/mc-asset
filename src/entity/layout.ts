@@ -17,6 +17,8 @@ export const ENTITY_LAYOUT_FORMAT = "mc-asset/entity-layout";
 export const ENTITY_LAYOUT_VERSION = 1;
 /** Absolute cap; the region cap (one region per face) binds first. */
 export const MAX_ENTITY_PARTS = 512;
+/** Largest outward growth one part may declare, in model units. */
+export const MAX_ENTITY_INFLATE = 256;
 
 const PART_ID = /^[A-Za-z0-9_.-]+$/;
 const LAYOUT_ID = /^[A-Za-z0-9_.-]+$/;
@@ -84,6 +86,34 @@ function numberTuple(
 	return [out[0] as number, out[1] as number, out[2] as number];
 }
 
+/**
+ * A model distance that the integer preview can represent exactly: a multiple
+ * of 1/256 model units (0.5 and 0.25 both are). Rejecting other values here
+ * keeps the preview from silently rounding a document that claims an exact
+ * size.
+ */
+function fixedUnitNumber(
+	value: unknown,
+	field: string,
+	minimum: number,
+	maximum: number,
+): number | undefined {
+	if (value === undefined) return undefined;
+	if (
+		typeof value !== "number" ||
+		!Number.isFinite(value) ||
+		!Number.isInteger(value * 256) ||
+		value < minimum ||
+		value > maximum
+	) {
+		invalid(
+			`${field} must be a multiple of 1/256 in [${minimum}, ${maximum}].`,
+			{ field, value },
+		);
+	}
+	return value;
+}
+
 function parsePart(value: unknown, index: number): EntityPartDocument {
 	if (!isRecord(value)) {
 		invalid(`parts[${index}] must be an object.`, { field: `parts/${index}` });
@@ -125,6 +155,12 @@ function parsePart(value: unknown, index: number): EntityPartDocument {
 	const origin = numberTuple(value.origin, 3, `parts[${index}].origin`);
 	const pivot = numberTuple(value.pivot, 3, `parts[${index}].pivot`);
 	const rotation = numberTuple(value.rotation, 3, `parts[${index}].rotation`);
+	const inflate = fixedUnitNumber(
+		value.inflate,
+		`parts[${index}].inflate`,
+		-MAX_ENTITY_INFLATE,
+		MAX_ENTITY_INFLATE,
+	);
 	return {
 		id,
 		size,
@@ -134,6 +170,7 @@ function parsePart(value: unknown, index: number): EntityPartDocument {
 		...(origin === undefined ? {} : { origin }),
 		...(pivot === undefined ? {} : { pivot }),
 		...(rotation === undefined ? {} : { rotation }),
+		...(inflate === undefined ? {} : { inflate }),
 	};
 }
 
@@ -333,6 +370,7 @@ export function resolveEntityLayout(
 			...(part.origin === undefined ? {} : { origin: part.origin }),
 			...(part.pivot === undefined ? {} : { pivot: part.pivot }),
 			...(part.rotation === undefined ? {} : { rotation: part.rotation }),
+			...(part.inflate === undefined ? {} : { inflate: part.inflate }),
 			faces: partFaces,
 		});
 	}

@@ -66,6 +66,7 @@ export async function handleEntityAsset(
 			stdout: false,
 			force: false,
 			mkdir: false,
+			size: input.size,
 			requireOutput: false,
 		});
 		const body: Record<string, unknown> = {

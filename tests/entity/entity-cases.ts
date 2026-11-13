@@ -21,13 +21,14 @@ import {
 	getEntityLayoutDocument,
 	listEntityLayoutIds,
 } from "../../src/entity/layouts.ts";
+import { renderEntityPreview } from "../../src/entity/preview.ts";
 import {
 	buildEntityTemplate,
 	ENTITY_FACE_COLORS,
 } from "../../src/entity/template.ts";
-import type { EntityLayout } from "../../src/entity/types.ts";
+import type { EntityFaceName, EntityLayout } from "../../src/entity/types.ts";
 import { validateEntityTexture } from "../../src/entity/validate.ts";
-import { encodePng, flattenCanvas } from "../../src/io/png.ts";
+import { decodePng, encodePng, flattenCanvas } from "../../src/io/png.ts";
 import { handleEntityAsset } from "../../src/mcp/handlers-entity.ts";
 import { TOOL_INPUT_SCHEMAS } from "../../src/mcp/schema.ts";
 import { parseMcpx, serializeMcpx } from "../../src/mcpx/index.ts";
@@ -292,6 +293,189 @@ Options:
   --operations <path>  Batch operations JSON file ("-" reads stdin).
   -h, --help           display help for command
 `;
+
+/** Fixed sha256 of the 128-px four-view render of the player_wide face-color template. */
+const PLAYER_PREVIEW_SHA256 =
+	"b6f76a9b8f4b05f606601f759677e7efc2f5a6b9f58bb1a617021bbd8a0da66d";
+
+/** One face's cell color: the template's face colors are the probe for face assignment. */
+const FACE_COLOR_KEY: Readonly<Record<EntityFaceName, string>> = {
+	top: "91,155,213",
+	bottom: "59,90,140",
+	right: "106,176,106",
+	front: "217,155,74",
+	left: "201,106,106",
+	back: "155,127,201",
+};
+
+function playerTemplate(id: "player_wide" | "player_slim"): {
+	readonly layout: EntityLayout;
+	readonly texture: {
+		readonly width: number;
+		readonly height: number;
+		readonly pixels: Uint8Array;
+	};
+} {
+	const layout = resolveEntityLayoutDocument(getEntityLayoutDocument(id));
+	const template = buildEntityTemplate(layout, { fill: true });
+	return {
+		layout,
+		texture: {
+			width: template.canvas.width,
+			height: template.canvas.height,
+			pixels: flattenCanvas(template.canvas),
+		},
+	};
+}
+
+function decodedImage(png: Uint8Array): {
+	readonly width: number;
+	readonly height: number;
+	readonly pixels: Uint8Array;
+} {
+	const decoded = decodePng(png);
+	return {
+		width: decoded.canvas.width,
+		height: decoded.canvas.height,
+		pixels: flattenCanvas(decoded.canvas),
+	};
+}
+
+/** The face names whose template color appears in each panel, in face-name order. */
+function panelFaceNames(
+	png: Uint8Array,
+	size: number,
+): ReadonlyArray<readonly EntityFaceName[]> {
+	const image = decodedImage(png);
+	return [0, 1, 2, 3].map((panel) => {
+		const found = new Set<EntityFaceName>();
+		for (let y = 0; y < size; y += 1) {
+			for (let x = 0; x < size; x += 1) {
+				const offset = (y * image.width + panel * size + x) * 4;
+				if (image.pixels[offset + 3] !== 255) continue;
+				const key = `${image.pixels[offset]},${image.pixels[offset + 1]},${image.pixels[offset + 2]}`;
+				for (const face of FACE_NAMES) {
+					if (FACE_COLOR_KEY[face] === key) found.add(face);
+				}
+			}
+		}
+		return FACE_NAMES.filter((face) => found.has(face)).sort();
+	});
+}
+
+function colorCountInPanels(
+	png: Uint8Array,
+	size: number,
+	panels: readonly number[],
+	color: readonly [number, number, number],
+): number {
+	let count = 0;
+	for (const panel of panels) {
+		count += colorCountInBand(png, size, panel, 0, size, color);
+	}
+	return count;
+}
+
+/** Count one probe color inside a horizontal band of one panel. */
+function colorCountInBand(
+	png: Uint8Array,
+	size: number,
+	panel: number,
+	fromX: number,
+	toX: number,
+	color: readonly [number, number, number],
+): number {
+	const image = decodedImage(png);
+	let count = 0;
+	for (let y = 0; y < size; y += 1) {
+		for (let x = fromX; x < toX; x += 1) {
+			const offset = (y * image.width + panel * size + x) * 4;
+			if (
+				image.pixels[offset] === color[0] &&
+				image.pixels[offset + 1] === color[1] &&
+				image.pixels[offset + 2] === color[2] &&
+				image.pixels[offset + 3] === 255
+			) {
+				count += 1;
+			}
+		}
+	}
+	return count;
+}
+
+function fillTextureRect(
+	pixels: Uint8Array,
+	width: number,
+	rect: readonly [number, number, number, number],
+	color: readonly [number, number, number, number],
+): void {
+	const [x, y, w, h] = rect;
+	for (let row = y; row < y + h; row += 1) {
+		for (let column = x; column < x + w; column += 1) {
+			const offset = (row * width + column) * 4;
+			pixels[offset] = color[0];
+			pixels[offset + 1] = color[1];
+			pixels[offset + 2] = color[2];
+			pixels[offset + 3] = color[3];
+		}
+	}
+}
+
+/** A solid 16x16 texture whose right cell is red and left cell green, for a 4x4x4 box. */
+function sideCellTexture(): {
+	readonly width: number;
+	readonly height: number;
+	readonly pixels: Uint8Array;
+} {
+	const pixels = new Uint8Array(16 * 16 * 4);
+	// Opaque black everywhere, so the transparent cells cannot let the back faces
+	// show through; only the two side cells carry a probe color.
+	for (let offset = 3; offset < pixels.length; offset += 4) {
+		pixels[offset] = 255;
+	}
+	fillTextureRect(pixels, 16, [0, 4, 4, 4], [255, 0, 0, 255]);
+	fillTextureRect(pixels, 16, [8, 4, 4, 4], [0, 255, 0, 255]);
+	return { width: 16, height: 16, pixels };
+}
+
+/**
+ * Both side cells split red on the cell's left half and green on its right
+ * half. Both cells carry the same pattern, so a cell swap alone cannot change
+ * the picture; only the mirrored U axis can.
+ */
+function splitSideCellTexture(): {
+	readonly width: number;
+	readonly height: number;
+	readonly pixels: Uint8Array;
+} {
+	const pixels = new Uint8Array(16 * 16 * 4);
+	for (let offset = 3; offset < pixels.length; offset += 4) {
+		pixels[offset] = 255;
+	}
+	for (const x of [0, 8]) {
+		fillTextureRect(pixels, 16, [x, 4, 2, 4], [255, 0, 0, 255]);
+		fillTextureRect(pixels, 16, [x + 2, 4, 2, 4], [0, 255, 0, 255]);
+	}
+	return { width: 16, height: 16, pixels };
+}
+
+function mirrorProbeLayout(mirror: boolean): EntityLayout {
+	return resolveEntityLayoutDocument({
+		format: "mc-asset/entity-layout",
+		version: 1,
+		id: mirror ? "mirror-probe" : "plain-probe",
+		texture: { width: 16, height: 16 },
+		parts: [
+			{
+				id: "box",
+				size: [4, 4, 4],
+				uv: [0, 0],
+				origin: [0, 0, 0],
+				...(mirror ? { mirror: true } : {}),
+			},
+		],
+	});
+}
 
 export const ENTITY_CASES: readonly EntityCase[] = [
 	{
@@ -1152,6 +1336,547 @@ export const ENTITY_CASES: readonly EntityCase[] = [
 				"minecraft:entity",
 				"entity profile still accepted",
 			);
+		},
+	},
+	{
+		name: "the builtin player layout carries the vanilla standing pose and outer-layer dilation",
+		run(check) {
+			const { layout, texture } = playerTemplate("player_wide");
+			const part = (id: string) => {
+				const found = layout.parts.find((entry) => entry.id === id);
+				if (found === undefined) throw new Error(`Missing part: ${id}.`);
+				return found;
+			};
+			check.deepEqual(part("head").origin, [-4, 24, -4], "head origin");
+			check.deepEqual(part("head").pivot, [0, 24, 0], "head pivot");
+			check.deepEqual(part("body").origin, [-4, 12, -2], "body origin");
+			check.deepEqual(
+				part("right_arm").origin,
+				[-8, 12, -2],
+				"right arm origin",
+			);
+			check.deepEqual(part("right_arm").pivot, [-5, 22, 0], "right arm pivot");
+			check.deepEqual(part("left_arm").origin, [4, 12, -2], "left arm origin");
+			check.deepEqual(part("left_leg").pivot, [2, 12, 0], "left leg pivot");
+			check.equal(part("head").inflate, undefined, "base box has no dilation");
+			check.equal(part("head_overlay").inflate, 0.5, "hat dilation");
+			for (const id of [
+				"body_overlay",
+				"right_arm_overlay",
+				"left_arm_overlay",
+				"right_leg_overlay",
+				"left_leg_overlay",
+			]) {
+				check.equal(part(id).inflate, 0.25, `${id} dilation`);
+			}
+			// The inspect report is the old contract: the new preview-only field
+			// must not appear there, so existing JSON bytes stay identical.
+			check.equal(
+				"inflate" in partOf(layout, "head_overlay"),
+				false,
+				"inspect report unchanged",
+			);
+			const rendered = renderEntityPreview(layout, texture, {
+				texturePath: "player.png",
+				size: 128,
+			});
+			check.deepEqual(
+				rendered.report.range.min,
+				[-8.25, -0.25, -4.5],
+				"preview min includes the sleeve and hat dilation",
+			);
+			check.deepEqual(
+				rendered.report.range.max,
+				[8.25, 32.5, 4.5],
+				"preview max includes the hat dilation",
+			);
+		},
+	},
+	{
+		name: "an inflate must be an exact 1/256 multiple and is carried into the resolved part",
+		run(check) {
+			const document = (inflate: unknown) => ({
+				format: "mc-asset/entity-layout",
+				version: 1,
+				id: "inflate-probe",
+				texture: { width: 16, height: 16 },
+				parts: [
+					{
+						id: "box",
+						size: [4, 4, 4],
+						uv: [0, 0],
+						origin: [0, 0, 0],
+						inflate,
+					},
+				],
+			});
+			const resolved = resolveEntityLayoutDocument(document(0.5));
+			check.equal(resolved.parts[0]?.inflate, 0.5, "inflate carried");
+			for (const bad of [0.1, 300, "0.5"]) {
+				const error = errorOf(() => resolveEntityLayoutDocument(document(bad)));
+				check.equal(error.code, "ENTITY_LAYOUT_INVALID", `${String(bad)} code`);
+				check.equal(
+					(error.details as { reason?: string }).reason,
+					"invalid-layout",
+					`${String(bad)} reason`,
+				);
+			}
+		},
+	},
+	{
+		name: "the four isometric panels show the front, back, left, and right face cells in place",
+		run(check) {
+			const { layout, texture } = playerTemplate("player_wide");
+			const rendered = renderEntityPreview(layout, texture, {
+				texturePath: "player.png",
+				size: 128,
+			});
+			check.equal(
+				sha256(rendered.png),
+				PLAYER_PREVIEW_SHA256,
+				"fixed four-view hash",
+			);
+			check.equal(rendered.report.image.width, 512, "image width");
+			check.equal(rendered.report.image.height, 140, "image height");
+			check.deepEqual(
+				rendered.report.panels.map((panel) => panel.name),
+				["south-east", "north-east", "north-west", "south-west"],
+				"panel order",
+			);
+			check.equal(
+				rendered.report.coverage.status,
+				"complete",
+				"coverage complete",
+			);
+			// The camera directions and the layout's world orientation (front
+			// +z, right -x) fix which two side cells each panel can see.
+			check.deepEqual(
+				panelFaceNames(rendered.png, 128),
+				[
+					["front", "left", "top"],
+					["back", "left", "top"],
+					["back", "right", "top"],
+					["front", "right", "top"],
+				],
+				"face cells per panel",
+			);
+		},
+	},
+	{
+		name: "a mirrored box shows the other side cell on each left and right face",
+		run(check) {
+			const texture = sideCellTexture();
+			const plain = renderEntityPreview(mirrorProbeLayout(false), texture, {
+				texturePath: "side.png",
+				size: 64,
+			});
+			const mirrored = renderEntityPreview(mirrorProbeLayout(true), texture, {
+				texturePath: "side.png",
+				size: 64,
+			});
+			const west = [2, 3];
+			const east = [0, 1];
+			check.ok(
+				colorCountInPanels(plain.png, 64, west, [255, 0, 0]) > 0,
+				"plain right cell is red on the west side",
+			);
+			check.equal(
+				colorCountInPanels(plain.png, 64, west, [0, 255, 0]),
+				0,
+				"plain west side has no green",
+			);
+			check.ok(
+				colorCountInPanels(mirrored.png, 64, west, [0, 255, 0]) > 0,
+				"mirrored right face samples the left cell",
+			);
+			check.equal(
+				colorCountInPanels(mirrored.png, 64, west, [255, 0, 0]),
+				0,
+				"mirrored west side has no red",
+			);
+			check.ok(
+				colorCountInPanels(mirrored.png, 64, east, [255, 0, 0]) > 0,
+				"mirrored left face samples the right cell",
+			);
+			// Same side cells on both sides, so only the U flip can move the
+			// colors: on the south-west panel the box's back edge is the left
+			// band and its front edge the next band.
+			const split = splitSideCellTexture();
+			const plainSplit = renderEntityPreview(mirrorProbeLayout(false), split, {
+				texturePath: "split.png",
+				size: 64,
+			});
+			const mirroredSplit = renderEntityPreview(
+				mirrorProbeLayout(true),
+				split,
+				{ texturePath: "split.png", size: 64 },
+			);
+			const backBand = [0, 16] as const;
+			const frontBand = [16, 32] as const;
+			check.ok(
+				colorCountInBand(plainSplit.png, 64, 3, ...backBand, [255, 0, 0]) > 0,
+				"plain back band is red",
+			);
+			check.equal(
+				colorCountInBand(plainSplit.png, 64, 3, ...backBand, [0, 255, 0]),
+				0,
+				"plain back band has no green",
+			);
+			check.ok(
+				colorCountInBand(mirroredSplit.png, 64, 3, ...backBand, [0, 255, 0]) >
+					0,
+				"mirrored back band is green",
+			);
+			check.equal(
+				colorCountInBand(mirroredSplit.png, 64, 3, ...backBand, [255, 0, 0]),
+				0,
+				"mirrored back band has no red",
+			);
+			check.ok(
+				colorCountInBand(plainSplit.png, 64, 3, ...frontBand, [0, 255, 0]) >
+					colorCountInBand(plainSplit.png, 64, 3, ...frontBand, [255, 0, 0]),
+				"plain front band is mostly green",
+			);
+			check.ok(
+				colorCountInBand(mirroredSplit.png, 64, 3, ...frontBand, [255, 0, 0]) >
+					colorCountInBand(mirroredSplit.png, 64, 3, ...frontBand, [0, 255, 0]),
+				"mirrored front band is mostly red",
+			);
+		},
+	},
+	{
+		name: "preview refuses a texture whose size differs from the layout before writing a file",
+		async run(check) {
+			const { layout } = playerTemplate("player_wide");
+			const small = {
+				width: 32,
+				height: 32,
+				pixels: emptyPixels(32, 32),
+			};
+			const error = errorOf(() =>
+				renderEntityPreview(layout, small, {
+					texturePath: "small.png",
+					size: 128,
+				}),
+			);
+			check.equal(error.code, "ENTITY_TEXTURE_SIZE_MISMATCH", "core code");
+			check.deepEqual(
+				error.details,
+				{
+					expected: { width: 64, height: 64 },
+					actual: { width: 32, height: 32 },
+				},
+				"core details",
+			);
+			const dir = await mkdtemp(
+				join(tmpdir(), "mc-asset-entity-preview-size-"),
+			);
+			try {
+				const canvas = createCanvas(32, 32);
+				const layer = addLayer(canvas, { id: "base" });
+				replaceLayerPixels(canvas, layer.id, emptyPixels(32, 32));
+				const texturePath = join(dir, "small.png");
+				await writeFile(texturePath, encodePng(canvas));
+				const output = join(dir, "preview.png");
+				const streams = captureStreams();
+				const exit = await runEntity(
+					"preview",
+					texturePath,
+					{ layout: "player_wide", output, size: "128" },
+					true,
+					streams.streams,
+				);
+				check.equal(exit, 3, "size mismatch exit");
+				const envelope = JSON.parse(
+					new TextDecoder().decode(streams.stdout()),
+				) as { error: { code: string } };
+				check.equal(
+					envelope.error.code,
+					"ENTITY_TEXTURE_SIZE_MISMATCH",
+					"CLI error code",
+				);
+				let wrote = true;
+				try {
+					await readFile(output);
+				} catch {
+					wrote = false;
+				}
+				check.equal(wrote, false, "no image written");
+				const mcp = await handleEntityAsset({
+					mode: "preview",
+					layout: "player_wide",
+					inputPath: texturePath,
+				});
+				check.equal(mcp.isError, true, "MCP refuses");
+				check.equal(
+					(JSON.parse(textOf(mcp)) as { code: string }).code,
+					"ENTITY_TEXTURE_SIZE_MISMATCH",
+					"MCP error code",
+				);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		},
+	},
+	{
+		name: "preview refuses parts with no origin, or a rotated part with no pivot",
+		run(check) {
+			const texture = sideCellTexture();
+			const noOrigin = resolveEntityLayoutDocument({
+				format: "mc-asset/entity-layout",
+				version: 1,
+				id: "no-origin",
+				texture: { width: 16, height: 16 },
+				parts: [{ id: "box", size: [4, 4, 4], uv: [0, 0] }],
+			});
+			const originError = errorOf(() =>
+				renderEntityPreview(noOrigin, texture, {
+					texturePath: "side.png",
+					size: 64,
+				}),
+			);
+			check.equal(originError.code, "ENTITY_LAYOUT_INVALID", "origin code");
+			check.deepEqual(
+				(originError.details as { reason: string; parts: string[] }).parts,
+				["box"],
+				"origin parts",
+			);
+			const noPivot = resolveEntityLayoutDocument({
+				format: "mc-asset/entity-layout",
+				version: 1,
+				id: "no-pivot",
+				texture: { width: 16, height: 16 },
+				parts: [
+					{
+						id: "box",
+						size: [4, 4, 4],
+						uv: [0, 0],
+						origin: [0, 0, 0],
+						rotation: [0, 45, 0],
+					},
+				],
+			});
+			const pivotError = errorOf(() =>
+				renderEntityPreview(noPivot, texture, {
+					texturePath: "side.png",
+					size: 64,
+				}),
+			);
+			check.equal(pivotError.code, "ENTITY_LAYOUT_INVALID", "pivot code");
+			check.equal(
+				(pivotError.details as { reason: string }).reason,
+				"missing-pivot",
+				"pivot reason",
+			);
+		},
+	},
+	{
+		name: "preview applies a part rotation around its pivot and inflation in the reported range",
+		run(check) {
+			const texture = sideCellTexture();
+			const rotated = resolveEntityLayoutDocument({
+				format: "mc-asset/entity-layout",
+				version: 1,
+				id: "rotated",
+				texture: { width: 16, height: 16 },
+				parts: [
+					{
+						id: "box",
+						size: [2, 4, 2],
+						uv: [0, 0],
+						origin: [0, 0, 0],
+						pivot: [0, 0, 0],
+						rotation: [0, 0, 90],
+					},
+				],
+			});
+			const rotatedRender = renderEntityPreview(rotated, texture, {
+				texturePath: "side.png",
+				size: 64,
+			});
+			check.deepEqual(
+				rotatedRender.report.range.min,
+				[-4, 0, 0],
+				"rotated min",
+			);
+			check.deepEqual(rotatedRender.report.range.max, [0, 2, 2], "rotated max");
+			const inflated = resolveEntityLayoutDocument({
+				format: "mc-asset/entity-layout",
+				version: 1,
+				id: "inflated",
+				texture: { width: 16, height: 16 },
+				parts: [
+					{
+						id: "box",
+						size: [2, 4, 2],
+						uv: [0, 0],
+						origin: [0, 0, 0],
+						inflate: 0.5,
+					},
+				],
+			});
+			const inflatedRender = renderEntityPreview(inflated, texture, {
+				texturePath: "side.png",
+				size: 64,
+			});
+			check.deepEqual(
+				inflatedRender.report.range.min,
+				[-0.5, -0.5, -0.5],
+				"inflated min",
+			);
+			check.deepEqual(
+				inflatedRender.report.range.max,
+				[2.5, 4.5, 2.5],
+				"inflated max",
+			);
+		},
+	},
+	{
+		name: "CLI and MCP preview share the same four-view PNG and report",
+		async run(check) {
+			const dir = await mkdtemp(join(tmpdir(), "mc-asset-entity-preview-"));
+			try {
+				const { texture } = playerTemplate("player_wide");
+				const canvas = createCanvas(64, 64);
+				const layer = addLayer(canvas, { id: "base" });
+				replaceLayerPixels(canvas, layer.id, texture.pixels);
+				const skinPath = join(dir, "skin.png");
+				await writeFile(skinPath, encodePng(canvas));
+				const output = join(dir, "preview.png");
+				const cli = captureStreams();
+				const exit = await runEntity(
+					"preview",
+					skinPath,
+					{ layout: "player_wide", output, size: "128" },
+					true,
+					cli.streams,
+				);
+				check.equal(exit, 0, "CLI exit");
+				const cliPng = new Uint8Array(await readFile(output));
+				check.equal(sha256(cliPng), PLAYER_PREVIEW_SHA256, "CLI hash");
+				const envelope = JSON.parse(new TextDecoder().decode(cli.stdout())) as {
+					success: boolean;
+					result: Record<string, unknown>;
+				};
+				check.equal(envelope.success, true, "CLI envelope");
+				check.equal(envelope.result.mode, "preview", "CLI mode");
+				check.equal(envelope.result.output, output, "CLI output path");
+				check.equal(
+					(envelope.result.layout as { id: string }).id,
+					"player_wide",
+					"CLI layout",
+				);
+
+				const mcp = await handleEntityAsset({
+					mode: "preview",
+					layout: "player_wide",
+					inputPath: skinPath,
+					size: 128,
+				});
+				check.equal(mcp.isError, undefined, "MCP has no error");
+				const mcpReport = JSON.parse(textOf(mcp)) as Record<string, unknown>;
+				const image = mcp.content.find((entry) => entry.type === "image") as
+					| { data: string }
+					| undefined;
+				check.ok(image !== undefined, "MCP embeds the PNG");
+				check.equal(
+					sha256(new Uint8Array(Buffer.from(image?.data ?? "", "base64"))),
+					PLAYER_PREVIEW_SHA256,
+					"MCP hash",
+				);
+				const withoutOutput = (value: Record<string, unknown>) => {
+					const copy = { ...value };
+					delete copy.output;
+					return copy;
+				};
+				check.deepEqual(
+					withoutOutput(envelope.result),
+					withoutOutput(mcpReport),
+					"CLI and MCP reports agree",
+				);
+
+				const stdoutRun = captureStreams();
+				const stdoutExit = await runEntity(
+					"preview",
+					skinPath,
+					{ layout: "player_wide", stdout: true, size: "128" },
+					false,
+					stdoutRun.streams,
+				);
+				check.equal(stdoutExit, 0, "stdout exit");
+				check.equal(
+					sha256(stdoutRun.stdout()),
+					PLAYER_PREVIEW_SHA256,
+					"stdout bytes",
+				);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
+		},
+	},
+	{
+		name: "preview needs an output, refuses unused fields, and rejects an unsupported size",
+		async run(check) {
+			const dir = await mkdtemp(join(tmpdir(), "mc-asset-entity-preview-out-"));
+			try {
+				const { texture } = playerTemplate("player_wide");
+				const canvas = createCanvas(64, 64);
+				const layer = addLayer(canvas, { id: "base" });
+				replaceLayerPixels(canvas, layer.id, texture.pixels);
+				const skinPath = join(dir, "skin.png");
+				await writeFile(skinPath, encodePng(canvas));
+				const missing = captureStreams();
+				const missingExit = await runEntity(
+					"preview",
+					skinPath,
+					{ layout: "player_wide" },
+					false,
+					missing.streams,
+				);
+				check.equal(missingExit, 2, "missing output exit");
+				check.ok(
+					new TextDecoder()
+						.decode(missing.stdout())
+						.includes("OUTPUT_REQUIRED"),
+					"OUTPUT_REQUIRED named",
+				);
+				const refused = captureStreams();
+				const refusedExit = await runEntity(
+					"preview",
+					skinPath,
+					{
+						layout: "player_wide",
+						output: join(dir, "preview.png"),
+						fill: true,
+					},
+					true,
+					refused.streams,
+				);
+				check.equal(refusedExit, 2, "refused field exit");
+				check.equal(
+					(
+						JSON.parse(new TextDecoder().decode(refused.stdout())) as {
+							error: { code: string };
+						}
+					).error.code,
+					"INVALID_ARGUMENT",
+					"refused field code",
+				);
+				const badSize = await handleEntityAsset({
+					mode: "preview",
+					layout: "player_wide",
+					inputPath: skinPath,
+					size: 100,
+				});
+				check.equal(badSize.isError, true, "bad size is refused");
+				check.equal(
+					(JSON.parse(textOf(badSize)) as { code: string }).code,
+					"INVALID_ARGUMENT",
+					"bad size code",
+				);
+			} finally {
+				await rm(dir, { recursive: true, force: true });
+			}
 		},
 	},
 ];

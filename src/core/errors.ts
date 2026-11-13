@@ -100,6 +100,7 @@ export type ErrorCode =
 	| "ENTITY_LAYOUT_INVALID"
 	| "ENTITY_LAYOUT_UNSUPPORTED_VERSION"
 	| "ENTITY_LAYOUT_OVERLAP"
+	| "ENTITY_TEXTURE_SIZE_MISMATCH"
 	| "EMPTY_SELECTION"
 	| "SELF_INTERSECTING_POLYGON"
 	| "TRANSACTION_FAILED";
@@ -197,6 +198,9 @@ export const ERROR_EXIT_CODE: Record<FixedErrorCode, ExitCode> = {
 	ENTITY_LAYOUT_INVALID: 2,
 	ENTITY_LAYOUT_UNSUPPORTED_VERSION: 5,
 	ENTITY_LAYOUT_OVERLAP: 2,
+	// The 3D preview cannot draw a texture whose size differs from the layout;
+	// it refuses before writing an image, so this is a validation failure.
+	ENTITY_TEXTURE_SIZE_MISMATCH: 3,
 	// A selection-scoped write whose read scope matched no pixels.
 	EMPTY_SELECTION: 2,
 	// A polygon whose nonadjacent edges touch or cross (holes unsupported).

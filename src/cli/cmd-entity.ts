@@ -12,6 +12,11 @@ import {
 	getEntityLayoutDocument,
 } from "../entity/layouts.ts";
 import {
+	type EntityPreviewReport,
+	type EntityPreviewSize,
+	renderEntityPreview,
+} from "../entity/preview.ts";
+import {
 	buildEntityTemplate,
 	type EntityTemplateRegion,
 } from "../entity/template.ts";
@@ -38,7 +43,7 @@ import {
 	writePlannedTargets,
 } from "./safe-output.ts";
 
-export type EntityMode = "template" | "inspect" | "validate";
+export type EntityMode = "template" | "inspect" | "validate" | "preview";
 
 export interface EntityCliOptions {
 	layout?: string | undefined;
@@ -48,6 +53,8 @@ export interface EntityCliOptions {
 	fill?: boolean | undefined;
 	force?: boolean | undefined;
 	mkdir?: boolean | undefined;
+	/** preview panel edge size; absent means 128. */
+	size?: string | undefined;
 }
 
 /** A builtin id/alias, a layout .json path, or an inline MCP document. */
@@ -65,6 +72,8 @@ export interface EntityRequest {
 	readonly stdout?: boolean | undefined;
 	readonly force?: boolean | undefined;
 	readonly mkdir?: boolean | undefined;
+	/** preview panel edge size (64, 128, or 256); absent means 128. */
+	readonly size?: number | undefined;
 	/** CLI true: at least one output is required. MCP false: artifacts embed. */
 	readonly requireOutput: boolean;
 }
@@ -82,7 +91,8 @@ export interface EntityTemplateReport {
 export type EntityResult =
 	| EntityInspectReport
 	| EntityTemplateReport
-	| EntityValidateReport;
+	| EntityValidateReport
+	| EntityPreviewReport;
 
 export interface EntityOutcome {
 	readonly result: EntityResult;
@@ -112,8 +122,9 @@ const REFUSED_FIELDS: Readonly<Record<EntityMode, readonly RequestField[]>> = {
 		"stdout",
 		"force",
 		"mkdir",
+		"size",
 	],
-	template: ["inputPath"],
+	template: ["inputPath", "size"],
 	validate: [
 		"fill",
 		"outputPngPath",
@@ -121,7 +132,9 @@ const REFUSED_FIELDS: Readonly<Record<EntityMode, readonly RequestField[]>> = {
 		"stdout",
 		"force",
 		"mkdir",
+		"size",
 	],
+	preview: ["fill", "outputMcpxPath"],
 };
 
 function isGiven(value: unknown): boolean {
@@ -371,6 +384,85 @@ async function runValidate(
 	return { result: report, failed: report.verdict === "fail" };
 }
 
+/**
+ * preview: load the texture, refuse a size mismatch before any pixel work,
+ * then write the four-view PNG (or return it inline for MCP). The size is
+ * validated by the renderer so the CLI and MCP share one message.
+ */
+async function runPreview(
+	request: EntityRequest,
+	layout: EntityLayout,
+): Promise<EntityOutcome> {
+	if (request.inputPath === undefined) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			"preview needs a texture path.",
+			{ field: "inputPath" },
+		);
+	}
+	const stdout = request.stdout === true;
+	if (request.outputPngPath !== undefined && stdout) {
+		throw new McAssetError(
+			"ARGUMENT_CONFLICT",
+			"Use only one of the PNG output path or stdout.",
+		);
+	}
+	if (request.requireOutput && request.outputPngPath === undefined && !stdout) {
+		throw new McAssetError(
+			"OUTPUT_REQUIRED",
+			"preview needs a PNG output or stdout.",
+		);
+	}
+	const targets: OutputTarget[] =
+		request.outputPngPath === undefined
+			? []
+			: [
+					{
+						path: request.outputPngPath,
+						extension: ".png",
+						allowOverwrite: request.force === true,
+					},
+				];
+	// Path phase: the output is checked before the texture is read.
+	const planned = await planOutputTargets(targets, {
+		inputs: [request.inputPath],
+		mkdir: request.mkdir === true,
+	});
+	const texture = await loadTexture(request.inputPath);
+	const size = (request.size ?? 128) as EntityPreviewSize;
+	const rendered = renderEntityPreview(layout, texture, {
+		texturePath: request.inputPath,
+		size,
+	});
+	const payloads = new Map<string, Uint8Array>();
+	if (request.outputPngPath !== undefined) {
+		payloads.set(request.outputPngPath, rendered.png);
+	}
+	const written =
+		planned.length === 0
+			? []
+			: await writePlannedTargets(planned, payloads, {
+					mkdir: request.mkdir === true,
+				});
+	const output =
+		request.outputPngPath !== undefined &&
+		written.includes(request.outputPngPath)
+			? request.outputPngPath
+			: undefined;
+	const embed = !request.requireOutput;
+	return {
+		result: {
+			...rendered.report,
+			...(output === undefined ? {} : { output }),
+		},
+		failed: false,
+		png:
+			stdout || (embed && request.outputPngPath === undefined)
+				? rendered.png
+				: undefined,
+	};
+}
+
 /** Shared request core behind the CLI command and the MCP tool. */
 export async function runEntityRequest(
 	request: EntityRequest,
@@ -382,6 +474,9 @@ export async function runEntityRequest(
 	}
 	if (request.mode === "template") {
 		return runTemplate(request, loaded.layout, loaded.sourcePath);
+	}
+	if (request.mode === "preview") {
+		return runPreview(request, loaded.layout);
 	}
 	return runValidate(request, loaded.layout);
 }
@@ -466,6 +561,23 @@ function formatTemplateLine(result: EntityTemplateReport): string {
 	return `ok entity template layout=${result.layout.id} regions=${result.regions.length}${output}${source}`;
 }
 
+function formatPreviewLine(result: EntityPreviewReport): string {
+	const parts = [
+		`ok entity preview layout=${result.layout.id}`,
+		`texture=${result.texture.width}x${result.texture.height}`,
+		`size=${result.size}`,
+	];
+	if (result.output !== undefined) parts.push(`output=${result.output}`);
+	if (result.coverage.status !== "complete") {
+		parts.push(
+			`clipped=${result.coverage.skipped
+				.map((entry) => entry.target)
+				.join(",")}`,
+		);
+	}
+	return parts.join(" ");
+}
+
 /**
  * CLI entry: load the layout, run the shared request core, and emit the
  * artifact, envelope, and exit code. A failed texture verdict exits 3 with
@@ -486,13 +598,14 @@ export async function runEntity(
 		const outcome = await runEntityRequest({
 			mode,
 			layout: { kind: "name", value: options.layout ?? "player_wide" },
-			inputPath: mode === "validate" ? input : undefined,
+			inputPath: mode === "validate" || mode === "preview" ? input : undefined,
 			fill: options.fill,
 			outputPngPath: options.output,
 			outputMcpxPath: options.source,
 			stdout: options.stdout,
 			force: options.force,
 			mkdir: options.mkdir,
+			size: options.size === undefined ? undefined : Number(options.size),
 			requireOutput: true,
 		});
 		if (outcome.png !== undefined) {
@@ -524,6 +637,8 @@ export async function runEntity(
 			emitLog(formatValidateReport(outcome.result), streams, route);
 		} else if (outcome.result.mode === "inspect") {
 			emitLog(formatInspectReport(outcome.result), streams, route);
+		} else if (outcome.result.mode === "preview") {
+			emitLog(formatPreviewLine(outcome.result), streams, route);
 		} else {
 			emitLog(formatTemplateLine(outcome.result), streams, route);
 		}

@@ -22,6 +22,7 @@ function part(
 	layer: "base" | "overlay",
 	origin: readonly [number, number, number],
 	pivot: readonly [number, number, number],
+	inflate?: number,
 ): EntityPartDocument {
 	return {
 		id,
@@ -30,15 +31,33 @@ function part(
 		layer,
 		origin,
 		pivot,
+		...(inflate === undefined ? {} : { inflate }),
 	};
 }
 
 /**
- * The vanilla player model. Arm width is 4 for the wide (classic) model and
- * 3 for the slim model; everything else is shared. The 64x64 skin format gives
- * the left arm and left leg their own UV regions, so those parts are not
- * mirrored: `ModelPlayer` builds every left limb with a fresh `ModelRenderer`
- * at its own offset, unlike the shared-region biped mobs.
+ * The vanilla player model's standing pose. Coordinates are model units with
+ * +y up and the feet at y = 0; vanilla `ModelBiped` uses the same boxes with
+ * +y down from the neck, so head 24..32, body 12..24, arms 12..24, and legs
+ * 0..12 here.
+ *
+ * Verified against vanilla `ModelPlayer` / `ModelBiped`:
+ *   head      box (-4,-8,-4) size 8x8x8 at pivot (0,0,0)
+ *   body      box (-4, 0,-2) size 8x12x4 at pivot (0,0,0)
+ *   arms      box (-3,-2,-2) / (4,12,4) at pivot (±5,2,0), width 4 or 3
+ *   legs      box (-2, 0,-2) size 4x12x4 at pivot (±1.9,12,0)
+ * The builtin keeps the already-published grid origins (legs at ±2 and ±4
+ * rather than vanilla's ±1.9, which is not a multiple of 1/256), so the
+ * inspect report does not change. The outer layer is the same box with the
+ * vanilla dilation: the hat grows 0.5 on every side, the jacket, sleeves and
+ * pants 0.25. The standing pose has no rotations; an omitted `rotation` means
+ * none.
+ *
+ * Arm width is 4 for the wide (classic) model and 3 for the slim model;
+ * everything else is shared. The 64x64 skin format gives the left arm and left
+ * leg their own UV regions, so those parts are not mirrored: `ModelPlayer`
+ * builds every left limb with a fresh `ModelRenderer` at its own offset,
+ * unlike the shared-region biped mobs.
  */
 function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 	const wide = armWidth === 4;
@@ -57,6 +76,7 @@ function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 				"overlay",
 				[-4, 24, -4],
 				[0, 24, 0],
+				0.5,
 			),
 			part("body", [8, 12, 4], [16, 16], "base", [-4, 12, -2], [0, 24, 0]),
 			part(
@@ -66,6 +86,7 @@ function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 				"overlay",
 				[-4, 12, -2],
 				[0, 24, 0],
+				0.25,
 			),
 			part(
 				"right_arm",
@@ -82,6 +103,7 @@ function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 				"overlay",
 				[rightArmX, 12, -2],
 				[-5, 22, 0],
+				0.25,
 			),
 			part(
 				"left_arm",
@@ -98,6 +120,7 @@ function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 				"overlay",
 				[4, 12, -2],
 				[5, 22, 0],
+				0.25,
 			),
 			part("right_leg", [4, 12, 4], [0, 16], "base", [-4, 0, -2], [-2, 12, 0]),
 			part(
@@ -107,6 +130,7 @@ function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 				"overlay",
 				[-4, 0, -2],
 				[-2, 12, 0],
+				0.25,
 			),
 			part("left_leg", [4, 12, 4], [16, 48], "base", [0, 0, -2], [2, 12, 0]),
 			part(
@@ -116,6 +140,7 @@ function playerLayout(armWidth: 3 | 4): EntityLayoutDocument {
 				"overlay",
 				[0, 0, -2],
 				[2, 12, 0],
+				0.25,
 			),
 		],
 	};
