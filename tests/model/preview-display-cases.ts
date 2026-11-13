@@ -1,0 +1,1467 @@
+import { Buffer } from "node:buffer";
+import { join } from "node:path";
+import { runModel, runModelRequest } from "../../src/cli/cmd-model.ts";
+import { McAssetError } from "../../src/core/errors.ts";
+import { handleModelAsset } from "../../src/mcp/handlers-model-optimize.ts";
+import type { FixedVec3 } from "../../src/model/geometry/index.ts";
+import {
+	builtinDisplaySource,
+	builtinGuiLight,
+	displayMirrorsFaces,
+	displayTransformFor,
+	FACE_SHADE,
+	PREVIEW_DISPLAY_SLOTS,
+	parseTintColor,
+	shadeForNormal,
+} from "../../src/model/preview/display.ts";
+import { renderModelPreview } from "../../src/model/preview/render.ts";
+import { captureStreams } from "../cli/optimize-model-cases.ts";
+import type { CaseCheck, ModelCase } from "./json-document-cases.ts";
+import {
+	assertRgba,
+	coloredCubeContext,
+	coloredCubeModel,
+	cubeModel,
+	flatOf,
+	fullCubeFaces,
+	makePack,
+	memoryContext,
+	PREVIEW_PATH,
+	panelBox,
+	panelColors,
+	STONE_REL,
+	sha256,
+	solidPng,
+	withTempRoot,
+} from "./preview-cases.ts";
+
+const encoder = new TextEncoder();
+
+const DISPLAY_SLOTS = PREVIEW_DISPLAY_SLOTS;
+
+/**
+ * One distinct scale per slot, so each slot's fixed hash also proves the
+ * slot-specific transform was read. Translation stays zero here and gets its
+ * own case; rotation is the value the acceptance criterion changes.
+ */
+const SLOT_POSE: Readonly<
+	Record<
+		(typeof DISPLAY_SLOTS)[number],
+		{
+			readonly translation: readonly [number, number, number];
+			readonly scale: readonly [number, number, number];
+		}
+	>
+> = {
+	gui: { translation: [0, 0, 0], scale: [1, 1, 1] },
+	firstperson_righthand: { translation: [0, 0, 0], scale: [0.6, 0.6, 0.6] },
+	thirdperson_righthand: { translation: [0, 0, 0], scale: [0.7, 0.7, 0.7] },
+	head: { translation: [0, 0, 0], scale: [0.8, 0.8, 0.8] },
+	ground: { translation: [0, 0, 0], scale: [0.3, 0.3, 0.3] },
+	fixed: { translation: [0, 0, 0], scale: [0.9, 0.9, 0.9] },
+};
+
+function displayFor(
+	rotation: readonly [number, number, number],
+): Record<string, unknown> {
+	const display: Record<string, unknown> = {};
+	for (const slot of DISPLAY_SLOTS) {
+		display[slot] = { rotation, ...SLOT_POSE[slot] };
+	}
+	return display;
+}
+
+function withDisplay(
+	text: string,
+	display: Record<string, unknown>,
+	guiLight?: "front" | "side",
+): string {
+	return JSON.stringify({
+		...JSON.parse(text),
+		display,
+		...(guiLight === undefined ? {} : { gui_light: guiLight }),
+	});
+}
+
+/** The fixed hashes for the two rotation variants, one per slot. */
+const ROTATED_HASHES: Record<(typeof DISPLAY_SLOTS)[number], string> = {
+	gui: "f211afab8832045e08772c044295511bb63ad1453b55842b1e97b229afcffc50",
+	firstperson_righthand:
+		"1c6979c32f4d99cc338fa6ba0dfbdbf57e41c6d7c683be2ab5bdaf9a515f566b",
+	thirdperson_righthand:
+		"7ac632ffa5f7ef32746cf7eafa47e535c17c63fa7c6cb22c029d40d9581412ce",
+	head: "a26a18dd6db3933f418e3527970c8df5589a88431e58c47633488c62867af861",
+	ground: "c7e3c91fe2263211e62003125914f9eb8239cdb8d3755ef913c4055244a0a957",
+	fixed: "2195c223537d833a561735337732181d435278d538166065eac49875eb28ecbe",
+};
+const ZERO_HASHES: Record<(typeof DISPLAY_SLOTS)[number], string> = {
+	gui: "ffc5ed41c0c801c6e4189446708df1f7efffef9291a78b2eb3861c73c72243ee",
+	firstperson_righthand:
+		"82d3d278e29da7a24d22c5cf44041e0905eb89b1122e31fcd605c9e2cf2268ed",
+	thirdperson_righthand:
+		"843539cb4ef76a0bae03deb0d073e882a4fda86c3a8ad708172576bc4914feee",
+	head: "ea5fb5c00717a933d2eca959faa9bb8e2276329c36135645902dc8d7813ffc53",
+	ground: "6b2c7dc1a1b54c6663a71ad714b4acf358b74383bedecb59731b54c70ea8adee",
+	fixed: "1b3f8015ada26d7824f0341e5fb4dcd2214345956e270f0584c8eef301dff2ac",
+};
+
+const PARENT_PATH = "assets/demo/models/block/base.json";
+
+function parentContext(parent: unknown): ReturnType<typeof memoryContext> {
+	return memoryContext({
+		[PARENT_PATH]: encoder.encode(JSON.stringify(parent)),
+		[STONE_REL]: solidPng(200, 200, 200),
+	});
+}
+
+function childOf(parentId: string): string {
+	return JSON.stringify({
+		parent: parentId,
+		textures: { all: "demo:stone" },
+		elements: [
+			{
+				from: [0, 0, 0],
+				to: [16, 16, 16],
+				faces: fullCubeFaces("#all"),
+			},
+		],
+	});
+}
+
+function directChild(display: unknown, guiLight?: "front" | "side"): string {
+	return JSON.stringify({
+		textures: { all: "demo:stone" },
+		...(guiLight === undefined ? {} : { gui_light: guiLight }),
+		display,
+		elements: [
+			{
+				from: [0, 0, 0],
+				to: [16, 16, 16],
+				faces: fullCubeFaces("#all"),
+			},
+		],
+	});
+}
+
+async function expectCode(
+	check: CaseCheck,
+	body: () => Promise<unknown>,
+	code: string,
+	message: string,
+): Promise<void> {
+	let caught: unknown;
+	try {
+		await body();
+	} catch (error) {
+		caught = error;
+	}
+	check.ok(caught instanceof McAssetError, `${message}: expected McAssetError`);
+	if (caught instanceof McAssetError) {
+		check.equal(caught.code, code, `${message}: error code`);
+	}
+}
+
+function centerY(box: {
+	readonly minY: number;
+	readonly maxY: number;
+}): number {
+	return (box.minY + box.maxY) / 2;
+}
+
+export const DISPLAY_PREVIEW_CASES: ModelCase[] = [
+	{
+		name: "display rotation changes every slot preview and matches its fixed hash",
+		async run(check) {
+			const context = coloredCubeContext();
+			const rotated = withDisplay(coloredCubeModel(), displayFor([30, 225, 0]));
+			const zero = withDisplay(coloredCubeModel(), displayFor([0, 0, 0]));
+			for (const slot of DISPLAY_SLOTS) {
+				const posed = await renderModelPreview(rotated, {
+					path: PREVIEW_PATH,
+					context,
+					size: 64,
+					display: slot,
+				});
+				const flat = await renderModelPreview(zero, {
+					path: PREVIEW_PATH,
+					context,
+					size: 64,
+					display: slot,
+				});
+				check.equal(posed.report.display?.slot, slot, `${slot}: slot`);
+				check.deepEqual(
+					[...(posed.report.display?.rotation ?? [])],
+					[30, 225, 0],
+					`${slot}: rotation is reported as authored`,
+				);
+				check.equal(
+					posed.report.display?.applied,
+					true,
+					`${slot}: transform applied`,
+				);
+				check.equal(
+					posed.report.coverage.status,
+					"complete",
+					`${slot}: coverage`,
+				);
+				check.equal(
+					posed.report.range.pixelsPerUnit,
+					2,
+					`${slot}: display scale`,
+				);
+				check.deepEqual(
+					[...posed.report.panels].map((panel) => [
+						panel.name,
+						panel.x,
+						panel.y,
+						panel.width,
+						panel.height,
+					]),
+					[["display", 0, 0, 64, 64]],
+					`${slot}: one display panel`,
+				);
+				check.ok(
+					sha256(posed.png) !== sha256(flat.png),
+					`${slot}: the two rotations differ`,
+				);
+				check.equal(
+					sha256(posed.png),
+					ROTATED_HASHES[slot],
+					`${slot}: rotated PNG hash`,
+				);
+				check.equal(
+					sha256(flat.png),
+					ZERO_HASHES[slot],
+					`${slot}: zero-rotation PNG hash`,
+				);
+			}
+		},
+	},
+	{
+		name: "a child inherits the parent display transform per slot",
+		async run(check) {
+			const parent = {
+				gui_light: "front",
+				textures: { all: "demo:stone" },
+				display: {
+					gui: {
+						rotation: [10, 20, 30],
+						translation: [1, 2, 3],
+						scale: [0.5, 0.5, 0.5],
+					},
+					head: {
+						rotation: [0, 180, 0],
+						translation: [0, 13, 7],
+						scale: [1, 1, 1],
+					},
+				},
+			};
+			const context = parentContext(parent);
+			const inherited = await renderModelPreview(childOf("demo:block/base"), {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				display: "gui",
+			});
+			check.deepEqual(
+				[...(inherited.report.display?.rotation ?? [])],
+				[10, 20, 30],
+				"gui rotation from the parent",
+			);
+			check.deepEqual(
+				[...(inherited.report.display?.translation ?? [])],
+				[1, 2, 3],
+				"gui translation from the parent",
+			);
+			check.deepEqual(
+				[...(inherited.report.display?.scale ?? [])],
+				[0.5, 0.5, 0.5],
+				"gui scale from the parent",
+			);
+			check.equal(
+				inherited.report.display?.from,
+				"demo:block/base",
+				"the report names the parent that supplied the slot",
+			);
+			check.equal(
+				inherited.report.display?.applied,
+				true,
+				"parent transform applied",
+			);
+			const own = await renderModelPreview(
+				directChild(parent.display, "front"),
+				{ path: PREVIEW_PATH, context, size: 64, display: "gui" },
+			);
+			check.equal(
+				sha256(inherited.png),
+				sha256(own.png),
+				"inherited and directly written gui transforms render the same bytes",
+			);
+			check.equal(
+				inherited.report.lighting,
+				undefined,
+				"lighting is only reported when it is requested",
+			);
+
+			const lit = await renderModelPreview(childOf("demo:block/base"), {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				display: "head",
+				lighting: true,
+			});
+			check.equal(
+				lit.report.lighting?.guiLight,
+				"front",
+				"gui_light is inherited",
+			);
+			check.equal(
+				lit.report.lighting?.mode,
+				"flat",
+				"front gui_light uses flat shading",
+			);
+
+			const headParent = await renderModelPreview(
+				directChild({ head: parent.display.head }),
+				{ path: PREVIEW_PATH, context, size: 64, display: "head" },
+			);
+			check.equal(
+				sha256(lit.png),
+				sha256(headParent.png),
+				"the inherited head transform matches one written on the child",
+			);
+		},
+	},
+	{
+		name: "a child display slot overrides only that slot and defaults missing fields",
+		async run(check) {
+			const parent = {
+				display: {
+					gui: {
+						rotation: [10, 20, 30],
+						translation: [1, 2, 3],
+						scale: [0.5, 0.5, 0.5],
+					},
+					head: {
+						rotation: [0, 180, 0],
+						translation: [0, 13, 7],
+						scale: [1, 1, 1],
+					},
+				},
+			};
+			const context = parentContext(parent);
+			const child = JSON.stringify({
+				parent: "demo:block/base",
+				textures: { all: "demo:stone" },
+				display: { gui: { rotation: [45, 0, 0] } },
+				elements: [
+					{
+						from: [0, 0, 0],
+						to: [16, 16, 16],
+						faces: fullCubeFaces("#all"),
+					},
+				],
+			});
+			const gui = await renderModelPreview(child, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				display: "gui",
+			});
+			check.equal(gui.report.display?.from, "own", "own gui slot wins");
+			check.deepEqual(
+				[...(gui.report.display?.rotation ?? [])],
+				[45, 0, 0],
+				"own rotation",
+			);
+			check.deepEqual(
+				[...(gui.report.display?.translation ?? [])],
+				[0, 0, 0],
+				"an omitted translation uses the game default, not the parent value",
+			);
+			check.deepEqual(
+				[...(gui.report.display?.scale ?? [])],
+				[1, 1, 1],
+				"an omitted scale uses the game default, not the parent value",
+			);
+			const head = await renderModelPreview(child, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				display: "head",
+			});
+			check.equal(
+				head.report.display?.from,
+				"demo:block/base",
+				"head still comes from the parent",
+			);
+			check.deepEqual(
+				[...(head.report.display?.rotation ?? [])],
+				[0, 180, 0],
+				"parent head rotation",
+			);
+		},
+	},
+	{
+		name: "builtin item templates supply their display transforms and gui_light",
+		async run(check) {
+			const generated = childOf("minecraft:item/generated");
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
+			const head = await renderModelPreview(generated, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				display: "head",
+			});
+			check.equal(
+				head.report.display?.from,
+				"minecraft:item/generated",
+				"the builtin parent is named as the source",
+			);
+			check.equal(
+				head.report.display?.applied,
+				true,
+				"builtin transform applied",
+			);
+			check.deepEqual(
+				[...(head.report.display?.rotation ?? [])],
+				[0, 180, 0],
+				"generated head rotation",
+			);
+			check.deepEqual(
+				[...(head.report.display?.translation ?? [])],
+				[0, 13, 7],
+				"generated head translation",
+			);
+			const lit = await renderModelPreview(generated, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				display: "head",
+				lighting: true,
+			});
+			check.equal(
+				lit.report.lighting?.guiLight,
+				"front",
+				"generated gui_light",
+			);
+			check.equal(lit.report.lighting?.mode, "flat", "generated flat lighting");
+
+			const noGui = await renderModelPreview(generated, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				display: "gui",
+			});
+			check.equal(
+				noGui.report.display?.applied,
+				false,
+				"generated has no gui entry",
+			);
+			check.deepEqual(
+				[...(noGui.report.display?.rotation ?? [])],
+				[0, 0, 0],
+				"a missing slot uses the identity transform",
+			);
+			check.ok(
+				noGui.report.unapplied.includes("display-slot-missing"),
+				"a missing slot is listed in unapplied",
+			);
+
+			const rod = await renderModelPreview(
+				childOf("minecraft:item/handheld_rod"),
+				{
+					path: PREVIEW_PATH,
+					context,
+					size: 64,
+					display: "firstperson_righthand",
+				},
+			);
+			check.equal(
+				rod.report.display?.from,
+				"minecraft:item/handheld_rod",
+				"handheld_rod owns the firstperson entry",
+			);
+			check.deepEqual(
+				[...(rod.report.display?.rotation ?? [])],
+				[0, 90, 25],
+				"handheld_rod firstperson rotation",
+			);
+			check.deepEqual(
+				[...(rod.report.display?.scale ?? [])],
+				[0.68, 0.68, 0.68],
+				"handheld_rod firstperson scale",
+			);
+			check.deepEqual(
+				builtinDisplaySource("minecraft:item/handheld_rod", "fixed")?.source,
+				{ rotation: [0, 180, 0], scale: [1, 1, 1] },
+				"handheld_rod falls through to generated for fixed",
+			);
+			check.equal(
+				builtinGuiLight("minecraft:item/handheld_rod"),
+				"front",
+				"handheld_rod inherits generated gui_light",
+			);
+			check.equal(
+				builtinDisplaySource("minecraft:item/generated", "on_shelf" as never),
+				undefined,
+				"unsupported slots are not supplied by the builtin table",
+			);
+		},
+	},
+	{
+		name: "side lighting applies the fixed per-direction shade factors",
+		async run(check) {
+			const normals: Record<string, FixedVec3> = {
+				up: [0, 65536, 0],
+				down: [0, -65536, 0],
+				north: [0, 0, -65536],
+				south: [0, 0, 65536],
+				west: [-65536, 0, 0],
+				east: [65536, 0, 0],
+			};
+			for (const [direction, expected] of Object.entries(FACE_SHADE)) {
+				check.equal(
+					shadeForNormal(normals[direction] as FixedVec3, "directional"),
+					expected,
+					`${direction} shade`,
+				);
+				check.equal(
+					shadeForNormal(normals[direction] as FixedVec3, "flat"),
+					1000,
+					`${direction} flat`,
+				);
+			}
+			check.equal(
+				shadeForNormal([0, 0, 0], "directional"),
+				1000,
+				"a degenerate normal stays unshaded",
+			);
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
+			const text = JSON.stringify({
+				gui_light: "side",
+				textures: { all: "demo:stone" },
+				elements: [
+					{
+						from: [0, 0, 0],
+						to: [16, 16, 16],
+						faces: fullCubeFaces("#all"),
+					},
+					{
+						from: [20, 0, 0],
+						to: [28, 0, 8],
+						faces: { down: { texture: "#all" } },
+					},
+					{
+						from: [0, 0, 20],
+						to: [8, 0, 28],
+						faces: { down: { texture: "#all" } },
+					},
+				],
+			});
+			const lit = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				view: { kind: "isometric", direction: "south-east" },
+				lighting: true,
+			});
+			const litFlat = flatOf(lit.png);
+			check.deepEqual(
+				panelColors(
+					litFlat.flat,
+					litFlat.width,
+					0,
+					0,
+					litFlat.width - 1,
+					litFlat.height - 1,
+				),
+				["100,100,100", "120,120,120", "160,160,160", "200,200,200"],
+				"down 0.5, east 0.6, south 0.8 and up 1.0 appear as integer shades",
+			);
+			check.ok(
+				lit.report.unapplied.includes("dominant-axis-shading"),
+				"the report names the dominant-axis approximation",
+			);
+			check.ok(
+				!lit.report.unapplied.includes("lighting"),
+				"applied lighting leaves the historical entry out",
+			);
+
+			const flat = await renderModelPreview(
+				JSON.stringify({ ...JSON.parse(text), gui_light: "front" }),
+				{
+					path: PREVIEW_PATH,
+					context,
+					size: 64,
+					view: { kind: "isometric", direction: "south-east" },
+					lighting: true,
+				},
+			);
+			const flatPixels = flatOf(flat.png);
+			check.deepEqual(
+				panelColors(
+					flatPixels.flat,
+					flatPixels.width,
+					0,
+					0,
+					flatPixels.width - 1,
+					flatPixels.height - 1,
+				),
+				["200,200,200"],
+				"front gui_light is a flat shade",
+			);
+			check.equal(flat.report.lighting?.mode, "flat", "front mode is reported");
+			check.ok(
+				flat.report.unapplied.includes("flat-item-lighting-variation"),
+				"flat lighting keeps its own gap entry",
+			);
+
+			const unlit = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				view: { kind: "isometric", direction: "south-east" },
+			});
+			const unlitPixels = flatOf(unlit.png);
+			check.deepEqual(
+				panelColors(
+					unlitPixels.flat,
+					unlitPixels.width,
+					0,
+					0,
+					unlitPixels.width - 1,
+					unlitPixels.height - 1,
+				),
+				["200,200,200"],
+				"without lighting every face keeps the texture colour",
+			);
+			check.ok(
+				unlit.report.unapplied.includes("lighting"),
+				"unlit previews keep lighting in unapplied",
+			);
+		},
+	},
+	{
+		name: "tintindex faces multiply by the requested colour",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
+			const text = JSON.stringify({
+				textures: { all: "demo:stone" },
+				elements: [
+					{
+						from: [0, 0, 0],
+						to: [16, 16, 16],
+						faces: {
+							south: { texture: "#all", tintindex: 0 },
+							east: { texture: "#all", tintindex: 2 },
+							up: { texture: "#all" },
+						},
+					},
+				],
+			});
+			const single = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				view: { kind: "isometric", direction: "south-east" },
+				tint: [0x80, 0xc0, 0x40],
+			});
+			const singlePixels = flatOf(single.png);
+			check.deepEqual(
+				panelColors(
+					singlePixels.flat,
+					singlePixels.width,
+					0,
+					0,
+					singlePixels.width - 1,
+					singlePixels.height - 1,
+				),
+				["100,151,50", "200,200,200"],
+				"200 x 128/255 = 100, 192/255 = 151, 64/255 = 50; the untinted face stays 200",
+			);
+			check.deepEqual(single.report.tint, {
+				color: "#80c040",
+				appliedFaces: 2,
+				uncoloredFaces: 0,
+			});
+			check.ok(
+				!single.report.unapplied.includes("tintindex"),
+				"every tintindex face received a colour",
+			);
+
+			const perIndex = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				view: { kind: "isometric", direction: "south-east" },
+				tints: { "0": [0x80, 0xc0, 0x40], "2": [0xff, 0, 0] },
+			});
+			const perIndexPixels = flatOf(perIndex.png);
+			check.deepEqual(
+				panelColors(
+					perIndexPixels.flat,
+					perIndexPixels.width,
+					0,
+					0,
+					perIndexPixels.width - 1,
+					perIndexPixels.height - 1,
+				),
+				["100,151,50", "200,0,0", "200,200,200"],
+				"each tintindex gets its own colour",
+			);
+			check.deepEqual(perIndex.report.tint?.tints, {
+				"0": "#80c040",
+				"2": "#ff0000",
+			});
+
+			const lit = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				view: { kind: "isometric", direction: "south-east" },
+				lighting: true,
+				tints: { "0": [0x80, 0xc0, 0x40], "2": [0xff, 0, 0] },
+			});
+			const litPixels = flatOf(lit.png);
+			check.deepEqual(
+				panelColors(
+					litPixels.flat,
+					litPixels.width,
+					0,
+					0,
+					litPixels.width - 1,
+					litPixels.height - 1,
+				),
+				["120,0,0", "200,200,200", "80,120,40"],
+				"shading runs before the tint: south 160 -> 80/120/40, east 120 -> 120/0/0",
+			);
+			check.equal(
+				lit.report.lighting?.guiLight,
+				"side",
+				"side gui_light is reported",
+			);
+
+			const sparse = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				view: { kind: "isometric", direction: "south-east" },
+				tints: { "0": [0x80, 0xc0, 0x40] },
+			});
+			check.deepEqual(
+				sparse.report.tint,
+				{
+					tints: { "0": "#80c040" },
+					appliedFaces: 1,
+					uncoloredFaces: 1,
+				},
+				"an index without a colour stays untinted and is counted",
+			);
+			check.ok(
+				sparse.report.unapplied.includes("tintindex"),
+				"an uncoloured tintindex is listed in unapplied",
+			);
+
+			const sorted = await renderModelPreview(
+				JSON.stringify({
+					textures: { all: "demo:stone" },
+					elements: [
+						{
+							from: [0, 0, 0],
+							to: [16, 16, 16],
+							faces: {
+								south: { texture: "#all", tintindex: 10 },
+								east: { texture: "#all", tintindex: 2 },
+							},
+						},
+					],
+				}),
+				{
+					path: PREVIEW_PATH,
+					context,
+					size: 64,
+					view: { kind: "isometric", direction: "south-east" },
+					tints: { "10": [1, 2, 3], "2": [4, 5, 6] },
+				},
+			);
+			check.deepEqual(
+				Object.keys(sorted.report.tint?.tints ?? {}),
+				["2", "10"],
+				"the report orders tint indices numerically, not by first digit",
+			);
+
+			await expectCode(
+				check,
+				() =>
+					renderModelPreview(text, {
+						path: PREVIEW_PATH,
+						context,
+						size: 64,
+						tint: [0x80, 0xc0, 0x40],
+						tints: { "0": [0xff, 0, 0] },
+					}),
+				"ARGUMENT_CONFLICT",
+				"tint and tints together",
+			);
+			await expectCode(
+				check,
+				() =>
+					renderModelPreview(text, {
+						path: PREVIEW_PATH,
+						context,
+						size: 64,
+						tints: { "1": [0xff, 0, 0], "01": [0, 0xff, 0] },
+					}),
+				"ARGUMENT_CONFLICT",
+				"two keys that name the same tint index",
+			);
+		},
+	},
+	{
+		name: "a tint colour with no tintindex face warns instead of pretending",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
+			const rendered = await renderModelPreview(testCube(), {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				view: { kind: "isometric", direction: "south-east" },
+				tint: [0xff, 0, 0],
+			});
+			check.deepEqual(rendered.report.tint, {
+				color: "#ff0000",
+				appliedFaces: 0,
+				uncoloredFaces: 0,
+			});
+			check.ok(
+				rendered.report.warnings.some(
+					(warning) => warning.code === "MODEL_PREVIEW_TINT_UNUSED",
+				),
+				"an unused tint colour warns",
+			);
+		},
+	},
+	{
+		name: "display translation and scale stay visible in the fixed camera",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
+			const base = JSON.parse(testCube());
+			const render = (display: unknown) =>
+				renderModelPreview(
+					JSON.stringify({ ...base, display: { gui: display } }),
+					{ path: PREVIEW_PATH, context, size: 64, display: "gui" },
+				);
+			const centred = await render({ rotation: [0, 0, 0] });
+			const moved = await render({
+				rotation: [0, 0, 0],
+				translation: [0, 8, 0],
+			});
+			const centredPixels = flatOf(centred.png);
+			const movedPixels = flatOf(moved.png);
+			check.ok(
+				sha256(centred.png) !== sha256(moved.png),
+				"a display translation changes the image",
+			);
+			check.ok(
+				centerY(
+					panelBox(centredPixels.flat, centredPixels.width, 0, 0, 63, 63),
+				) >
+					centerY(panelBox(movedPixels.flat, movedPixels.width, 0, 0, 63, 63)),
+				"a positive y translation moves the model up the panel",
+			);
+			check.deepEqual(
+				[...(moved.report.range.min as readonly number[])],
+				[-8, 0, -8],
+				"the report range includes the translation",
+			);
+			check.deepEqual(
+				[...(moved.report.range.max as readonly number[])],
+				[8, 16, 8],
+				"the report range includes the translation",
+			);
+
+			const full = await render({ rotation: [0, 0, 0], scale: [1, 1, 1] });
+			const half = await render({
+				rotation: [0, 0, 0],
+				scale: [0.5, 0.5, 0.5],
+			});
+			const fullBox = panelBox(flatOf(full.png).flat, 64, 0, 0, 63, 63);
+			const halfBox = panelBox(flatOf(half.png).flat, 64, 0, 0, 63, 63);
+			check.ok(
+				sha256(full.png) !== sha256(half.png),
+				"a display scale changes the image",
+			);
+			check.ok(
+				halfBox.width < fullBox.width && halfBox.height < fullBox.height,
+				"a smaller display scale draws a smaller model",
+			);
+		},
+	},
+	{
+		name: "mirrored display scales flip the shading normal",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
+			const text = JSON.stringify({
+				gui_light: "side",
+				textures: { all: "demo:stone" },
+				elements: [
+					{
+						from: [0, 8, 0],
+						to: [16, 8, 16],
+						faces: { up: { texture: "#all" } },
+					},
+				],
+			});
+			const render = async (scale: readonly [number, number, number]) => {
+				const rendered = await renderModelPreview(
+					JSON.stringify({
+						...JSON.parse(text),
+						display: { gui: { rotation: [30, 0, 0], scale } },
+					}),
+					{
+						path: PREVIEW_PATH,
+						context,
+						size: 64,
+						display: "gui",
+						lighting: true,
+					},
+				);
+				const pixels = flatOf(rendered.png);
+				return panelColors(
+					pixels.flat,
+					pixels.width,
+					0,
+					0,
+					pixels.width - 1,
+					pixels.height - 1,
+				);
+			};
+			check.deepEqual(
+				await render([1, 1, 1]),
+				["200,200,200"],
+				"an up face gets the 1.0 shade",
+			);
+			check.deepEqual(
+				await render([1, -1, 1]),
+				["100,100,100"],
+				"mirroring y turns the same face into a down face and it gets the 0.5 shade",
+			);
+			check.deepEqual(
+				await render([1, 1, -1]),
+				["200,200,200"],
+				"mirroring z keeps the up dominant axis",
+			);
+			const transform = displayTransformFor("gui", {
+				rotation: [0, 0, 0],
+				scale: [-1, 1, 1],
+			});
+			check.equal(
+				displayMirrorsFaces(transform),
+				true,
+				"odd negative scale mirrors",
+			);
+			check.equal(
+				displayMirrorsFaces(
+					displayTransformFor("gui", { rotation: [0, 0, 0], scale: [1, 1, 1] }),
+				),
+				false,
+				"positive scale does not mirror",
+			);
+			check.equal(
+				displayMirrorsFaces(
+					displayTransformFor("gui", { rotation: [0, 0, 0], scale: [0, 1, 1] }),
+				),
+				false,
+				"a zero scale is degenerate, not a mirror",
+			);
+		},
+	},
+	{
+		name: "a zero display scale collapses the model without crashing",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(200, 200, 200) });
+			const rendered = await renderModelPreview(
+				JSON.stringify({
+					...JSON.parse(testCube()),
+					display: { gui: { rotation: [0, 0, 0], scale: [0, 1, 1] } },
+				}),
+				{
+					path: PREVIEW_PATH,
+					context,
+					size: 64,
+					display: "gui",
+					lighting: true,
+				},
+			);
+			check.equal(
+				rendered.report.coverage.status,
+				"complete",
+				"degenerate path stays complete",
+			);
+			check.deepEqual(
+				[...(rendered.report.range.min as readonly number[])],
+				[0, -8, -8],
+				"the collapsed x range is zero",
+			);
+			check.deepEqual(
+				[...(rendered.report.range.max as readonly number[])],
+				[0, 8, 8],
+				"the collapsed x range is zero",
+			);
+			const pixels = flatOf(rendered.png);
+			check.equal(
+				panelBox(pixels.flat, pixels.width, 0, 0, 63, 63).count,
+				0,
+				"the degenerate model draws no pixels",
+			);
+		},
+	},
+	{
+		name: "display reports list the poses and lighting still not simulated",
+		async run(check) {
+			const context = coloredCubeContext();
+			const text = withDisplay(coloredCubeModel(), displayFor([0, 0, 0]));
+			const expected: Record<string, readonly string[]> = {
+				gui: [],
+				firstperson_righthand: ["first-person-hand-pose"],
+				thirdperson_righthand: ["third-person-hand-pose"],
+				head: ["head-pose"],
+				ground: ["dropped-item-pose"],
+				fixed: ["item-frame-pose"],
+			};
+			for (const slot of DISPLAY_SLOTS) {
+				const rendered = await renderModelPreview(text, {
+					path: PREVIEW_PATH,
+					context,
+					size: 64,
+					display: slot,
+				});
+				for (const gap of [
+					"ambient-occlusion",
+					"world-lightmap",
+					"shadows",
+					"perspective-projection",
+					"camera-rig",
+					"left-hand-mirroring",
+					...expected[slot],
+				]) {
+					check.ok(
+						rendered.report.unapplied.includes(gap),
+						`${slot}: unapplied names ${gap}`,
+					);
+				}
+				check.ok(
+					!rendered.report.unapplied.some((entry) =>
+						/match|accurate|identical|game render/i.test(entry),
+					),
+					`${slot}: no unapplied entry claims a game match`,
+				);
+			}
+			const lit = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+				display: "gui",
+				lighting: true,
+			});
+			check.ok(
+				!lit.report.unapplied.includes("lighting"),
+				"applied lighting is not listed",
+			);
+			check.ok(
+				lit.report.unapplied.includes("dominant-axis-shading"),
+				"the shading approximation is listed",
+			);
+		},
+	},
+	{
+		name: "display data in the model does not change the default preview bytes",
+		async run(check) {
+			const context = memoryContext({ [STONE_REL]: solidPng(255, 0, 0) });
+			const text = JSON.stringify({
+				...JSON.parse(cubeModel("#all")),
+				display: { gui: { rotation: [30, 225, 0] } },
+				gui_light: "front",
+			});
+			const rendered = await renderModelPreview(text, {
+				path: PREVIEW_PATH,
+				context,
+				size: 64,
+			});
+			check.deepEqual(
+				[...rendered.report.unapplied],
+				["display", "lighting"],
+				"the compatibility path keeps the historical unapplied array",
+			);
+			check.equal(
+				sha256(rendered.png),
+				"503193a50eaf67a74227413d0001c9517a6adf231583f96c3e927e7bc76a1167",
+				"the default PNG stays byte-identical",
+			);
+			check.equal(
+				sha256(JSON.stringify(rendered.report)),
+				"e2eddba201867b7f960395d924c239f058f49363a94f75d502ff4dee3844cc99",
+				"the default report stays byte-identical",
+			);
+		},
+	},
+	{
+		name: "cli and mcp display, lighting and tint previews agree",
+		async run(check) {
+			await withTempRoot(async (root) => {
+				const modelText = JSON.stringify({
+					gui_light: "side",
+					textures: { all: "demo:stone" },
+					display: {
+						gui: {
+							rotation: [0, 0, 0],
+							translation: [0, 0, 0],
+							scale: [0.75, 0.75, 0.75],
+						},
+					},
+					elements: [
+						{
+							from: [0, 0, 0],
+							to: [16, 16, 16],
+							faces: {
+								north: { texture: "#all" },
+								south: { texture: "#all", tintindex: 0 },
+								east: { texture: "#all" },
+								up: { texture: "#all" },
+							},
+						},
+					],
+				});
+				const { pack, model } = await makePack(
+					root,
+					solidPng(200, 200, 200),
+					modelText,
+				);
+				const outcome = await runModelRequest({
+					mode: "preview",
+					inputPath: model,
+					packPath: pack,
+					size: 64,
+					display: "gui",
+					lighting: true,
+					tint: "#80c040",
+					stdout: true,
+					requireOutput: true,
+				});
+				check.equal(outcome.failed, false, "cli render succeeds");
+				const cliBytes = outcome.artifact as Uint8Array;
+				check.ok(cliBytes instanceof Uint8Array, "cli stdout artifact");
+				const cliReport = JSON.stringify(outcome.result);
+				const mcp = await handleModelAsset({
+					mode: "preview",
+					inputPath: model,
+					packPath: pack,
+					size: 64,
+					display: "gui",
+					lighting: true,
+					tint: "#80c040",
+				});
+				check.equal(mcp.isError, undefined, "mcp render succeeds");
+				const textBlock = mcp.content.find((entry) => entry.type === "text");
+				const imageBlock = mcp.content.find((entry) => entry.type === "image");
+				check.ok(textBlock?.type === "text", "mcp report");
+				check.ok(imageBlock?.type === "image", "mcp image");
+				if (textBlock?.type !== "text" || imageBlock?.type !== "image") return;
+				check.equal(
+					textBlock.text,
+					cliReport,
+					"cli and mcp reports are identical",
+				);
+				check.equal(
+					sha256(new Uint8Array(Buffer.from(imageBlock.data, "base64"))),
+					sha256(cliBytes),
+					"cli and mcp PNGs are identical",
+				);
+				const pixels = flatOf(cliBytes);
+				assertRgba(
+					check,
+					pixels.flat,
+					pixels.width,
+					32,
+					32,
+					[80, 120, 40, 255],
+					"the south tinted face is shaded then tinted",
+				);
+			});
+		},
+	},
+	{
+		name: "cli inline tints parse and produce the same report as the request core",
+		async run(check) {
+			await withTempRoot(async (root) => {
+				const modelText = JSON.stringify({
+					textures: { all: "demo:stone" },
+					elements: [
+						{
+							from: [0, 0, 0],
+							to: [16, 16, 16],
+							faces: {
+								south: { texture: "#all", tintindex: 2 },
+								east: { texture: "#all", tintindex: 10 },
+							},
+						},
+					],
+				});
+				const { pack, model } = await makePack(
+					root,
+					solidPng(200, 200, 200),
+					modelText,
+				);
+				const out = join(root, "tints.png");
+				const capture = captureStreams();
+				const code = await runModel(
+					"preview",
+					model,
+					{
+						pack,
+						size: "64",
+						view: "isometric",
+						viewDirection: "south-east",
+						tints: '{"10":"#010203","2":"#040506"}',
+						output: out,
+					},
+					true,
+					capture.streams,
+				);
+				check.equal(code, 0, "cli --tints exits cleanly");
+				const envelope = JSON.parse(
+					Buffer.from(capture.stdout()).toString("utf8"),
+				) as {
+					result: {
+						tint?: { tints?: Record<string, string>; appliedFaces: number };
+					};
+				};
+				check.deepEqual(envelope.result.tint, {
+					tints: { "2": "#040506", "10": "#010203" },
+					appliedFaces: 2,
+					uncoloredFaces: 0,
+				});
+				check.deepEqual(
+					Object.keys(envelope.result.tint?.tints ?? {}),
+					["2", "10"],
+					"the CLI report also orders tint indices numerically",
+				);
+			});
+		},
+	},
+	{
+		name: "invalid display and tint inputs are refused",
+		async run(check) {
+			await withTempRoot(async (root) => {
+				const { pack, model } = await makePack(
+					root,
+					solidPng(200, 200, 200),
+					testCube(),
+				);
+				await expectCode(
+					check,
+					() =>
+						renderModelPreview(testCube(), {
+							path: PREVIEW_PATH,
+							size: 64,
+							display: "on_shelf" as never,
+						}),
+					"INVALID_ARGUMENT",
+					"unsupported display slot",
+				);
+				await expectCode(
+					check,
+					() =>
+						renderModelPreview(testCube(), {
+							path: PREVIEW_PATH,
+							size: 64,
+							display: "gui",
+							view: { kind: "isometric", direction: "south-east" },
+						}),
+					"ARGUMENT_CONFLICT",
+					"display with view",
+				);
+				await expectCode(
+					check,
+					() =>
+						runModelRequest({
+							mode: "preview",
+							inputPath: model,
+							packPath: pack,
+							size: 64,
+							display: "left_hand" as never,
+							stdout: true,
+							requireOutput: true,
+						}),
+					"INVALID_ARGUMENT",
+					"cli unsupported display slot",
+				);
+				await expectCode(
+					check,
+					() =>
+						runModelRequest({
+							mode: "preview",
+							inputPath: model,
+							packPath: pack,
+							size: 64,
+							display: "gui",
+							view: "isometric",
+							stdout: true,
+							requireOutput: true,
+						}),
+					"ARGUMENT_CONFLICT",
+					"cli display with view",
+				);
+				await expectCode(
+					check,
+					() =>
+						runModelRequest({
+							mode: "preview",
+							inputPath: model,
+							packPath: pack,
+							size: 64,
+							tint: "#12345",
+							stdout: true,
+							requireOutput: true,
+						}),
+					"INVALID_ARGUMENT",
+					"cli invalid tint colour",
+				);
+				await expectCode(
+					check,
+					() =>
+						runModelRequest({
+							mode: "preview",
+							inputPath: model,
+							packPath: pack,
+							size: 64,
+							tint: "#80c040",
+							tints: { "0": "#ffffff" },
+							stdout: true,
+							requireOutput: true,
+						}),
+					"ARGUMENT_CONFLICT",
+					"cli tint and tints together",
+				);
+				await expectCode(
+					check,
+					() =>
+						runModelRequest({
+							mode: "inspect",
+							inputPath: model,
+							packPath: pack,
+							size: 64,
+							stdout: true,
+							requireOutput: true,
+						}),
+					"INVALID_ARGUMENT",
+					"size is preview-only",
+				);
+				const legacy = await handleModelAsset({
+					mode: "inspect",
+					inputPath: model,
+					packPath: pack,
+					size: 64,
+				});
+				check.equal(legacy.isError, true, "mcp refuses size on inspect");
+				const legacyText = legacy.content.find(
+					(entry) => entry.type === "text",
+				);
+				check.ok(legacyText?.type === "text", "mcp error text");
+				if (legacyText?.type === "text") {
+					check.equal(
+						(JSON.parse(legacyText.text) as { message: string }).message,
+						"size, view, viewDirection, and outputPngPath are only accepted by preview, not inspect.",
+						"the historical preview-only message stays byte-identical",
+					);
+				}
+				const displayOnly = await handleModelAsset({
+					mode: "inspect",
+					inputPath: model,
+					packPath: pack,
+					display: "gui",
+				});
+				const displayText = displayOnly.content.find(
+					(entry) => entry.type === "text",
+				);
+				check.ok(displayText?.type === "text", "mcp display error text");
+				if (displayText?.type === "text") {
+					check.equal(
+						(JSON.parse(displayText.text) as { message: string }).message,
+						"display is only accepted by preview, not inspect.",
+						"a new preview-only field names itself",
+					);
+				}
+			});
+		},
+	},
+	{
+		name: "cli inline tints refuse malformed JSON and keys",
+		async run(check) {
+			await withTempRoot(async (root) => {
+				const { pack, model } = await makePack(
+					root,
+					solidPng(200, 200, 200),
+					testCube(),
+				);
+				const runTints = async (tints: string) => {
+					const capture = captureStreams();
+					const code = await runModel(
+						"preview",
+						model,
+						{
+							pack,
+							size: "64",
+							tints,
+							stdout: true,
+						},
+						true,
+						capture.streams,
+					);
+					return {
+						code,
+						text: capture.stderrText(),
+					};
+				};
+				for (const [tints, expected] of [
+					["not-json", "--tints expects a JSON object"],
+					["[]", "--tints expects a JSON object"],
+					['{"x":"#ffffff"}', "--tints keys must be non-negative integers"],
+					['{"0":"red"}', "tints[0] expects a #RRGGBB colour"],
+				] as const) {
+					const result = await runTints(tints);
+					check.ok(result.code !== 0, `${tints}: non-zero exit`);
+					check.ok(
+						result.text.includes(expected),
+						`${tints}: message names the problem`,
+					);
+				}
+			});
+		},
+	},
+	{
+		name: "parseTintColor accepts both forms and rejects everything else",
+		async run(check) {
+			check.deepEqual(parseTintColor("#80C040"), [0x80, 0xc0, 0x40]);
+			check.deepEqual(parseTintColor("80c040"), [0x80, 0xc0, 0x40]);
+			for (const value of ["#80c04", "#80c0400", "#gggggg", "", "red"]) {
+				check.equal(parseTintColor(value), undefined, `${value} is rejected`);
+			}
+		},
+	},
+];
+
+/** A plain cube used by the error and unused-tint cases. */
+function testCube(): string {
+	return JSON.stringify({
+		textures: { all: "demo:stone" },
+		elements: [
+			{
+				from: [0, 0, 0],
+				to: [16, 16, 16],
+				faces: fullCubeFaces("#all"),
+			},
+		],
+	});
+}

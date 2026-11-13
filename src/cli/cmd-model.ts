@@ -38,6 +38,12 @@ import {
 } from "../model/inspect.ts";
 import { MODEL_LIMITS } from "../model/limits.ts";
 import {
+	PREVIEW_DISPLAY_SLOTS,
+	type PreviewDisplaySlot,
+	parseTintColor,
+	type RgbTint,
+} from "../model/preview/display.ts";
+import {
 	type ModelPreviewReport,
 	type ModelPreviewSize,
 	type ModelPreviewView,
@@ -92,6 +98,14 @@ export interface ModelCliOptions {
 	view?: string | undefined;
 	/** Isometric camera direction; only with view=isometric. */
 	viewDirection?: string | undefined;
+	/** Display slot to simulate; mutually exclusive with view. */
+	display?: string | undefined;
+	/** Apply the fixed per-face shade factors selected by gui_light. */
+	lighting?: boolean | undefined;
+	/** #rrggbb colour for every face that declares tintindex. */
+	tint?: string | undefined;
+	/** Inline JSON object mapping a tintindex to a #rrggbb colour. */
+	tints?: string | undefined;
 	output?: string | undefined;
 	stdout?: boolean | undefined;
 	itemOutput?: string | undefined;
@@ -204,6 +218,14 @@ export interface ModelRequest {
 	/** three-view (default) or isometric; the shared preview parser validates it. */
 	readonly view?: string | undefined;
 	readonly viewDirection?: string | undefined;
+	/** Display slot to simulate; mutually exclusive with view. */
+	readonly display?: string | undefined;
+	/** Apply the fixed per-face shade factors selected by gui_light. */
+	readonly lighting?: boolean | undefined;
+	/** #rrggbb colour for every face that declares tintindex. */
+	readonly tint?: string | undefined;
+	/** Colour per tintindex, already parsed from the CLI's inline JSON. */
+	readonly tints?: Readonly<Record<string, string>> | undefined;
 	readonly outputPath?: string | undefined;
 	readonly itemOutputPath?: string | undefined;
 	readonly blockstateOutputPath?: string | undefined;
@@ -242,6 +264,10 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"size",
 		"view",
 		"viewDirection",
+		"display",
+		"lighting",
+		"tint",
+		"tints",
 		"outputPath",
 		"itemOutputPath",
 		"blockstateOutputPath",
@@ -256,6 +282,10 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"size",
 		"view",
 		"viewDirection",
+		"display",
+		"lighting",
+		"tint",
+		"tints",
 		"outputPath",
 		"itemOutputPath",
 		"blockstateOutputPath",
@@ -270,6 +300,10 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"size",
 		"view",
 		"viewDirection",
+		"display",
+		"lighting",
+		"tint",
+		"tints",
 		"packPath",
 		"vanillaPath",
 		"dependencyPaths",
@@ -284,6 +318,10 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"size",
 		"view",
 		"viewDirection",
+		"display",
+		"lighting",
+		"tint",
+		"tints",
 		"packPath",
 		"vanillaPath",
 		"dependencyPaths",
@@ -298,6 +336,10 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"size",
 		"view",
 		"viewDirection",
+		"display",
+		"lighting",
+		"tint",
+		"tints",
 		"vanillaPath",
 		"dependencyPaths",
 		"textureOutputDir",
@@ -318,6 +360,10 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"operations",
 		"binding",
 		"size",
+		"display",
+		"lighting",
+		"tint",
+		"tints",
 		"packPath",
 		"vanillaPath",
 		"dependencyPaths",
@@ -330,6 +376,10 @@ const REFUSED_FIELDS: Readonly<Record<ModelMode, readonly RequestField[]>> = {
 		"operations",
 		"binding",
 		"size",
+		"display",
+		"lighting",
+		"tint",
+		"tints",
 		"packPath",
 		"vanillaPath",
 		"dependencyPaths",
@@ -729,7 +779,9 @@ function outputChoice(request: ModelRequest): {
 async function runPreview(request: ModelRequest): Promise<ModelOutcome> {
 	const modelPath = requireInput(request);
 	const size = previewSize(request);
+	const display = previewDisplay(request);
 	const view = previewView(request);
+	const tint = previewTint(request);
 	const packRoot =
 		request.packPath === undefined
 			? undefined
@@ -777,6 +829,10 @@ async function runPreview(request: ModelRequest): Promise<ModelOutcome> {
 		...(context === undefined ? {} : { context }),
 		size,
 		...(view === undefined ? {} : { view }),
+		...(display === undefined ? {} : { display }),
+		...(request.lighting === true ? { lighting: true } : {}),
+		...(tint.tint === undefined ? {} : { tint: tint.tint }),
+		...(tint.tints === undefined ? {} : { tints: tint.tints }),
 	});
 	// The PNG and the report are computed before anything is written.
 	const payloads = new Map<string, Uint8Array>();
@@ -840,6 +896,117 @@ function previewView(request: ModelRequest): ModelPreviewView | undefined {
 		);
 	}
 	return { kind: "isometric", direction: direction as IsometricDirection };
+}
+
+/** Display slots the preview can simulate; the game only has these six + the unused on_shelf. */
+function previewDisplay(request: ModelRequest): PreviewDisplaySlot | undefined {
+	if (request.display === undefined) return undefined;
+	if (!(PREVIEW_DISPLAY_SLOTS as readonly string[]).includes(request.display)) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			`display must be one of ${PREVIEW_DISPLAY_SLOTS.join(", ")}: ${String(request.display)}.`,
+			{ field: "display", display: request.display },
+		);
+	}
+	if (request.view !== undefined || request.viewDirection !== undefined) {
+		throw new McAssetError(
+			"ARGUMENT_CONFLICT",
+			"display cannot be combined with view or viewDirection.",
+			{ field: "display", mode: "preview" },
+		);
+	}
+	return request.display as PreviewDisplaySlot;
+}
+
+/** Parse the CLI's inline `--tints` JSON object; the MCP passes the object itself. */
+function parseTintsDocument(raw: string): Readonly<Record<string, string>> {
+	let value: unknown;
+	try {
+		value = JSON.parse(raw);
+	} catch {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			"--tints expects a JSON object mapping a tintindex to a #RRGGBB colour.",
+			{ field: "tints" },
+		);
+	}
+	if (value === null || typeof value !== "object" || Array.isArray(value)) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			"--tints expects a JSON object mapping a tintindex to a #RRGGBB colour.",
+			{ field: "tints" },
+		);
+	}
+	const result: Record<string, string> = {};
+	const seen = new Set<number>();
+	for (const [key, rawValue] of Object.entries(value)) {
+		if (!/^\d+$/.test(key)) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				`--tints keys must be non-negative integers: ${key}.`,
+				{ field: "tints", key },
+			);
+		}
+		const index = Number(key);
+		if (!Number.isSafeInteger(index)) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				`--tints key is too large: ${key}.`,
+				{ field: "tints", key },
+			);
+		}
+		if (seen.has(index)) {
+			throw new McAssetError(
+				"ARGUMENT_CONFLICT",
+				`--tints names tintindex ${index} twice.`,
+				{ field: "tints", index },
+			);
+		}
+		seen.add(index);
+		if (typeof rawValue !== "string") {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				`--tints[${key}] must be a #RRGGBB colour.`,
+				{ field: "tints", key },
+			);
+		}
+		result[String(index)] = rawValue;
+	}
+	return result;
+}
+
+/** Parse the tint colour strings; shared by the CLI and the MCP tool. */
+function previewTint(request: ModelRequest): {
+	readonly tint?: RgbTint;
+	readonly tints?: Record<string, RgbTint>;
+} {
+	if (request.tint !== undefined && request.tints !== undefined) {
+		throw new McAssetError(
+			"ARGUMENT_CONFLICT",
+			"Use only one of tint or tints.",
+			{ field: "tints", mode: "preview" },
+		);
+	}
+	const parseColour = (value: string, field: string): RgbTint => {
+		const color = parseTintColor(value);
+		if (color === undefined) {
+			throw new McAssetError(
+				"INVALID_ARGUMENT",
+				`${field} expects a #RRGGBB colour: ${value}.`,
+				{ field },
+			);
+		}
+		return color;
+	};
+	if (request.tint !== undefined) {
+		return { tint: parseColour(request.tint, "tint") };
+	}
+	if (request.tints === undefined) return {};
+	const tints: Record<string, RgbTint> = {};
+	for (const [key, value] of Object.entries(request.tints)) {
+		tints[key] = parseColour(value, `tints[${key}]`);
+	}
+	return { tints };
 }
 
 function modelTargets(
@@ -1532,6 +1699,15 @@ function reportLines(
 			...(report.view === undefined
 				? []
 				: [`view: ${report.view.kind} (${report.view.direction})`]),
+			...(report.display === undefined
+				? []
+				: [`display: ${report.display.slot}`]),
+			...(report.lighting === undefined
+				? []
+				: [`lighting: ${report.lighting.mode}`]),
+			...(report.tint === undefined
+				? []
+				: [`tint: ${String(report.tint.appliedFaces)} face(s)`]),
 			coverageLine(report.coverage),
 		];
 	}
@@ -1662,6 +1838,13 @@ export async function runModel(
 			size: options.size === undefined ? undefined : Number(options.size),
 			view: options.view,
 			viewDirection: options.viewDirection,
+			display: options.display,
+			lighting: options.lighting,
+			tint: options.tint,
+			tints:
+				options.tints === undefined
+					? undefined
+					: parseTintsDocument(options.tints),
 			stdout: options.stdout,
 			force: options.force,
 			mkdir: options.mkdir,

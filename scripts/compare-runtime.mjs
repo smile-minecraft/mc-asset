@@ -34,8 +34,9 @@
 //   - model: create, apply and export text outputs, and the inspect and
 //   - validate reports in canonical JSON (fixed spec, operations, binding),
 //   - plus the model preview PNG bytes (fixed cube render with its texture,
-//   - and an isometric preview of a rotated two-part model with the same
-//   - texture, source model and texture untouched)
+//   - an isometric preview of a rotated two-part model with the same texture,
+//   - and a display-slot preview with gui transform, side lighting and a
+//   - tinted face plus its report envelope; sources stay untouched)
 // Any difference exits non-zero so CI fails. stderr, timing, and absolute
 // paths never enter the comparison. Temp dirs are always cleaned up.
 import { PNG } from "pngjs";
@@ -556,6 +557,75 @@ function compareModel(bunDir, nodeDir, workdir) {
 		"model-preview-iso.png",
 		join(bunDir, "model-preview-iso.png"),
 		join(nodeDir, "model-preview-iso.png"),
+	);
+
+	// Display preview: the gui transform, directional lighting and a tinted
+	// face all pass through the integer pipeline, so the PNG and the report
+	// envelope must stay byte-identical between the Bun source CLI and the
+	// Node bundle.
+	const displayModelText = JSON.stringify({
+		gui_light: "side",
+		textures: { all: "mypack:block/ruby" },
+		display: {
+			gui: {
+				rotation: [30, 225, 0],
+				translation: [0, 0, 0],
+				scale: [0.75, 0.75, 0.75],
+			},
+		},
+		elements: [
+			{
+				from: [0, 0, 0],
+				to: [16, 16, 16],
+				faces: {
+					north: { texture: "#all" },
+					south: { texture: "#all", tintindex: 0 },
+					east: { texture: "#all" },
+					up: { texture: "#all" },
+				},
+			},
+		],
+	});
+	const displayRel = join(
+		"pack",
+		"assets",
+		"mypack",
+		"models",
+		"block",
+		"preview-display.json",
+	);
+	for (const dir of [bunDir, nodeDir]) {
+		writeFileSync(join(dir, displayRel), displayModelText);
+	}
+	const displayArgs = (dir) => [
+		"model",
+		"preview",
+		join(dir, displayRel),
+		"--pack",
+		join(dir, "pack"),
+		...version,
+		"--size",
+		"64",
+		"--display",
+		"gui",
+		"--lighting",
+		"--tint",
+		"#80c040",
+		"--output",
+		join(dir, "model-preview-display.png"),
+		"--json",
+	];
+	const bunDisplay = runBun(displayArgs(bunDir), "model-preview-display");
+	const nodeDisplay = runNode(displayArgs(nodeDir), "model-preview-display");
+	compareFile(
+		"model-preview-display.png",
+		join(bunDir, "model-preview-display.png"),
+		join(nodeDir, "model-preview-display.png"),
+	);
+	compareCanonicalJson(
+		"model-preview-display.json",
+		String(bunDisplay.stdout).split(bunDir).join("<dir>"),
+		String(nodeDisplay.stdout).split(nodeDir).join("<dir>"),
 	);
 }
 

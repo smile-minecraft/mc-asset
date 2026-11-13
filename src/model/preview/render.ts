@@ -8,10 +8,22 @@ import { decodePng, encodePng, flattenCanvas } from "../../io/png.ts";
 import {
 	inspectModel,
 	type ModelCoverage,
+	type ModelElementView,
 	type ModelFaceView,
 } from "../inspect.ts";
 import { textureResourcePath } from "../references.ts";
 import { DIRECTIONS, type Direction, type Vec3 } from "../types.ts";
+import {
+	builtinDisplaySource,
+	builtinGuiLight,
+	type DisplayTransformSource,
+	displayTransformFor,
+	formatTintColor,
+	type LightingMode,
+	PREVIEW_DISPLAY_SLOTS,
+	type PreviewDisplaySlot,
+	type RgbTint,
+} from "./display.ts";
 import {
 	autoUv,
 	checkerColor,
@@ -72,16 +84,20 @@ export type {
  * pass, per pixel, from far to near. Without a `view` option the geometry
  * renderer also produces the three-view layout, so a rotated element shows up
  * in all three panels; with `view: { kind: "isometric" }` it renders one square
- * 2:1 isometric panel for the requested camera direction.
+ * 2:1 isometric panel for the requested camera direction; with `display` it
+ * renders one square panel through the game display slot's transform and
+ * optionally applies the fixed face shading and a tint colour.
  *
  * The report stays honest: anything not faithfully rendered is listed in
  * `coverage.skipped` (including a panel the content is clipped by), every
- * texture problem also raises a warning, and `unapplied` states that display
- * transforms and game lighting are not applied. The geometry renderer adds
- * `tintindex` when the model uses it; the compatibility renderer keeps its
- * historical `display` / `lighting` list so its reports stay byte-identical.
- * This is a diagnostic view, not a game renderer, and it never rewrites the
- * model.
+ * texture problem also raises a warning, and `unapplied` names the steps this
+ * diagnostic view still does not apply: display transforms or lighting when
+ * not requested, uncoloured `tintindex` faces, ambient occlusion, world light,
+ * shadows, perspective projection, the per-slot camera rig, left-hand
+ * mirroring, and the hand, head, item-frame and dropped-item poses. The
+ * compatibility renderer keeps its historical `display` / `lighting` list so
+ * its reports stay byte-identical. This is a diagnostic view, not a game
+ * renderer, and it never rewrites the model.
  */
 
 function isSupportedSize(value: unknown): value is ModelPreviewSize {
@@ -145,6 +161,87 @@ function unappliedSteps(faces: readonly ModelFaceView[]): string[] {
 }
 
 /**
+ * The extra pose each display slot adds in the game on top of the model
+ * transform: the hand, the head, the dropped item and the item frame all
+ * have their own camera or anchor that this diagnostic view does not model.
+ */
+const DISPLAY_POSE_UNAPPLIED: Readonly<
+	Record<PreviewDisplaySlot, readonly string[]>
+> = {
+	gui: [],
+	firstperson_righthand: ["first-person-hand-pose"],
+	thirdperson_righthand: ["third-person-hand-pose"],
+	head: ["head-pose"],
+	ground: ["dropped-item-pose"],
+	fixed: ["item-frame-pose"],
+};
+
+/**
+ * The honest gap list once a display slot, lighting or a tint is requested.
+ * The first two entries keep the historical meaning of the report; the rest
+ * name what this diagnostic renderer still does not simulate. The strings
+ * never claim the image matches the game client.
+ */
+function previewUnapplied(input: {
+	readonly elements: readonly ModelElementView[];
+	readonly display: PreviewDisplaySlot | undefined;
+	readonly displayApplied: boolean;
+	readonly lighting: boolean;
+	readonly guiLight: "front" | "side";
+	readonly uncoloredFaces: number;
+}): string[] {
+	const steps: string[] = [];
+	if (input.display === undefined) steps.push("display");
+	if (!input.lighting) steps.push("lighting");
+	if (input.uncoloredFaces > 0) steps.push("tintindex");
+	steps.push(
+		"ambient-occlusion",
+		"world-lightmap",
+		"shadows",
+		"perspective-projection",
+	);
+	if (input.display !== undefined) {
+		steps.push("camera-rig", "left-hand-mirroring");
+		steps.push(...DISPLAY_POSE_UNAPPLIED[input.display]);
+		if (!input.displayApplied) steps.push("display-slot-missing");
+	}
+	if (input.lighting) {
+		steps.push(
+			input.guiLight === "front"
+				? "flat-item-lighting-variation"
+				: "dominant-axis-shading",
+		);
+	}
+	if (
+		input.elements.some(
+			(element) =>
+				element.shade === false || element.shadeDirectionOverride !== undefined,
+		)
+	) {
+		steps.push("element-shade");
+	}
+	if (input.elements.some((element) => (element.lightEmission ?? 0) > 0)) {
+		steps.push("light-emission");
+	}
+	return steps;
+}
+
+/** Report tint colours in index order, so object key order cannot vary. */
+function sortedTints(
+	tints: Readonly<Record<string, RgbTint>>,
+): Record<string, string> {
+	const result: Record<string, string> = {};
+	for (const [key, value] of Object.entries(tints).sort(
+		(a, b) => Number(a) - Number(b),
+	)) {
+		// Keys are decimal tint indices; `Number` orders "2" before "10".
+
+		result[key] = formatTintColor(value);
+	}
+	return result;
+}
+
+/**
  * Render the diagnostic preview PNG plus its report. The compatibility
  * renderer and the geometry renderer share the inspection result, the decoded
  * texture cache and the report shape; anything not faithfully rendered is
@@ -162,7 +259,26 @@ export async function renderModelPreview(
 		);
 	}
 	const size = options.size;
-	const view: ModelPreviewView = options.view ?? { kind: "three-view" };
+	if (
+		options.display !== undefined &&
+		!(PREVIEW_DISPLAY_SLOTS as readonly string[]).includes(options.display)
+	) {
+		throw new McAssetError(
+			"INVALID_ARGUMENT",
+			`display must be one of ${PREVIEW_DISPLAY_SLOTS.join(", ")}: ${String(options.display)}.`,
+			{ field: "display", display: options.display },
+		);
+	}
+	if (options.display !== undefined && options.view !== undefined) {
+		throw new McAssetError(
+			"ARGUMENT_CONFLICT",
+			"display cannot be combined with view.",
+		);
+	}
+	const view: ModelPreviewView =
+		options.display === undefined
+			? (options.view ?? { kind: "three-view" })
+			: { kind: "display", slot: options.display };
 	const inspection = await inspectModel(text, {
 		path: options.path,
 		...(options.modelId === undefined ? {} : { modelId: options.modelId }),
@@ -182,6 +298,79 @@ export async function renderModelPreview(
 		detail?: string;
 	}[] = [];
 	const warnings: ModelPreviewWarning[] = [];
+
+	const builtinParent =
+		inspection.parent?.status === "builtin"
+			? inspection.parent.value
+			: undefined;
+	const inspectionDisplay =
+		options.display === undefined
+			? undefined
+			: inspection.display.find((entry) => entry.position === options.display);
+	let displaySource: DisplayTransformSource | undefined = inspectionDisplay;
+	let displayFrom = inspectionDisplay?.from;
+	if (
+		options.display !== undefined &&
+		displaySource === undefined &&
+		builtinParent !== undefined
+	) {
+		const builtin = builtinDisplaySource(builtinParent, options.display);
+		if (builtin !== undefined) {
+			displaySource = builtin.source;
+			displayFrom = builtin.from;
+		}
+	}
+	const display =
+		options.display === undefined
+			? undefined
+			: displayTransformFor(options.display, displaySource, displayFrom);
+	const guiLight =
+		inspection.properties.guiLight ??
+		(builtinParent === undefined
+			? undefined
+			: builtinGuiLight(builtinParent)) ??
+		"side";
+	const lightingMode: LightingMode | undefined =
+		options.lighting === true
+			? guiLight === "front"
+				? "flat"
+				: "directional"
+			: undefined;
+	if (options.tint !== undefined && options.tints !== undefined) {
+		throw new McAssetError(
+			"ARGUMENT_CONFLICT",
+			"Use only one of tint or tints.",
+			{ field: "tints", mode: "preview" },
+		);
+	}
+	const tintByIndex = new Map<number, RgbTint>();
+	if (options.tints !== undefined) {
+		for (const [key, value] of Object.entries(options.tints)) {
+			const index = Number(key);
+			if (!Number.isSafeInteger(index) || index < 0) {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					`tints keys must be non-negative integers: ${key}.`,
+					{ field: "tints", key },
+				);
+			}
+			if (tintByIndex.has(index)) {
+				throw new McAssetError(
+					"ARGUMENT_CONFLICT",
+					`tints names tintindex ${index} twice.`,
+					{ field: "tints", index },
+				);
+			}
+			tintByIndex.set(index, value);
+		}
+	}
+	const tint =
+		options.tint === undefined && options.tints === undefined
+			? undefined
+			: {
+					...(options.tint === undefined ? {} : { color: options.tint }),
+					byIndex: tintByIndex,
+				};
 
 	const translucentVars = new Set<string>();
 	for (const entry of inspection.textures) {
@@ -316,6 +505,10 @@ export async function renderModelPreview(
 	// switch it.
 	let needsGeometry =
 		view.kind === "isometric" ||
+		view.kind === "display" ||
+		options.lighting === true ||
+		options.tint !== undefined ||
+		options.tints !== undefined ||
 		drawn.some((entry) => entry.element.rotation !== undefined);
 	if (!needsGeometry) {
 		outer: for (const entry of drawn) {
@@ -343,14 +536,22 @@ export async function renderModelPreview(
 	// The compatibility renderer keeps its historical report, byte for byte:
 	// `tintindex` is only listed when the geometry renderer runs, which is the
 	// path a new view, a rotated element or a visible translucent face takes.
-	const unapplied = needsGeometry
-		? unappliedSteps(allFaces)
-		: ["display", "lighting"];
+	const newPreviewOptions =
+		options.display !== undefined ||
+		options.lighting === true ||
+		options.tint !== undefined ||
+		options.tints !== undefined;
+	let unapplied: string[] = ["display", "lighting"];
+	if (needsGeometry) {
+		unapplied = newPreviewOptions ? [] : unappliedSteps(allFaces);
+	}
 
 	let image: { readonly width: number; readonly height: number };
 	let panels: readonly ModelPreviewPanel[];
 	let range: ModelPreviewRange;
 	let flat: Uint8Array;
+	let tintedFaces = 0;
+	let uncoloredFaces = 0;
 
 	if (needsGeometry) {
 		const scene = await renderPreviewScene({
@@ -365,6 +566,11 @@ export async function renderModelPreview(
 			loadTexture: (resolvedTo) =>
 				decodedTexture(textureResourcePath(resolvedTo)),
 			isForceTranslucent,
+			...(display === undefined ? {} : { display }),
+			...(lightingMode === undefined
+				? {}
+				: { lighting: { mode: lightingMode } }),
+			...(tint === undefined ? {} : { tint }),
 		});
 		for (const skip of scene.skipped) {
 			addSkip(skipped, skip.kind, skip.reason, skip.target, skip.detail);
@@ -377,10 +583,34 @@ export async function renderModelPreview(
 				warning.message,
 			);
 		}
+		if (newPreviewOptions) {
+			unapplied = previewUnapplied({
+				elements: inspection.elements,
+				display: options.display,
+				displayApplied: displaySource !== undefined,
+				lighting: options.lighting === true,
+				guiLight,
+				uncoloredFaces: scene.uncoloredFaces,
+			});
+			if (
+				(options.tint !== undefined || options.tints !== undefined) &&
+				scene.tintedFaces === 0 &&
+				scene.uncoloredFaces === 0
+			) {
+				addPreviewWarning(
+					warnings,
+					"MODEL_PREVIEW_TINT_UNUSED",
+					"tintindex",
+					"Tint colours were given but no face declares tintindex.",
+				);
+			}
+		}
 		image = { width: scene.width, height: scene.height };
 		panels = scene.panels;
 		range = scene.range;
 		flat = scene.pixels;
+		tintedFaces = scene.tintedFaces;
+		uncoloredFaces = scene.uncoloredFaces;
 	} else {
 		const imageWidth = size * 3;
 		const imageHeight = size;
@@ -732,6 +962,36 @@ export async function renderModelPreview(
 			...(view.kind === "isometric"
 				? { view: { kind: "isometric" as const, direction: view.direction } }
 				: {}),
+			...(display === undefined || options.display === undefined
+				? {}
+				: {
+						display: {
+							slot: options.display,
+							...(displayFrom === undefined ? {} : { from: displayFrom }),
+							rotation: display.rotation,
+							translation: display.translation,
+							scale: display.scale,
+							applied: displaySource !== undefined,
+							clamped: display.clamped,
+						},
+					}),
+			...(lightingMode === undefined
+				? {}
+				: { lighting: { mode: lightingMode, guiLight } }),
+			...(tint === undefined
+				? {}
+				: {
+						tint: {
+							...(options.tint === undefined
+								? {}
+								: { color: formatTintColor(options.tint) }),
+							...(options.tints === undefined
+								? {}
+								: { tints: sortedTints(options.tints) }),
+							appliedFaces: tintedFaces,
+							uncoloredFaces,
+						},
+					}),
 		},
 		png: encodePng(canvas),
 	};
