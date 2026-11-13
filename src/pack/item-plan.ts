@@ -6,7 +6,7 @@
  */
 
 import { McAssetError } from "../core/errors.ts";
-import type { RecipeStep } from "./recipe.ts";
+import type { RecipeStep, RecipeTarget } from "./recipe.ts";
 
 const NAMESPACE_PATTERN = /^[a-z0-9_.-]+$/;
 
@@ -80,4 +80,23 @@ export function collectItemOutputsForStep(
 			: targetId;
 	assertValidItemName(item, targetId, -1);
 	return [{ item }];
+}
+
+/**
+ * Whether a target produces JSON documents only.
+ *
+ * A target that declares no source has no image pipeline: the recipe reader
+ * refuses image steps without a source, so its steps are `model` and
+ * `itemDefinition` only. Such a target plans JSON outputs only — no texture
+ * output, no canvas, no PNG. A target that declares a source keeps its texture
+ * output even when every step is a JSON step, because the source image is the
+ * texture it copies into the pack.
+ */
+export function isJsonOnlyTarget(target: RecipeTarget): boolean {
+	return (
+		target.source === undefined &&
+		target.steps.every(
+			(step) => step.type === "model" || step.type === "itemDefinition",
+		)
+	);
 }

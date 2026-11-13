@@ -57,6 +57,22 @@ export function isRelativeProjectPath(value: string): boolean {
 }
 
 /**
+ * Whether a planned output path names a file below `directory` inside the
+ * project. The build resolves an output as `join(projectDir, path)`, so
+ * callers check the final path — the output directory plus the declared
+ * fragment or the computed default — rather than the fragment alone. A path
+ * that climbs out with `..`, names an absolute location, or carries an empty
+ * segment is refused; so is the directory itself, which is not a file below
+ * itself.
+ */
+export function isPathInsideDirectory(
+	path: string,
+	directory: string,
+): boolean {
+	return isRelativeProjectPath(path) && path.startsWith(`${directory}/`);
+}
+
+/**
  * A style reference in the shape the single-asset tools resolve: a builtin
  * preset id, or a `.style.json` path relative to the project root. Whether
  * a custom file exists is checked when it is read, not when it is recorded.

@@ -320,6 +320,48 @@ mc-asset style audit ./AurelianPack/pack/assets/aurelian/textures/item/*_sword.p
 - **High Contrast & Dynamic Range**: Styles like `vanilla` require dynamic range ≥ 450‰ (`STYLE_DYNAMIC_RANGE`). Darker material ramps (such as netherite, stone, or dark wood) must include a pure white (`#FFFFFF`) or near-white specular highlight plus a light buffer pixel to meet the dynamic range and highlight ratio thresholds.
 - **Cool Family × Warm Wood Handle Strategy**: When pairing cool-colored heads (diamond, amethyst, iron) with a warm wooden handle (brown), keep handle colors near the outline below 38 saturation in integer HSL: pixels with saturation < 38 are excluded from hue drift metrics, preventing false `STYLE_OUTLINE_TINT` warnings.
 
+### Six-Level Family Ramps
+
+The palette library promotes six-level family ramps, but the `vanilla` style's
+category overrides still ask gear for 8–10 levels and a dynamic range of
+650–750‰. A project that ships every family as six levels therefore collects a
+long list of `STYLE_LEVELS_TOO_FEW` and `STYLE_DYNAMIC_RANGE` warnings that the
+art cannot clear without padding the ramp.
+
+Keep the six-level textures and lower the thresholds with a project style.
+Save this document as `styles/family-ramp.style.json`:
+
+```json
+{
+  "formatVersion": 1,
+  "id": "family-ramp",
+  "name": "Family ramp (six levels)",
+  "extends": "vanilla",
+  "limits": { "minLevels": 6, "dynamicRangeMinPermille": 450 },
+  "categoryOverrides": {
+    "sword": { "limits": { "minLevels": 6, "dynamicRangeMinPermille": 450 } },
+    "pickaxe": { "limits": { "minLevels": 6, "dynamicRangeMinPermille": 450 } },
+    "axe": { "limits": { "minLevels": 6, "dynamicRangeMinPermille": 450 } },
+    "shovel": { "limits": { "minLevels": 6, "dynamicRangeMinPermille": 450 } },
+    "hoe": { "limits": { "minLevels": 6, "dynamicRangeMinPermille": 450 } },
+    "ingot": { "limits": { "minLevels": 6, "dynamicRangeMinPermille": 450 } }
+  }
+}
+```
+
+Then point the project document at it:
+
+```json
+{
+  "style": "styles/family-ramp.style.json"
+}
+```
+
+The path resolves against the directory holding the project document, so the
+style travels with the project. On the sample pack the warning count dropped
+from 138 to 108 (`STYLE_LEVELS_TOO_FEW` 15 → 0, `STYLE_DYNAMIC_RANGE` 20 → 5)
+and the built pack stayed byte-identical.
+
 ---
 
 ## 7. Generate Overview Contact Sheets

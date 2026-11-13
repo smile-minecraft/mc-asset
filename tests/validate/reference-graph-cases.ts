@@ -1,4 +1,4 @@
-import { requiredAtlasesForUsage } from "../../src/validate/atlas.ts";
+import { atlasCandidatesForUsage } from "../../src/validate/atlas.ts";
 import {
 	collectBlockstateModelRefs,
 	collectItemModelRefs,
@@ -385,26 +385,31 @@ export const REFERENCE_GRAPH_CASES: ReferenceGraphCase[] = [
 		},
 	},
 	{
-		name: "atlas demand follows usage, never the models/ path",
+		name: "atlas candidates follow usage, never the models/ path",
 		run: (check) => {
 			const policy = { itemAtlas: "items", blockAtlas: "blocks" };
 			check.deepEqual(
-				requiredAtlasesForUsage({ items: true, blockstates: false }, policy),
-				["items"],
-				"items usage needs the items atlas",
+				atlasCandidatesForUsage({ items: true, blockstates: false }, policy),
+				["items", "blocks"],
+				"an item-only model may use either atlas",
 			);
 			check.deepEqual(
-				requiredAtlasesForUsage({ items: false, blockstates: true }, policy),
+				atlasCandidatesForUsage({ items: false, blockstates: true }, policy),
 				["blocks"],
-				"blockstate usage needs the blocks atlas",
+				"a blockstate model needs the blocks atlas",
 			);
 			check.deepEqual(
-				requiredAtlasesForUsage({ items: true, blockstates: true }, policy),
-				["blocks", "items"],
-				"dual usage needs both",
+				atlasCandidatesForUsage({ items: true, blockstates: true }, policy),
+				["blocks"],
+				"a blockstate wins over the item candidate",
 			);
 			check.deepEqual(
-				requiredAtlasesForUsage(undefined, policy),
+				atlasCandidatesForUsage({ items: false, blockstates: false }, policy),
+				[],
+				"no entry means no candidates",
+			);
+			check.deepEqual(
+				atlasCandidatesForUsage(undefined, policy),
 				[],
 				"unreachable models need nothing",
 			);

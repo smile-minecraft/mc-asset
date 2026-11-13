@@ -150,26 +150,27 @@ export function requiredAtlasForModel(
 }
 
 /**
- * Required atlases from entry reachability: models reached through item
- * definitions need the items atlas, models reached through blockstates
- * need the blocks atlas, models reached through both need both. Path
- * based guessing is never used here; unreachable models answer empty.
+ * Candidate atlases for one model file under the one-atlas-per-model
+ * rule: a model reached from a blockstate must use the blocks atlas (which
+ * also satisfies item definitions sharing that model), and a model reached
+ * only from item definitions may use either the items or the blocks atlas
+ * as long as every texture of the model stays in one candidate. Path based
+ * guessing is never used here; unreachable models answer empty.
  */
-export function requiredAtlasesForUsage(
+export function atlasCandidatesForUsage(
 	usage: { items: boolean; blockstates: boolean } | undefined,
 	policy: AtlasPolicy,
 ): string[] {
 	if (usage === undefined) {
 		return [];
 	}
-	const out: string[] = [];
 	if (usage.blockstates) {
-		out.push(policy.blockAtlas);
+		return [policy.blockAtlas];
 	}
 	if (usage.items) {
-		out.push(policy.itemAtlas);
+		return [...new Set([policy.itemAtlas, policy.blockAtlas])];
 	}
-	return [...new Set(out)];
+	return [];
 }
 
 /**

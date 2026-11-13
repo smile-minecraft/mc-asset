@@ -104,11 +104,12 @@ pack package [--project <file>] --output <file.zip> [--force] [--mkdir]
   1. *解析与计划*：读取项目文件、配方、解析后的风格、lock 文件（`mc-asset.lock.json`）与源文件；在内存中完成变量展开、调色板映射与全部校验，不写入任何字节。
   2. *分类*：将每个预定产物比对 lock 文件与磁盘现况，划入四类：`new`（未记录且不存在；预定写入）、`own-clean`（已记录且输出哈希相符；输入未变则跳过，输入变更则预定重写）、`own-modified`（已记录但磁盘文件被修改；用户修改冲突）、`foreign`（未记录但磁盘已有文件；外部文件冲突）。若有任何产物为 `own-modified` 或 `foreign`，整批以 `PACK_BUILD_CONFLICT`（exit 4）拒绝，一个字节都不写，并在 `details.conflicts` 完整列出冲突路径。
   3. *写入*：先对全部目标执行 safe-output 只读预检（拒绝符号链接、路径别名与目录冲突）；全部通过后才以临时文件加 rename 原子写入各文件，最后再原子更新 `mc-asset.lock.json`。
-- 模型与物品定义步骤：`model` 步骤写出 `assets/<namespace>/models/item/<item>.json`（父模型预设或自定义 modelSpec）；`itemDefinition` 步骤写出 `assets/<namespace>/items/<item>.json`（默认 simple 或 select／condition／range_dispatch 模板）。两者都以 `kind: model`／`kind: itemDefinition` 的 lock 条目与贴图产物一起规划。物品定义需资源包格式 46.0 及以上，否则返回 `RECIPE_VERSION_UNSUPPORTED`（带 `targetId` 与实际格式）；引用不存在模型时返回 `PACK_BROKEN_REFERENCE`；`minecraft` 命名空间需 `override: true`，否则返回 `RECIPE_INVALID`。
+- 模型与物品定义步骤：`model` 步骤写出 `assets/<namespace>/models/item/<item>.json`（父模型预设或自定义 modelSpec）；`itemDefinition` 步骤写出 `assets/<namespace>/items/<item>.json`（默认 simple 或 select／condition／range_dispatch 模板）。两者都以 `kind: model`／`kind: itemDefinition` 的 lock 条目与贴图产物一起规划。物品定义需资源包格式 46.0 及以上，否则返回 `RECIPE_VERSION_UNSUPPORTED`（带 `targetId` 与实际格式）；引用不存在模型时返回 `PACK_BROKEN_REFERENCE`；`minecraft` 命名空间需 `override: true`，否则返回 `RECIPE_INVALID`。没有声明 `source`、而且只有 `model`／`itemDefinition` 步骤的目标，只规划并写出这些 JSON 文件，不规划任何贴图输出；有 `source` 但没有 `output` 的目标，贴图写到 `<outputDir>/assets/<namespace>/textures/item/<target id>.png`；每一个规划的输出路径都必须在输出目录之下，否则是 `RECIPE_INVALID`。
 - `--dry-run` 执行至分类阶段为止，不写入任何文件与 lock 文件，仅报告分类统计与预定输出列表。
 - `pack catalog --vanilla <path>` 列出原版资源树下含 `assets/` 的 PNG 贴图。每条报告路径、分类（`textures/` 下第一段）、解码宽高、是否动画（同名 `.mcmeta` 或高宽比为整数倍且高大于宽），以及遮罩家族键（尺寸加不透明遮罩的 SHA-256；相同键属同一家族，代表为路径字节序最小者）。`--category` 精确匹配，`--page` 从 1 起算，`--page-size` 每页至多 1000 条，`--include-families` 附上家族索引。缺 `assets/` 或超出扫描预算报 `PACK_CATALOG_INVALID`。
 - `pack extract --jar <path> --output-dir <dir>` 只取出调用方指定 jar 内的 `assets/` 条目。绝对路径、`..` 片段与加密条目报 `PACK_ARCHIVE_INVALID`，中央目录损坏亦同；条目数与解压字节沿用既有资源预算。`--force` 允许覆盖，`--mkdir` 创建缺失的父目录。
-- `pack check [--project <file>]` 合并资源包验证与逐贴图风格度量。发现项目按代码计数分组；修复列表由 error 排在最前，其次按出现次数降序、代码字节序排序。每条条目含 code、level、count、最多三条 samplePaths 与建议。整包验证失败或有色彩预算超额时判定为 fail，其余 warning 保持原样。
+- 项目文件的 `style` 若是 `.style.json` 路径，`pack build` 与 `pack check` 都以项目文件所在目录为基准解析；配方文件中声明的 `style` 以该配方文件所在目录为基准；内置预设 id 不需要路径。
+- `pack check [--project <file>]` 合并资源包验证与逐贴图风格度量。发现项目按代码计数分组；修复列表由 error 排在最前，其次按出现次数降序、代码字节序排序。每条条目含 code、level、count、最多三条 samplePaths 与建议。整包验证失败或有色彩预算超额时判定为 fail，其余 warning 保持原样。项目 `style` 无法读取或内容无效时，会报告一条带底层错误码（`STYLE_INVALID`）的 error 项目并使判定失败；`pack check` 不会改用 `vanilla`。
 - `pack package --output <file.zip>` 将已构建的资源包目录打包为可重现的 zip 文件：项目文件、配方目录、lock 文件、点开头路径段与 `__MACOSX` 条目绝不打包；zip 根目录为 `pack.mcmeta`；条目按 UTF-8 字节序排序并使用固定时间戳。相同输出目录重复运行保证产生逐字节相同的 zip。
 - 构建错误码：`RECIPE_INVALID`（语法、字段、变量未用、占位符错误、不允许的命名空间或缺少 `override`；exit 2）、`RECIPE_UNSUPPORTED_VERSION`（配方文件版本过新；exit 5）、`RECIPE_OUTPUT_CONFLICT`（展开后输出路径重复；exit 2）、`RECIPE_VERSION_UNSUPPORTED`（目标格式不支持产物，如 46.0 前的物品定义；exit 2）、`RECIPE_SOURCE_MISSING`（源文件或原版素材目录不存在；exit 4）、`PACK_BUILD_CONFLICT`（产物分类冲突；exit 4）、`PACK_BROKEN_REFERENCE`（物品定义引用不存在模型；exit 3）、`PACK_LOCK_INVALID`（lock 文件损坏；exit 4）、`PACK_LOCK_UNSUPPORTED_VERSION`（lock 文件版本过新；exit 5）。资源预算上限（单次构建输出最多 4096 文件、源文件总计 256 MiB、解码像素 16M）触发 `RESOURCE_LIMIT_EXCEEDED`（exit 5）。
 
@@ -180,7 +181,7 @@ style audit <paths...> [--style <id|path>] [--baseline <path>] [--json]
 - `style create` 先让文档通过校验，再写出 `{formatVersion, id, name, extends}`（`extends` 默认为 `vanilla`），写入同样走共用输出保护：目标必须以 `.style.json` 结尾、已有文件需要 `--force`、父目录不存在需要 `--mkdir`，而且目标不得是它继承的来源。工具不会改写自己没有创建的风格文件，其他命令也不会写风格文件。
 - `style lint <path>` 会度量一张图片并对照指定风格（默认 `vanilla`）。报告先给 `metrics`（不透明像素数、不同颜色数、明度级数、动态范围、TL-BR 光向、覆盖率、最小边距、内侧外框像素数、外框明度差与色相差、色相箱、高光像素数与比例、缓冲率、抖动比例、主轴及其二阶矩、`firstFrameOnly`），再给 `findings`。每条 finding 都带 `code`、`level`、`measured`、`threshold`、`message` 与 `suggestion`。除 `STYLE_COLOR_BUDGET` 外全部是 warning，而它也是唯一能让本次运行失败的码；判定为 `pass`、`warnings` 或 `fail`，`fail` 的退出码与验证失败相同（3）。没有可比较对象的指标不产生 finding，只在 `skipped` 加一条（`no-opaque-pixels`、`animation-first-frame-only`）。`--category` 会套用该分类的阈值覆盖；未指定时，分类层级的规则（例如主轴角度）不检查。动画竖条只度量第一帧，并以 `firstFrameOnly` 标示。
 - `style audit <paths...>` 比对 2 到 256 张贴图组与基准（`--baseline`，或默认第一张）。报告各贴图尺寸、每对的遮罩重叠率与色板重叠率（千分率），以及全组最小值。尺寸不符报 `STYLE_FAMILY_SIZE_DRIFT`，遮罩重叠率低于 800‰ 报 `STYLE_FAMILY_SILHOUETTE_DRIFT`，色板重叠率低于 500‰ 报 `STYLE_FAMILY_PALETTE_DRIFT`。输出顺序与输入一致。
-- `preview contact-sheet`（或 `--contact-sheet`）按顺序排布输入图像：每格包含一张按最近邻整数放大的图片及下方标签带。标签带高 8 像素（随图片放大）并使用原创 5x7 点阵字体（每字符宽 6 像素含间距）；文件名去扩展名，过长则截断加省略号，缺字以 `?` 替代并计入 `labelFallbacks`。底色可选 `dark`（`#373737`，文字 `#C6C6C6`）或 `light`（对调）。`pairMode: sequential` 将相邻两图并排于同一格。单页尺寸上限 1024x1024，超额时按输入顺序自动分页，多页输出需在路径中提供 `{page}`（否则返回 `INVALID_ARGUMENT`）。单图照排单格；零输入返回 `INVALID_ARGUMENT`。
+- `preview contact-sheet` 按顺序排布输入图像：每格包含一张按最近邻整数放大的图片及下方标签带。标签带高 8 像素（随图片放大）并使用原创 5x7 点阵字体（每字符宽 6 像素含间距）；文件名去扩展名，过长则截断加省略号，缺字以 `?` 替代并计入 `labelFallbacks`。底色可选 `dark`（`#373737`，文字 `#C6C6C6`）或 `light`（对调）。`pairMode: sequential` 将相邻两图并排于同一格。单页尺寸上限 1024x1024，超额时按输入顺序自动分页，多页输出需在路径中提供 `{page}`（否则返回 `INVALID_ARGUMENT`）。单图照排单格；零输入返回 `INVALID_ARGUMENT`。`contact-sheet` 是放在输入位置的模式关键字，不接受输入路径，也不能与 `--scale`、`--ascii`、`--palette-map`、`--nine-slice` 同时使用（`ARGUMENT_CONFLICT`）。
 - 风格文件以严格模式读取：未知字段、枚举外的值，或不是 `#RRGGBB` 的颜色都是 `STYLE_INVALID`，并带字段路径（例如 `palettes.stone.base: expected #RRGGBB, got "#12345"`）。读不到或解析失败的文件、版本高于支持范围的 `formatVersion`（`STYLE_UNSUPPORTED_VERSION`）、`extends` 循环（`STYLE_INHERITANCE_CYCLE`）、`id` 撞到内置预设名称，以及查不到的内置 id（`STYLE_NOT_FOUND`），都会带上文件路径、字段路径与解析链。
 
 ---
@@ -216,7 +217,7 @@ generate <pattern> --size <N|WxH> --palette <name|path> --seed <int>
                   [--output <png>] [--source <mcpx>] [--stdout] <file flags>
 preview  <input> --ascii | --palette-map | --scale <N> | --nine-slice --mcmeta <path>
                   [--output <png>] [--stdout] <file flags>
-preview  --contact-sheet --inputs <paths...> [--columns <n>] [--background <name>]
+preview  contact-sheet --inputs <paths...> [--columns <n>] [--background <name>]
                   [--pair-mode <mode>] [--output <png> | --stdout] <file flags>
 gui-scale <input> --size <N|WxH> [--mcmeta <path>]
                   [--minecraft-version <v>|--resource-pack-version <f>]

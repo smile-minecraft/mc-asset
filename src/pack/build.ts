@@ -60,11 +60,13 @@ import { parseResourceLocation } from "../validate/resource-location.ts";
 import {
 	canonicalDocumentText,
 	isJsonObject,
+	isPathInsideDirectory,
 	isRelativeProjectPath,
 } from "./document.ts";
 import {
 	collectItemOutputsForStep,
 	collectModelOutputsForStep,
+	isJsonOnlyTarget,
 } from "./item-plan.ts";
 import {
 	buildItemDefinitionDocument,
@@ -110,6 +112,13 @@ export interface McmetaPlanInternal {
 	computedOutputHash?: string | undefined;
 }
 
+export interface TextureOutputPlanInternal {
+	readonly path: string;
+	readonly judgement: BuildOutputJudgement;
+	readonly needsRewrite: boolean;
+	computedOutputHash?: string | undefined;
+}
+
 export interface ModelOutputPlan {
 	readonly path: string;
 	readonly judgement: BuildOutputJudgement;
@@ -122,8 +131,6 @@ export interface ModelOutputPlan {
 export interface TargetPlanInternal {
 	readonly targetId: string;
 	readonly recipeId: string;
-	readonly path: string;
-	readonly judgement: BuildOutputJudgement;
 	readonly target: RecipeTarget;
 	readonly sourceDecl?: RecipeSource | undefined;
 	readonly sourceFilePath?: string | undefined;
@@ -132,13 +139,12 @@ export interface TargetPlanInternal {
 	readonly recipeFilePath: string;
 	readonly styleName: string;
 	readonly resolvedStyle: ResolvedStyle;
-	readonly kind: "texture" | "model" | "itemDefinition" | "mcmeta";
 	readonly category?: string | undefined;
 	readonly inputHash: string;
-	readonly needsRewrite: boolean;
+	/** The texture half of the product line; absent for a JSON-only target. */
+	readonly texturePlan?: TextureOutputPlanInternal | undefined;
 	readonly mcmetaPlan?: McmetaPlanInternal | undefined;
 	readonly modelPlans?: readonly ModelOutputPlan[] | undefined;
-	computedOutputHash?: string | undefined;
 }
 
 export interface PackBuildPlan {
@@ -286,6 +292,35 @@ function assertItemModelRefsResolvable(
 }
 
 /**
+ * A planned texture output is written as `join(projectDir, outputRelPath)`, so
+ * the final path must stay below the project's output directory. The declared
+ * fragment is already checked when the recipe expands; this check also covers
+ * the default path computed from the target id, which never passes through
+ * that expansion rule.
+ */
+function assertOutputInsideOutputDir(
+	outputRelPath: string,
+	target: RecipeTarget,
+	outputDir: string,
+): void {
+	if (isPathInsideDirectory(outputRelPath, outputDir)) {
+		return;
+	}
+	if (target.output !== undefined) {
+		throw new McAssetError(
+			"RECIPE_INVALID",
+			`Output path escapes output directory: ${target.output}`,
+			{ output: target.output },
+		);
+	}
+	throw new McAssetError(
+		"RECIPE_INVALID",
+		`Default output path escapes output directory for target '${target.id}'.`,
+		{ targetId: target.id },
+	);
+}
+
+/**
  * Plan a resource pack build without writing any files.
  *
  * Reads project document, recipe(s), sources, and lockfile; expands targets;
@@ -347,7 +382,11 @@ export async function planPackBuild(
 	for (const file of recipeFiles) {
 		const text = readFileSync(file, "utf8");
 		const recipe = parseRecipeText(text);
-		const expanded = expandRecipeTargets(recipe, project.namespace);
+		const expanded = expandRecipeTargets(
+			recipe,
+			project.namespace,
+			project.outputDir,
+		);
 		for (const t of expanded) {
 			totalOutputCount += 1;
 			if (
@@ -475,17 +514,13 @@ export async function planPackBuild(
 	for (const { file: recipeFile, recipe, expanded } of recipes) {
 		const styleRef = recipe.style ?? project.style ?? "vanilla";
 		const resolvedStyle = await resolveStyle(styleRef, {
-			baseDir: dirname(recipeFile),
+			baseDir: recipe.style !== undefined ? dirname(recipeFile) : projectDir,
 		});
 		const styleHash = sha256Hex(
 			canonicalCompactJson(normalizedStyleForHash(resolvedStyle)),
 		);
 
 		for (const target of expanded) {
-			const outputRelPath = target.output
-				? `${project.outputDir}/${target.output}`
-				: `assets/${project.namespace}/textures/item/${target.id}.png`;
-
 			const sourcesList: Array<{ ref: string; sha256: string }> = [];
 			let sourceDecl: RecipeSource | undefined;
 			let sourceFilePath: string | undefined;
@@ -617,45 +652,55 @@ export async function planPackBuild(
 			};
 			const inputHash = sha256Hex(canonicalCompactJson(normalizedInput));
 
-			const fullOutputPath = join(projectDir, outputRelPath);
-			const existsOnDisk = existsSync(fullOutputPath);
-			const lockEntry = lock?.outputs?.[outputRelPath];
+			// A target without a source has no image pipeline: its steps are JSON
+			// steps only, and it plans no texture half at all.
+			let texturePlan: TextureOutputPlanInternal | undefined;
+			if (!isJsonOnlyTarget(target)) {
+				const outputRelPath = target.output
+					? `${project.outputDir}/${target.output}`
+					: `${project.outputDir}/assets/${project.namespace}/textures/item/${target.id}.png`;
+				assertOutputInsideOutputDir(outputRelPath, target, project.outputDir);
 
-			let judgement: BuildOutputJudgement;
-			let needsRewrite = false;
+				const fullOutputPath = join(projectDir, outputRelPath);
+				const existsOnDisk = existsSync(fullOutputPath);
+				const lockEntry = lock?.outputs?.[outputRelPath];
 
-			if (lockEntry !== undefined) {
-				if (!existsOnDisk) {
-					judgement = "new";
-					needsRewrite = true;
+				let judgement: BuildOutputJudgement;
+				let needsRewrite = false;
+
+				if (lockEntry !== undefined) {
+					if (!existsOnDisk) {
+						judgement = "new";
+						needsRewrite = true;
+					} else {
+						const diskBytes = readFileSync(fullOutputPath);
+						const diskHash = sha256Hex(diskBytes);
+						if (diskHash !== lockEntry.outputHash) {
+							judgement = "own-modified";
+							needsRewrite = false;
+						} else {
+							judgement = "own-clean";
+							needsRewrite = inputHash !== lockEntry.inputHash;
+						}
+					}
 				} else {
-					const diskBytes = readFileSync(fullOutputPath);
-					const diskHash = sha256Hex(diskBytes);
-					if (diskHash !== lockEntry.outputHash) {
-						judgement = "own-modified";
+					if (existsOnDisk) {
+						judgement = "foreign";
 						needsRewrite = false;
 					} else {
-						judgement = "own-clean";
-						needsRewrite = inputHash !== lockEntry.inputHash;
+						judgement = "new";
+						needsRewrite = true;
 					}
 				}
-			} else {
-				if (existsOnDisk) {
-					judgement = "foreign";
-					needsRewrite = false;
-				} else {
-					judgement = "new";
-					needsRewrite = true;
-				}
-			}
 
-			const outPlan: BuildOutputPlan = {
-				path: outputRelPath,
-				judgement,
-				targetId: target.id,
-				recipeId: recipe.id,
-			};
-			outputs.push(outPlan);
+				outputs.push({
+					path: outputRelPath,
+					judgement,
+					targetId: target.id,
+					recipeId: recipe.id,
+				});
+				texturePlan = { path: outputRelPath, judgement, needsRewrite };
+			}
 
 			// Check for sweep step with mcmetaOutput
 			let mcmetaPlan: McmetaPlanInternal | undefined;
@@ -671,8 +716,9 @@ export async function planPackBuild(
 						{ output: mcmetaRelRaw },
 					);
 				}
+				const mcmetaRelPath = `${project.outputDir}/${mcmetaRelRaw}`;
 				if (
-					!isRelativeProjectPath(mcmetaRelRaw) ||
+					!isPathInsideDirectory(mcmetaRelPath, project.outputDir) ||
 					mcmetaRelRaw.startsWith("..")
 				) {
 					throw new McAssetError(
@@ -681,7 +727,6 @@ export async function planPackBuild(
 						{ output: mcmetaRelRaw },
 					);
 				}
-				const mcmetaRelPath = `${project.outputDir}/${mcmetaRelRaw}`;
 				const fullMcmetaPath = join(projectDir, mcmetaRelPath);
 				const mcmetaExists = existsSync(fullMcmetaPath);
 				const mcmetaLockEntry = lock?.outputs?.[mcmetaRelPath];
@@ -856,8 +901,6 @@ export async function planPackBuild(
 			targetPlans.push({
 				targetId: target.id,
 				recipeId: recipe.id,
-				path: outputRelPath,
-				judgement,
 				target,
 				sourceDecl,
 				sourceFilePath,
@@ -866,11 +909,10 @@ export async function planPackBuild(
 				recipeFilePath: recipeFile,
 				styleName: styleRef,
 				resolvedStyle,
-				kind: "texture",
 				category:
 					typeof target.category === "string" ? target.category : undefined,
 				inputHash,
-				needsRewrite,
+				texturePlan,
 				mcmetaPlan,
 				modelPlans,
 			});
@@ -995,7 +1037,7 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 	const targetPlans = (plan.targetPlans ?? []) as TargetPlanInternal[];
 	const targetsToExecute = targetPlans.filter(
 		(tp) =>
-			tp.needsRewrite ||
+			tp.texturePlan?.needsRewrite ||
 			tp.mcmetaPlan?.needsRewrite ||
 			(tp.modelPlans ?? []).some((mp) => mp.needsRewrite),
 	);
@@ -1007,9 +1049,10 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 	// 1. Safe-output preflight across all outputs to write
 	const outputTargets: OutputTarget[] = [];
 	for (const tp of targetsToExecute) {
-		if (tp.needsRewrite) {
+		const texturePlan = tp.texturePlan;
+		if (texturePlan?.needsRewrite) {
 			outputTargets.push({
-				path: resolve(projectDir, tp.path),
+				path: resolve(projectDir, texturePlan.path),
 				extension: ".png",
 				allowOverwrite: true,
 			});
@@ -1050,217 +1093,222 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 	const completedPaths: string[] = [];
 
 	for (const tp of targetsToExecute) {
-		let canvas: PixelCanvas;
-		const sourceDecl = tp.sourceDecl;
+		const texture = tp.texturePlan;
+		if (texture !== undefined) {
+			let canvas: PixelCanvas;
+			const sourceDecl = tp.sourceDecl;
 
-		if (sourceDecl) {
-			if (sourceDecl.kind === "grid") {
-				canvas = parseGridTextForBuild(tp.sourceText ?? "");
-			} else if (sourceDecl.kind === "mcpx") {
-				canvas = parseMcpx(tp.sourceText ?? "");
-			} else if (sourceDecl.kind === "png" || sourceDecl.kind === "vanilla") {
-				canvas = decodePng(tp.sourceBytes ?? new Uint8Array()).canvas;
-			} else if (sourceDecl.kind === "generate") {
-				const dims = parseSize(sourceDecl.size ?? "16x16");
-				const colors = resolveGeneratePalette(
-					sourceDecl.palette ?? "",
-					dirname(tp.recipeFilePath),
-				);
-				const gen = generateProcedural(
-					sourceDecl.pattern as GeneratePatternName,
-					{
-						width: dims.width,
-						height: dims.height,
-						seed: sourceDecl.seed ?? 0,
-						palette: colors,
-					},
-				);
-				canvas = createCanvas(gen.width, gen.height);
-				const layer = addLayer(canvas, { id: "base" });
-				replaceLayerPixels(canvas, layer.id, gen.pixels);
-			} else {
-				throw new McAssetError(
-					"RECIPE_INVALID",
-					`Unknown source kind for ${tp.targetId}`,
-				);
-			}
-		} else {
-			canvas = createCanvas(16, 16);
-		}
-
-		for (let stepIndex = 0; stepIndex < tp.target.steps.length; stepIndex++) {
-			const step = tp.target.steps[stepIndex];
-			try {
-				if (step.type === "recolor") {
-					const family = step.family as string;
-					const familyRamp = tp.resolvedStyle.palettes[family];
-					if (familyRamp === undefined) {
-						throw new McAssetError(
-							"STYLE_FAMILY_NOT_FOUND",
-							`Family ${family} is not defined in the resolved style.`,
-							{ family },
-						);
-					}
-					const recolorOpts: FamilyRecolorOptions = {
-						ramp: familyRamp,
-					};
-					if (step.selection !== undefined) {
-						recolorOpts.selection = step.selection as SelectionExpr;
-					}
-					if (step.preserveRegions !== undefined) {
-						recolorOpts.preserveRegions = step.preserveRegions as string[];
-					}
-					if (step.preserveRoles !== undefined) {
-						recolorOpts.preserveRoles = step.preserveRoles as PaletteRole[];
-					}
-					recolorCanvasByFamily(canvas, family, recolorOpts);
-				} else if (step.type === "outline") {
-					const layerId =
-						(step.layerId as string | undefined) ??
-						canvas.layers[0]?.id ??
-						"base";
-					const styleOutline = tp.resolvedStyle.outline;
-					const outlineOpts: OutlineOptions = {
-						mode: (step.mode as OutlineMode | undefined) ?? styleOutline.mode,
-						position:
-							(step.position as OutlinePosition | undefined) ??
-							styleOutline.position,
-						luminanceDropPermille:
-							(step.luminanceDropPermille as number | undefined) ??
-							styleOutline.luminanceDropPermille,
-						saturationRatioPermille:
-							(step.saturationRatioPermille as number | undefined) ??
-							styleOutline.saturationRatioPermille,
-						maxHueOffsetDegrees:
-							(step.maxHueOffsetDegrees as number | undefined) ??
-							styleOutline.maxHueOffsetDegrees,
-						snapFamilies:
-							(step.snapFamilies as boolean | undefined) ??
-							styleOutline.snapFamilies,
-					};
-					let color: RGBA | undefined;
-					if (typeof step.color === "string") {
-						color = parseSweepColor(step.color);
-					} else if (
-						step.color &&
-						typeof step.color === "object" &&
-						"r" in step.color
-					) {
-						color = step.color as RGBA;
-					} else if (styleOutline.color) {
-						color = parseSweepColor(styleOutline.color);
-					}
-					if (color !== undefined) {
-						outlineOpts.color = color;
-					}
-					if (step.family !== undefined) {
-						outlineOpts.family = step.family as string;
-					}
-					applyOutline(canvas, layerId, outlineOpts);
-				} else if (step.type === "sweep") {
-					const angle =
-						(step.angle as SweepAngleDegrees | undefined) ??
-						tp.resolvedStyle.animation?.sweepAngleDegrees ??
-						135;
-					const width =
-						(step.width as number | undefined) ??
-						tp.resolvedStyle.animation?.sweepWidthPixels ??
-						1;
-					let color: RGBA;
-					if (typeof step.color === "string") {
-						color = parseSweepColor(step.color);
-					} else if (tp.resolvedStyle.animation?.sweepColor) {
-						color = parseSweepColor(tp.resolvedStyle.animation.sweepColor);
-					} else {
-						color = parseSweepColor("#FFFFFF");
-					}
-					const frames =
-						(step.frames as number | undefined) ??
-						tp.resolvedStyle.animation?.sweepFrames ??
-						16;
-
-					const initialWidth = canvas.width;
-					const initialHeight = canvas.height;
-
-					const sweepResult = generateSweepFrames({
-						canvas,
-						angleDegrees: angle,
-						widthPixels: width,
-						color,
-						frames,
-					});
-
-					const packed = packFrameSet(sweepResult.frameSet, "vertical");
-					const sheetCanvas = createCanvas(packed.width, packed.height);
-					const sheetLayer = addLayer(sheetCanvas, { id: "base" });
-					replaceLayerPixels(sheetCanvas, sheetLayer.id, packed.pixels);
-					canvas = sheetCanvas;
-
-					if (tp.mcmetaPlan) {
-						const holdTicks =
-							(step.holdTicks as number | undefined) ??
-							tp.resolvedStyle.animation?.holdTicks ??
-							100;
-						const frametime =
-							(step.frametime as number | undefined) ??
-							tp.resolvedStyle.animation?.frametime ??
-							1;
-						const preset = (tp.resolvedStyle.animation?.timelinePreset ??
-							"hold-and-sweep") as TimelinePreset;
-						const mcmetaResult = generateAnimationMcmeta({
-							sheetWidth: packed.width,
-							sheetHeight: packed.height,
-							frameSize: `${initialWidth}x${initialHeight}`,
-							frametime,
-							preset,
-							holdTicks,
-							interpolate:
-								(step.interpolate as boolean | undefined) ??
-								tp.resolvedStyle.animation?.interpolate,
-						});
-						const mcmetaBytes = new TextEncoder().encode(mcmetaResult.text);
-						tp.mcmetaPlan.computedOutputHash = sha256Hex(mcmetaBytes);
-						if (tp.mcmetaPlan.needsRewrite) {
-							payloads.set(
-								resolve(projectDir, tp.mcmetaPlan.path),
-								mcmetaBytes,
-							);
-							completedPaths.push(tp.mcmetaPlan.path);
-						}
-					}
-				} else if (step.type === "operations") {
-					const rawOps = Array.isArray(step.operations) ? step.operations : [];
-					const typedOps = parseOperationsJson(
-						JSON.stringify(rawOps),
-						canvas.layers.length === 1 ? canvas.layers[0]?.id : undefined,
+			if (sourceDecl) {
+				if (sourceDecl.kind === "grid") {
+					canvas = parseGridTextForBuild(tp.sourceText ?? "");
+				} else if (sourceDecl.kind === "mcpx") {
+					canvas = parseMcpx(tp.sourceText ?? "");
+				} else if (sourceDecl.kind === "png" || sourceDecl.kind === "vanilla") {
+					canvas = decodePng(tp.sourceBytes ?? new Uint8Array()).canvas;
+				} else if (sourceDecl.kind === "generate") {
+					const dims = parseSize(sourceDecl.size ?? "16x16");
+					const colors = resolveGeneratePalette(
+						sourceDecl.palette ?? "",
+						dirname(tp.recipeFilePath),
 					);
-					applyOperations(canvas, typedOps);
-				} else if (step.type === "model" || step.type === "itemDefinition") {
-					// JSON outputs are validated and rendered after the pixel steps.
+					const gen = generateProcedural(
+						sourceDecl.pattern as GeneratePatternName,
+						{
+							width: dims.width,
+							height: dims.height,
+							seed: sourceDecl.seed ?? 0,
+							palette: colors,
+						},
+					);
+					canvas = createCanvas(gen.width, gen.height);
+					const layer = addLayer(canvas, { id: "base" });
+					replaceLayerPixels(canvas, layer.id, gen.pixels);
 				} else {
 					throw new McAssetError(
 						"RECIPE_INVALID",
-						`Unknown step type: ${step.type}`,
+						`Unknown source kind for ${tp.targetId}`,
 					);
 				}
-			} catch (err) {
-				if (err instanceof McAssetError) {
-					const details = isJsonObject(err.details) ? err.details : {};
-					throw new McAssetError(err.code, err.message, {
-						...details,
-						targetId: tp.targetId,
-						stepIndex,
-					});
-				}
-				throw err;
+			} else {
+				canvas = createCanvas(16, 16);
 			}
-		}
 
-		if (tp.needsRewrite) {
-			const pngBytes = encodePng(canvas);
-			tp.computedOutputHash = sha256Hex(pngBytes);
-			payloads.set(resolve(projectDir, tp.path), pngBytes);
-			completedPaths.push(tp.path);
+			for (let stepIndex = 0; stepIndex < tp.target.steps.length; stepIndex++) {
+				const step = tp.target.steps[stepIndex];
+				try {
+					if (step.type === "recolor") {
+						const family = step.family as string;
+						const familyRamp = tp.resolvedStyle.palettes[family];
+						if (familyRamp === undefined) {
+							throw new McAssetError(
+								"STYLE_FAMILY_NOT_FOUND",
+								`Family ${family} is not defined in the resolved style.`,
+								{ family },
+							);
+						}
+						const recolorOpts: FamilyRecolorOptions = {
+							ramp: familyRamp,
+						};
+						if (step.selection !== undefined) {
+							recolorOpts.selection = step.selection as SelectionExpr;
+						}
+						if (step.preserveRegions !== undefined) {
+							recolorOpts.preserveRegions = step.preserveRegions as string[];
+						}
+						if (step.preserveRoles !== undefined) {
+							recolorOpts.preserveRoles = step.preserveRoles as PaletteRole[];
+						}
+						recolorCanvasByFamily(canvas, family, recolorOpts);
+					} else if (step.type === "outline") {
+						const layerId =
+							(step.layerId as string | undefined) ??
+							canvas.layers[0]?.id ??
+							"base";
+						const styleOutline = tp.resolvedStyle.outline;
+						const outlineOpts: OutlineOptions = {
+							mode: (step.mode as OutlineMode | undefined) ?? styleOutline.mode,
+							position:
+								(step.position as OutlinePosition | undefined) ??
+								styleOutline.position,
+							luminanceDropPermille:
+								(step.luminanceDropPermille as number | undefined) ??
+								styleOutline.luminanceDropPermille,
+							saturationRatioPermille:
+								(step.saturationRatioPermille as number | undefined) ??
+								styleOutline.saturationRatioPermille,
+							maxHueOffsetDegrees:
+								(step.maxHueOffsetDegrees as number | undefined) ??
+								styleOutline.maxHueOffsetDegrees,
+							snapFamilies:
+								(step.snapFamilies as boolean | undefined) ??
+								styleOutline.snapFamilies,
+						};
+						let color: RGBA | undefined;
+						if (typeof step.color === "string") {
+							color = parseSweepColor(step.color);
+						} else if (
+							step.color &&
+							typeof step.color === "object" &&
+							"r" in step.color
+						) {
+							color = step.color as RGBA;
+						} else if (styleOutline.color) {
+							color = parseSweepColor(styleOutline.color);
+						}
+						if (color !== undefined) {
+							outlineOpts.color = color;
+						}
+						if (step.family !== undefined) {
+							outlineOpts.family = step.family as string;
+						}
+						applyOutline(canvas, layerId, outlineOpts);
+					} else if (step.type === "sweep") {
+						const angle =
+							(step.angle as SweepAngleDegrees | undefined) ??
+							tp.resolvedStyle.animation?.sweepAngleDegrees ??
+							135;
+						const width =
+							(step.width as number | undefined) ??
+							tp.resolvedStyle.animation?.sweepWidthPixels ??
+							1;
+						let color: RGBA;
+						if (typeof step.color === "string") {
+							color = parseSweepColor(step.color);
+						} else if (tp.resolvedStyle.animation?.sweepColor) {
+							color = parseSweepColor(tp.resolvedStyle.animation.sweepColor);
+						} else {
+							color = parseSweepColor("#FFFFFF");
+						}
+						const frames =
+							(step.frames as number | undefined) ??
+							tp.resolvedStyle.animation?.sweepFrames ??
+							16;
+
+						const initialWidth = canvas.width;
+						const initialHeight = canvas.height;
+
+						const sweepResult = generateSweepFrames({
+							canvas,
+							angleDegrees: angle,
+							widthPixels: width,
+							color,
+							frames,
+						});
+
+						const packed = packFrameSet(sweepResult.frameSet, "vertical");
+						const sheetCanvas = createCanvas(packed.width, packed.height);
+						const sheetLayer = addLayer(sheetCanvas, { id: "base" });
+						replaceLayerPixels(sheetCanvas, sheetLayer.id, packed.pixels);
+						canvas = sheetCanvas;
+
+						if (tp.mcmetaPlan) {
+							const holdTicks =
+								(step.holdTicks as number | undefined) ??
+								tp.resolvedStyle.animation?.holdTicks ??
+								100;
+							const frametime =
+								(step.frametime as number | undefined) ??
+								tp.resolvedStyle.animation?.frametime ??
+								1;
+							const preset = (tp.resolvedStyle.animation?.timelinePreset ??
+								"hold-and-sweep") as TimelinePreset;
+							const mcmetaResult = generateAnimationMcmeta({
+								sheetWidth: packed.width,
+								sheetHeight: packed.height,
+								frameSize: `${initialWidth}x${initialHeight}`,
+								frametime,
+								preset,
+								holdTicks,
+								interpolate:
+									(step.interpolate as boolean | undefined) ??
+									tp.resolvedStyle.animation?.interpolate,
+							});
+							const mcmetaBytes = new TextEncoder().encode(mcmetaResult.text);
+							tp.mcmetaPlan.computedOutputHash = sha256Hex(mcmetaBytes);
+							if (tp.mcmetaPlan.needsRewrite) {
+								payloads.set(
+									resolve(projectDir, tp.mcmetaPlan.path),
+									mcmetaBytes,
+								);
+								completedPaths.push(tp.mcmetaPlan.path);
+							}
+						}
+					} else if (step.type === "operations") {
+						const rawOps = Array.isArray(step.operations)
+							? step.operations
+							: [];
+						const typedOps = parseOperationsJson(
+							JSON.stringify(rawOps),
+							canvas.layers.length === 1 ? canvas.layers[0]?.id : undefined,
+						);
+						applyOperations(canvas, typedOps);
+					} else if (step.type === "model" || step.type === "itemDefinition") {
+						// JSON outputs are validated and rendered after the pixel steps.
+					} else {
+						throw new McAssetError(
+							"RECIPE_INVALID",
+							`Unknown step type: ${step.type}`,
+						);
+					}
+				} catch (err) {
+					if (err instanceof McAssetError) {
+						const details = isJsonObject(err.details) ? err.details : {};
+						throw new McAssetError(err.code, err.message, {
+							...details,
+							targetId: tp.targetId,
+							stepIndex,
+						});
+					}
+					throw err;
+				}
+			}
+
+			if (texture.needsRewrite) {
+				const pngBytes = encodePng(canvas);
+				texture.computedOutputHash = sha256Hex(pngBytes);
+				payloads.set(resolve(projectDir, texture.path), pngBytes);
+				completedPaths.push(texture.path);
+			}
 		}
 
 		for (const mp of tp.modelPlans ?? []) {
@@ -1377,14 +1425,15 @@ export async function executePackBuild(plan: PackBuildPlan): Promise<{
 		: {};
 
 	for (const tp of targetsToExecute) {
-		if (tp.needsRewrite && tp.computedOutputHash !== undefined) {
-			updatedOutputs[tp.path] = {
+		const texture = tp.texturePlan;
+		if (texture?.needsRewrite && texture.computedOutputHash !== undefined) {
+			updatedOutputs[texture.path] = {
 				targetId: tp.targetId,
 				recipeId: tp.recipeId,
-				kind: tp.kind,
+				kind: "texture",
 				...(tp.category !== undefined ? { category: tp.category } : {}),
 				inputHash: tp.inputHash,
-				outputHash: tp.computedOutputHash,
+				outputHash: texture.computedOutputHash,
 			};
 		}
 		for (const mp of tp.modelPlans ?? []) {

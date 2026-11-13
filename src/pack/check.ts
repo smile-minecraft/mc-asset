@@ -162,13 +162,18 @@ export async function checkResourcePack(
 	let textureCount = 0;
 	let resolvedStyleObj: Awaited<ReturnType<typeof resolveStyle>> | undefined;
 	try {
-		resolvedStyleObj = await resolveStyle(styleName);
-	} catch {
-		try {
-			resolvedStyleObj = await resolveStyle("vanilla");
-		} catch {
-			// In case style fails to resolve
+		resolvedStyleObj = await resolveStyle(styleName, { baseDir: projectDir });
+	} catch (error) {
+		if (!(error instanceof McAssetError)) {
+			throw error;
 		}
+		findings.push({
+			code: error.code,
+			level: "error",
+			path: resolvedProject,
+			message: `${error.message} style "${styleName}" resolved against ${projectDir}`,
+			suggestion: `Fix the project style "${styleName}" (resolved against ${projectDir}) or use a builtin preset id.`,
+		});
 	}
 
 	// Scan PNG textures in pack/assets

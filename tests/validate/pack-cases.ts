@@ -917,6 +917,277 @@ export const PACK_CASES: PackCase[] = [
 		},
 	},
 	{
+		name: "pass: item model shared with a blockstate uses the blocks atlas",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/blockstates/dirt_path.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/dirt_path" } },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/dirt_path.json",
+					modelJson({
+						model: {
+							type: "minecraft:model",
+							model: "minecraft:block/dirt_path",
+						},
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/block/dirt_path.json",
+					modelJson({
+						textures: {
+							top: "minecraft:block/dirt_path_top",
+							side: "minecraft:block/dirt_path_side",
+						},
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/block/dirt_path_top.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/block/dirt_path_side.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([{ type: "directory", source: "block", prefix: "block/" }]),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([
+							{ type: "directory", source: "block", prefix: "block/" },
+						]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(
+						report.verdict,
+						"pass",
+						"a shared model stays on the blocks atlas",
+					);
+					check.ok(
+						!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"no atlas accusation for a blocks-only item model",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "pass: item-only model uses the blocks atlas",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/acacia_planks.json",
+					modelJson({
+						model: {
+							type: "minecraft:model",
+							model: "minecraft:block/acacia_planks_inventory",
+						},
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/block/acacia_planks_inventory.json",
+					modelJson({ textures: { all: "minecraft:block/acacia_planks" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/block/acacia_planks.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([{ type: "directory", source: "block", prefix: "block/" }]),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([
+							{ type: "directory", source: "block", prefix: "block/" },
+						]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(
+						report.verdict,
+						"pass",
+						"an item-only model may use the blocks atlas",
+					);
+					check.ok(
+						!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"no atlas accusation for a blocks-only item model",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "fail: item model mixes the items and blocks atlases",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/mixed.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/mixed" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/mixed.json",
+					modelJson({
+						textures: {
+							layer0: "minecraft:item/sword",
+							layer1: "minecraft:block/stone",
+						},
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/sword.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/block/stone.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([{ type: "directory", source: "block", prefix: "block/" }]),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([{ type: "directory", source: "item", prefix: "item/" }]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([
+							{ type: "directory", source: "block", prefix: "block/" },
+						]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([{ type: "directory", source: "item", prefix: "item/" }]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "fail", "mixed atlases fail");
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_TEXTURE_NOT_IN_ATLAS"],
+						"only that code",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "fail: item model texture outside every candidate atlas",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/items/sword.json",
+					modelJson({
+						model: { type: "minecraft:model", model: "minecraft:item/sword" },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/item/sword.json",
+					modelJson({ textures: { layer0: "minecraft:item/sword" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/sword.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([{ type: "directory", source: "block", prefix: "block/" }]),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([
+							{ type: "directory", source: "block", prefix: "block/" },
+						]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.equal(report.verdict, "fail", "uncovered texture fails");
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_TEXTURE_NOT_IN_ATLAS"],
+						"only that code",
+					);
+				});
+			});
+		},
+	},
+	{
 		name: "pass: packFormat below the atlas split skips atlas verdicts",
 		run: async (check) => {
 			await withPackDir(async (dir) => {
@@ -2659,7 +2930,7 @@ export const PACK_CASES: PackCase[] = [
 		},
 	},
 	{
-		name: "red: atlas follows items usage, not the models/ path",
+		name: "pass: item usage accepts a model whose textures are all in the blocks atlas",
 		run: async (check) => {
 			await withPackDir(async (dir) => {
 				await writePackFile(
@@ -2704,21 +2975,205 @@ export const PACK_CASES: PackCase[] = [
 						...VERSIONED,
 						vanillaPath: vanillaDir,
 					});
+					check.ok(
+						report.verdict !== "fail",
+						"an item model may use the blocks atlas",
+					);
+					check.ok(
+						!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"no atlas accusation when the texture is in the blocks atlas",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "pass: the particle texture is not checked against the atlas",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/blockstates/barrier.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/barrier" } },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/block/barrier.json",
+					modelJson({ textures: { particle: "minecraft:item/barrier" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/barrier.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([{ type: "directory", source: "block", prefix: "block/" }]),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([{ type: "directory", source: "item", prefix: "item/" }]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([
+							{ type: "directory", source: "block", prefix: "block/" },
+						]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([{ type: "directory", source: "item", prefix: "item/" }]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.ok(
+						report.verdict !== "fail",
+						"a particle texture off the atlas does not fail the pack",
+					);
+					check.ok(
+						!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"particle textures are exempt from the atlas check",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "fail: a non-particle texture in the wrong atlas is still reported",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/blockstates/barrier.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/barrier" } },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/block/barrier.json",
+					modelJson({ textures: { all: "minecraft:item/barrier" } }),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/barrier.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([{ type: "directory", source: "block", prefix: "block/" }]),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([{ type: "directory", source: "item", prefix: "item/" }]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([
+							{ type: "directory", source: "block", prefix: "block/" },
+						]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([{ type: "directory", source: "item", prefix: "item/" }]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
 					check.equal(
 						report.verdict,
 						"fail",
-						"items usage needs the items atlas",
+						"a model texture in the wrong atlas fails",
+					);
+					check.deepEqual(
+						uniqueCodes(report),
+						["PACK_TEXTURE_NOT_IN_ATLAS"],
+						"only the atlas miss is reported",
+					);
+				});
+			});
+		},
+	},
+	{
+		name: "pass: a block model keeps checking its other textures when particle is exempt",
+		run: async (check) => {
+			await withPackDir(async (dir) => {
+				await writePackFile(
+					dir,
+					"assets/minecraft/blockstates/stone.json",
+					modelJson({
+						variants: { "": { model: "minecraft:block/stone" } },
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/models/block/stone.json",
+					modelJson({
+						textures: {
+							particle: "minecraft:item/stone",
+							all: "minecraft:block/stone",
+						},
+					}),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/item/stone.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/textures/block/stone.png",
+					makePngBytes(),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/blocks.json",
+					atlasJson([{ type: "directory", source: "block", prefix: "block/" }]),
+				);
+				await writePackFile(
+					dir,
+					"assets/minecraft/atlases/items.json",
+					atlasJson([{ type: "directory", source: "item", prefix: "item/" }]),
+				);
+				await withPackDir(async (vanillaDir) => {
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/blocks.json",
+						atlasJson([
+							{ type: "directory", source: "block", prefix: "block/" },
+						]),
+					);
+					await writePackFile(
+						vanillaDir,
+						"assets/minecraft/atlases/items.json",
+						atlasJson([{ type: "directory", source: "item", prefix: "item/" }]),
+					);
+					const report = await scanPack(dir, {
+						...VERSIONED,
+						vanillaPath: vanillaDir,
+					});
+					check.ok(
+						report.verdict !== "fail",
+						"the block texture in the blocks atlas passes",
 					);
 					check.ok(
-						codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
-						"atlas miss present",
-					);
-					const miss = report.findings.find(
-						(f) => f.code === "PACK_TEXTURE_NOT_IN_ATLAS",
-					);
-					check.ok(
-						(miss?.message ?? "").includes('"items"'),
-						"miss names the items atlas, not blocks",
+						!codesOf(report).includes("PACK_TEXTURE_NOT_IN_ATLAS"),
+						"only the particle texture is exempt, everything else is present",
 					);
 				});
 			});

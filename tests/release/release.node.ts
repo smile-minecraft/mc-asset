@@ -56,14 +56,17 @@ describe("release entry (static, no build required)", () => {
 			typeof pkg.version === "string" && pkg.version.length > 0,
 			"package.json version must be a non-empty string",
 		);
-		const indexSource = readFileSync(join(ROOT, "src", "index.ts"), "utf-8");
-		assert.ok(
-			indexSource.includes("package.json"),
-			"src/index.ts must read the version from package.json",
+		const versionSource = readFileSync(
+			join(ROOT, "src", "version.ts"),
+			"utf-8",
 		);
 		assert.ok(
-			!/VERSION\s*=\s*"/.test(indexSource),
-			"src/index.ts must not hardcode a second VERSION copy",
+			versionSource.includes("package.json"),
+			"src/version.ts must read the version from package.json",
+		);
+		assert.ok(
+			!/VERSION\s*=\s*"/.test(versionSource),
+			"src/version.ts must not hardcode a second VERSION copy",
 		);
 	});
 

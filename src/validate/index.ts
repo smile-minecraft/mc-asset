@@ -13,12 +13,12 @@ export type {
 	PalettedSpriteQuery,
 } from "./atlas.ts";
 export {
+	atlasCandidatesForUsage,
 	atlasCoverageDetail,
 	atlasNameOf,
 	atlasSpriteCoverageFor,
 	palettedSpriteStatusFor,
 	parseAtlasLayers,
-	requiredAtlasesForUsage,
 	requiredAtlasForModel,
 	spriteIdForTextureValue,
 } from "./atlas.ts";

@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Recipe targets without a `source` and with only `model` / `itemDefinition` steps no longer plan a blank texture or write outside the output directory, and a planned output must stay below the output directory.
+- The lock file and input hashes record the real tool version in bundled builds (previously they fell back to a fixed older version), so a project last built by an older bundled build is rewritten once on the next build with identical output.
+- A `.style.json` path in the project document resolves against the project document's directory in both `pack build` and `pack check`, and `pack check` reports an unreadable or invalid project style as an error instead of silently using the `vanilla` style.
+- `validate-pack` no longer reports `PACK_TEXTURE_NOT_IN_ATLAS` for item models whose textures all come from the blocks atlas: an item model needs all its textures in one atlas (items or blocks), a model reached from a blockstate needs the blocks atlas, and mixing the two atlases in one item model is still reported. The atlas check also skips a model's textures.particle entry, because vanilla ships block models whose particle sprite lives in the items atlas.
+
 ## [0.5.0] - 2026-10-18
 
 ### Added

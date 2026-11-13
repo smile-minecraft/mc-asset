@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readdir,
+	readFile,
+	rm,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executePackBuild, planPackBuild } from "../../src/pack/build.ts";
@@ -575,6 +582,182 @@ export const ITEM_MODEL_CASES = [
 					);
 				});
 				assert.equal(refusal.code, "RECIPE_INVALID");
+			});
+		},
+	},
+	{
+		name: "a target with only model and itemDefinition steps plans and writes JSON documents",
+		async run() {
+			await withProject(async (projectDir) => {
+				const recipePath = join(projectDir, "recipes", "pure-json.recipe.json");
+				await writeFile(
+					recipePath,
+					`${JSON.stringify(
+						{
+							formatVersion: 1,
+							id: "pure-json",
+							targets: [
+								{
+									id: "pure_item",
+									steps: [
+										{ type: "model", parent: "generated" },
+										{ type: "itemDefinition" },
+									],
+								},
+							],
+						},
+						null,
+						2,
+					)}\n`,
+					"utf8",
+				);
+
+				const project = join(projectDir, "mc-asset.pack.json");
+				const plan = await planPackBuild(project, { recipe: recipePath });
+				assert.deepEqual(
+					plan.outputs.map((output) => output.path).sort(),
+					[
+						`pack/assets/${NAMESPACE}/items/pure_item.json`,
+						`pack/assets/${NAMESPACE}/models/item/pure_item.json`,
+					],
+					"the plan holds the model and the item definition only",
+				);
+
+				const executed = await executePackBuild(plan);
+				assert.equal(
+					executed.completed.length,
+					2,
+					"both JSON documents are written",
+				);
+				assert.ok(
+					await bytesAt(
+						join(
+							projectDir,
+							"pack",
+							"assets",
+							NAMESPACE,
+							"models",
+							"item",
+							"pure_item.json",
+						),
+					),
+					"the model document lands below the output directory",
+				);
+				assert.ok(
+					await bytesAt(
+						join(
+							projectDir,
+							"pack",
+							"assets",
+							NAMESPACE,
+							"items",
+							"pure_item.json",
+						),
+					),
+					"the item definition lands below the output directory",
+				);
+				assert.ok(
+					!(await readdir(projectDir)).includes("assets"),
+					"no texture directory appears at the project root",
+				);
+				assert.equal(
+					await bytesAt(
+						join(
+							projectDir,
+							"pack",
+							"assets",
+							NAMESPACE,
+							"textures",
+							"item",
+							"pure_item.png",
+						),
+					),
+					null,
+					"no texture is generated for a JSON-only target",
+				);
+
+				const lock = parseLockText(
+					await readFile(join(projectDir, "mc-asset.lock.json"), "utf8"),
+				);
+				const lockKeys = Object.keys(lock.outputs).sort();
+				assert.deepEqual(
+					lockKeys,
+					[
+						`pack/assets/${NAMESPACE}/items/pure_item.json`,
+						`pack/assets/${NAMESPACE}/models/item/pure_item.json`,
+					],
+					"the lock records the two JSON documents and nothing else",
+				);
+				assert.ok(
+					lockKeys.every((key) => key.startsWith("pack/")),
+					"every lock key stays below the output directory",
+				);
+
+				const rebuilt = await executePackBuild(
+					await planPackBuild(project, { recipe: recipePath }),
+				);
+				assert.equal(
+					rebuilt.completed.length,
+					0,
+					"a second build rewrites nothing",
+				);
+			});
+		},
+	},
+	{
+		name: "a JSON-only target does not write a declared texture output",
+		async run() {
+			await withProject(async (projectDir) => {
+				const recipePath = join(
+					projectDir,
+					"recipes",
+					"declared-pure.recipe.json",
+				);
+				await writeFile(
+					recipePath,
+					`${JSON.stringify(
+						{
+							formatVersion: 1,
+							id: "declared-pure",
+							targets: [
+								{
+									id: "declared_pure",
+									output: `assets/${NAMESPACE}/textures/item/declared_pure.png`,
+									steps: [{ type: "model", parent: "generated" }],
+								},
+							],
+						},
+						null,
+						2,
+					)}\n`,
+					"utf8",
+				);
+
+				const project = join(projectDir, "mc-asset.pack.json");
+				const plan = await planPackBuild(project, { recipe: recipePath });
+				assert.deepEqual(
+					plan.outputs.map((output) => output.path),
+					[`pack/assets/${NAMESPACE}/models/item/declared_pure.json`],
+					"a declared texture output is not planned for a JSON-only target",
+				);
+
+				const executed = await executePackBuild(plan);
+				assert.equal(executed.completed.length, 1, "only the model is written");
+				assert.equal(
+					await bytesAt(
+						join(
+							projectDir,
+							"pack",
+							"assets",
+							NAMESPACE,
+							"textures",
+							"item",
+							"declared_pure.png",
+						),
+					),
+					null,
+					"no texture is written at the declared output",
+				);
 			});
 		},
 	},

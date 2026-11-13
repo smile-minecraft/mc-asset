@@ -5,7 +5,7 @@
  */
 
 import { McAssetError } from "../core/errors.ts";
-import { isJsonObject, isRelativeProjectPath } from "./document.ts";
+import { isJsonObject, isPathInsideDirectory } from "./document.ts";
 import { compareCodeUnits } from "./skeleton.ts";
 
 export interface RecipeSource {
@@ -490,10 +490,36 @@ function substituteValue(
 	return value;
 }
 
+/**
+ * Refuse one declared output path that would leave the output directory.
+ *
+ * A recipe declares `output` and `mcmetaOutput` relative to the project's
+ * output directory, and the build later writes `join(projectDir, outputDir,
+ * declared)`. The check runs on that final path: `../x.png`, an absolute
+ * path, and a fragment that climbs out only after joining
+ * (`sub/../../x.png`) are all refused. A declared name that starts with `..`
+ * stays refused too, because the project-relative path rule forbids every
+ * `..` segment.
+ */
+function assertDeclaredOutputPath(
+	declared: string,
+	outputDir: string,
+	message: string,
+	details: Record<string, unknown>,
+): void {
+	if (
+		!isPathInsideDirectory(`${outputDir}/${declared}`, outputDir) ||
+		declared.startsWith("..")
+	) {
+		throw new McAssetError("RECIPE_INVALID", message, details);
+	}
+}
+
 /** Expand recipe targets into a flat list sorted by target id. */
 export function expandRecipeTargets(
 	recipe: RecipeDocument,
 	namespace: string,
+	outputDir: string,
 ): readonly RecipeTarget[] {
 	const allUsedPlaceholders = new Set<string>();
 	for (const target of recipe.targets) {
@@ -565,13 +591,12 @@ export function expandRecipeTargets(
 					: target.output;
 
 			if (output !== undefined) {
-				if (!isRelativeProjectPath(output) || output.startsWith("..")) {
-					throw new McAssetError(
-						"RECIPE_INVALID",
-						`Output path escapes output directory: ${output}`,
-						{ output },
-					);
-				}
+				assertDeclaredOutputPath(
+					output,
+					outputDir,
+					`Output path escapes output directory: ${output}`,
+					{ output },
+				);
 				assertAssetNamespaceSegment(output);
 			}
 
@@ -586,16 +611,12 @@ export function expandRecipeTargets(
 							{ output: step.mcmetaOutput },
 						);
 					}
-					if (
-						!isRelativeProjectPath(step.mcmetaOutput) ||
-						step.mcmetaOutput.startsWith("..")
-					) {
-						throw new McAssetError(
-							"RECIPE_INVALID",
-							`mcmetaOutput escapes output directory: ${step.mcmetaOutput}`,
-							{ output: step.mcmetaOutput },
-						);
-					}
+					assertDeclaredOutputPath(
+						step.mcmetaOutput,
+						outputDir,
+						`mcmetaOutput escapes output directory: ${step.mcmetaOutput}`,
+						{ output: step.mcmetaOutput },
+					);
 					assertAssetNamespaceSegment(step.mcmetaOutput);
 				}
 			}

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
 	mkdir,
 	mkdtemp,
+	readdir,
 	readFile,
 	rm,
 	symlink,
@@ -475,21 +476,93 @@ export const RECIPE_BUILD_CASES = [
 		async run() {
 			await withProject(async (projectDir) => {
 				const recipePath = join(projectDir, "recipes", "escape.recipe.json");
+				const project = join(projectDir, "mc-asset.pack.json");
+				const escapes = [
+					{
+						output: "../outside.png",
+						decoded: join(projectDir, "..", "outside.png"),
+					},
+					{
+						output: join(projectDir, "absolute-outside.png"),
+						decoded: join(projectDir, "absolute-outside.png"),
+					},
+					{
+						output: "sub/../../outside.png",
+						decoded: join(projectDir, "outside.png"),
+					},
+					// The project-relative path rule forbids every `..` segment, so a
+					// fragment that would normalize back inside stays refused as before.
+					{
+						output: "sub/../ok.png",
+						decoded: join(projectDir, "pack", "ok.png"),
+					},
+				];
+				for (const attempt of escapes) {
+					await writeFile(
+						recipePath,
+						`${JSON.stringify(
+							{
+								formatVersion: 1,
+								id: "escape",
+								sources: {
+									grid: { kind: "grid", path: "sources/sword.grid" },
+								},
+								targets: [
+									{
+										id: "escape",
+										source: "grid",
+										output: attempt.output,
+										steps: [{ type: "outline" }],
+									},
+								],
+							},
+							null,
+							2,
+						)}\n`,
+						"utf8",
+					);
+					const refusal = await refusalOf(async () => {
+						await executePackBuild(
+							await planPackBuild(project, { recipe: recipePath }),
+						);
+					});
+					assert.equal(
+						refusal.code,
+						"RECIPE_INVALID",
+						`refused: ${attempt.output}`,
+					);
+					assert.equal(
+						await bytesAt(attempt.decoded),
+						null,
+						`nothing lands at ${attempt.decoded}`,
+					);
+				}
+			});
+		},
+	},
+	{
+		name: "a default output that escapes the output directory is refused",
+		async run() {
+			await withProject(async (projectDir) => {
+				const recipePath = join(
+					projectDir,
+					"recipes",
+					"escape-default.recipe.json",
+				);
 				await writeFile(
 					recipePath,
 					`${JSON.stringify(
 						{
 							formatVersion: 1,
-							id: "escape",
+							id: "escape-default",
 							sources: {
 								grid: { kind: "grid", path: "sources/sword.grid" },
 							},
 							targets: [
 								{
-									id: "escape",
+									id: "../../../../../escaped",
 									source: "grid",
-									output: "../outside.png",
-									steps: [{ type: "outline" }],
+									steps: [{ type: "model", item: "escaped_item" }],
 								},
 							],
 						},
@@ -507,9 +580,110 @@ export const RECIPE_BUILD_CASES = [
 				});
 				assert.equal(refusal.code, "RECIPE_INVALID");
 				assert.equal(
-					await bytesAt(join(projectDir, "outside.png")),
+					await bytesAt(join(projectDir, "..", "escaped.png")),
 					null,
 					"nothing lands outside the output directory",
+				);
+			});
+		},
+	},
+	{
+		name: "a default output lands below the output directory",
+		async run() {
+			await withProject(async (projectDir) => {
+				const recipePath = join(
+					projectDir,
+					"recipes",
+					"source-copy.recipe.json",
+				);
+				await writeFile(
+					recipePath,
+					`${JSON.stringify(
+						{
+							formatVersion: 1,
+							id: "source-copy",
+							sources: {
+								grid: { kind: "grid", path: "sources/sword.grid" },
+							},
+							targets: [
+								{
+									id: "copied",
+									source: "grid",
+									steps: [{ type: "model" }],
+								},
+							],
+						},
+						null,
+						2,
+					)}\n`,
+					"utf8",
+				);
+				const project = join(projectDir, "mc-asset.pack.json");
+				const texturePath = `pack/assets/${NAMESPACE}/textures/item/copied.png`;
+				const plan = await planPackBuild(project, { recipe: recipePath });
+				assert.deepEqual(
+					plan.outputs.map((output) => output.path).sort(),
+					[`pack/assets/${NAMESPACE}/models/item/copied.json`, texturePath],
+					"the default texture path is prefixed with the output directory",
+				);
+
+				const executed = await executePackBuild(plan);
+				assert.equal(
+					executed.completed.length,
+					2,
+					"texture and model are written",
+				);
+				assert.ok(
+					await bytesAt(join(projectDir, texturePath)),
+					"the texture lands below the output directory",
+				);
+				assert.ok(
+					!(await readdir(projectDir)).includes("assets"),
+					"nothing appears at the project root",
+				);
+			});
+		},
+	},
+	{
+		name: "a declared output with a dot segment keeps its existing path",
+		async run() {
+			await withProject(async (projectDir) => {
+				const recipePath = join(projectDir, "recipes", "dot.recipe.json");
+				await writeFile(
+					recipePath,
+					`${JSON.stringify(
+						{
+							formatVersion: 1,
+							id: "dot-segment",
+							sources: {
+								grid: { kind: "grid", path: "sources/sword.grid" },
+							},
+							targets: [
+								{
+									id: "dot",
+									source: "grid",
+									output: "./ok.png",
+									steps: [{ type: "outline" }],
+								},
+							],
+						},
+						null,
+						2,
+					)}\n`,
+					"utf8",
+				);
+				const project = join(projectDir, "mc-asset.pack.json");
+				const plan = await planPackBuild(project, { recipe: recipePath });
+				assert.deepEqual(
+					plan.outputs.map((output) => output.path),
+					["pack/./ok.png"],
+					"the declared path keeps its shape",
+				);
+				const executed = await executePackBuild(plan);
+				assert.equal(executed.completed.length, 1, "the texture is written");
+				assert.ok(
+					await bytesAt(join(projectDir, "pack", "ok.png")),
+					"the joined path lands below the output directory",
 				);
 			});
 		},

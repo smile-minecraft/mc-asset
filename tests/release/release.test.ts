@@ -117,9 +117,12 @@ describe("release entry", () => {
 
 	test("library bundle VERSION matches the single package.json source", () => {
 		const pkg = readPackage();
-		const indexSource = readFileSync(join(ROOT, "src", "index.ts"), "utf-8");
-		expect(indexSource).toContain("package.json");
-		expect(indexSource).not.toContain('VERSION = "');
+		const versionSource = readFileSync(
+			join(ROOT, "src", "version.ts"),
+			"utf-8",
+		);
+		expect(versionSource).toContain("package.json");
+		expect(versionSource).not.toContain('VERSION = "');
 		const dir = makeTempDir();
 		try {
 			const run = runNode(

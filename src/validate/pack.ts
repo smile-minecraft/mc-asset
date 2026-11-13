@@ -23,11 +23,11 @@ import {
 import {
 	type AtlasLayerInput,
 	type AtlasSkip,
+	atlasCandidatesForUsage,
 	atlasCoverageDetail,
 	atlasNameOf,
 	palettedSpriteStatusFor,
 	parseAtlasLayers,
-	requiredAtlasesForUsage,
 	spriteIdForTextureValue,
 } from "./atlas.ts";
 import type { ValidateFindingLevel } from "./checks.ts";
@@ -1478,9 +1478,12 @@ function computeReachability(
 /**
  * Atlas verdicts over texture references that resolved to real files.
  * Missing files already carry PACK_MISSING_TEXTURE and never reach this
- * pass, so the two §53 errors stay mutually exclusive. The required atlas
- * names and the version gate both come from the items/split facts: below
- * the split, or with no determinable version, every verdict skips. Model
+ * pass, so the two §53 errors stay mutually exclusive. The candidate
+ * atlases and the version gate both come from the items/split facts: a
+ * blockstate-reached model uses the blocks atlas, an item-only model may
+ * use either atlas as long as all its textures share one, and unreachable
+ * models get no verdict. Below the split, or with no determinable version,
+ * every verdict skips. Model
  * texture references resolve onto atlas sprite ids (the resource location
  * without its trailing `.png`), never onto same-named PNG paths. Atlas
  * definitions merge every visible layer in load order (vanilla, reversed
@@ -1579,73 +1582,143 @@ async function checkAtlasCoverage(
 			skip.target,
 		);
 	}
+	const refsByModel = new Map<
+		string,
+		Array<{ ref: (typeof state.atlasRefs)[number]; sprite: string }>
+	>();
 	for (const ref of state.atlasRefs) {
 		if (state.errorFiles.has(ref.target)) {
-			continue;
-		}
-		// Atlas demand follows entry reachability, never the models/ path:
-		// unreachable models carry no atlas verdict at all.
-		const requiredList = requiredAtlasesForUsage(
-			reachability.get(ref.modelRel),
-			{
-				itemAtlas: itemsAtlas.atlas,
-				blockAtlas: placement.blockAtlas,
-			},
-		);
-		if (requiredList.length === 0) {
 			continue;
 		}
 		const sprite = spriteIdForTextureValue(ref.value);
 		if (sprite === undefined) {
 			continue;
 		}
-		for (const required of requiredList) {
-			if (!context.hasVanilla) {
-				// Without the vanilla tree the merged atlas is unknowable:
-				// vanilla sources could add or remove any sprite, so every
-				// query skips instead of accusing.
-				const rules = parsed.atlases.get(required);
-				const definition =
-					rules === undefined || rules.definitionFiles.length === 0
-						? undefined
-						: rules.definitionFiles[0];
+		// A particle texture may come from a different atlas than the model's
+		// other textures; vanilla ships block models whose particle sprite lives
+		// in the item atlas, so no atlas verdict is possible for this field.
+		if (ref.field === "textures.particle") {
+			continue;
+		}
+		const entry = { ref, sprite };
+		const group = refsByModel.get(ref.modelRel);
+		if (group === undefined) {
+			refsByModel.set(ref.modelRel, [entry]);
+		} else {
+			group.push(entry);
+		}
+	}
+	for (const [modelRel, entries] of refsByModel) {
+		// Atlas demand follows entry reachability, never the models/ path:
+		// unreachable models carry no atlas verdict at all.
+		const candidates = atlasCandidatesForUsage(reachability.get(modelRel), {
+			itemAtlas: itemsAtlas.atlas,
+			blockAtlas: placement.blockAtlas,
+		});
+		if (candidates.length === 0) {
+			continue;
+		}
+		if (!context.hasVanilla) {
+			// Without the vanilla tree the merged atlas is unknowable:
+			// vanilla sources could add or remove any sprite, so every
+			// query skips instead of accusing.
+			const atlas = candidates[0];
+			const rules = parsed.atlases.get(atlas);
+			const definition =
+				rules === undefined || rules.definitionFiles.length === 0
+					? undefined
+					: rules.definitionFiles[0];
+			for (const { sprite } of entries) {
 				pushSkip(
 					"atlas-source",
 					"vanilla-not-provided",
-					definition ?? required,
-					ref.modelRel,
-					`atlas "${required}" for sprite "${sprite}" in "${ref.modelRel}" cannot be completed without the vanilla resource tree; coverage recorded as skipped.`,
+					definition ?? atlas,
+					modelRel,
+					`atlas "${atlas}" for sprite "${sprite}" in "${modelRel}" cannot be completed without the vanilla resource tree; coverage recorded as skipped.`,
 					`sprite "${sprite}" needs the vanilla atlas sources`,
 				);
-				continue;
 			}
-			const diagnosis = atlasCoverageDetail(parsed, required, sprite);
-			if (diagnosis.status === "covered") {
-				continue;
-			}
-			if (diagnosis.status === "not-covered") {
-				push(
-					state.findings,
-					"PACK_TEXTURE_NOT_IN_ATLAS",
-					"error",
-					`"${ref.field}" "${ref.value}" in "${ref.modelRel}" resolves to "${ref.target}" (sprite "${sprite}") which is not stitched into the "${required}" atlas.`,
-					ref.modelRel,
-				);
-				state.errorFiles.add(ref.modelRel);
-				continue;
-			}
-			if (!diagnosis.hasDefinitions) {
+			continue;
+		}
+		const evaluated = candidates.map((atlas) => {
+			const diagnoses = entries.map(({ ref, sprite }) => ({
+				ref,
+				sprite,
+				diagnosis: atlasCoverageDetail(parsed, atlas, sprite),
+			}));
+			return {
+				atlas,
+				diagnoses,
+				hasDefinitions: diagnoses[0]?.diagnosis.hasDefinitions === true,
+				misses: diagnoses.filter(
+					(entry) => entry.diagnosis.status === "not-covered",
+				).length,
+			};
+		});
+		const available = evaluated.filter((candidate) => candidate.hasDefinitions);
+		if (available.length === 0) {
+			const atlas = candidates[0];
+			for (const { sprite } of entries) {
 				pushSkip(
 					"atlas-source",
 					"missing-atlas-definition",
-					required,
-					ref.modelRel,
-					`atlas "${required}" for sprite "${sprite}" in "${ref.modelRel}" has no definition in any visible layer; coverage recorded as skipped.`,
+					atlas,
+					modelRel,
+					`atlas "${atlas}" for sprite "${sprite}" in "${modelRel}" has no definition in any visible layer; coverage recorded as skipped.`,
 					`sprite "${sprite}" has no atlas definition`,
 				);
 			}
-			// Any other unknown already carries its parse skip above; a query
-			// that is unknown without one is impossible by construction.
+			continue;
+		}
+		if (available.some((candidate) => candidate.misses === 0)) {
+			continue;
+		}
+		// A candidate with only covered and unknown sprites cannot accuse;
+		// its gaps already carry parse skips, so the group ends here.
+		const unresolved = available.find((candidate) =>
+			candidate.diagnoses.every(
+				(entry) => entry.diagnosis.status !== "not-covered",
+			),
+		);
+		if (unresolved !== undefined) {
+			for (const { sprite, diagnosis } of unresolved.diagnoses) {
+				if (diagnosis.status !== "unknown") {
+					continue;
+				}
+				if (!diagnosis.hasDefinitions) {
+					pushSkip(
+						"atlas-source",
+						"missing-atlas-definition",
+						unresolved.atlas,
+						modelRel,
+						`atlas "${unresolved.atlas}" for sprite "${sprite}" in "${modelRel}" has no definition in any visible layer; coverage recorded as skipped.`,
+						`sprite "${sprite}" has no atlas definition`,
+					);
+				}
+			}
+			continue;
+		}
+		// Every available candidate misses at least one sprite: prefer the
+		// closest one, keeping candidate order on ties (items before blocks).
+		const chosen = available.reduce((best, candidate) =>
+			candidate.misses < best.misses ? candidate : best,
+		);
+		const suffix =
+			candidates.length > 1
+				? " An item model needs all its textures in one atlas."
+				: "";
+		for (const { ref, sprite, diagnosis } of chosen.diagnoses) {
+			if (diagnosis.status !== "not-covered") {
+				continue;
+			}
+			push(
+				state.findings,
+				"PACK_TEXTURE_NOT_IN_ATLAS",
+				"error",
+				`"${ref.field}" "${ref.value}" in "${modelRel}" resolves to "${ref.target}" (sprite "${sprite}") which is not stitched into the "${chosen.atlas}" atlas.${suffix}`,
+				modelRel,
+			);
+			state.errorFiles.add(modelRel);
 		}
 	}
 	return skipped;

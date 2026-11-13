@@ -4,10 +4,8 @@
  * Full parsing, validation, serialization, and comparison for `mc-asset.lock.json`.
  */
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { McAssetError } from "../core/errors.ts";
+import { VERSION } from "../version.ts";
 import {
 	canonicalDocumentText,
 	isJsonObject,
@@ -33,24 +31,13 @@ export interface LockDocument {
 	readonly outputs: Readonly<Record<string, LockEntry>>;
 }
 
-let cachedToolVersion: string | undefined;
-
-/** Resolve tool version safely across Node and Bun without JSON import assertions. */
+/**
+ * The tool version recorded in lock documents and input hashes. The version
+ * itself is inlined from package.json at build time, so source runs and
+ * installed bundles agree.
+ */
 export function getToolVersion(): string {
-	if (cachedToolVersion !== undefined) {
-		return cachedToolVersion;
-	}
-	try {
-		const dir = dirname(fileURLToPath(import.meta.url));
-		const pkgPath = join(dir, "../../package.json");
-		const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as {
-			version?: string;
-		};
-		cachedToolVersion = pkg.version ?? "0.4.0";
-	} catch {
-		cachedToolVersion = "0.4.0";
-	}
-	return cachedToolVersion;
+	return VERSION;
 }
 
 const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
