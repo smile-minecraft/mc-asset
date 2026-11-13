@@ -21,6 +21,8 @@ import { parseMcpx } from "../../src/mcpx/index.ts";
 import { executePackBuild, planPackBuild } from "../../src/pack/build.ts";
 import { initializePackProject } from "../../src/pack/init.ts";
 import { parseLockText } from "../../src/pack/lock.ts";
+import { planParticleAsset } from "../../src/particle/index.ts";
+import { loadParticleFrames } from "../../src/particle/load.ts";
 
 /**
  * Generator-backed recipe steps: entity texture templates, equipment, fonts,
@@ -166,6 +168,48 @@ opacity = 1
 GGGG
 GGGG
 .GG.
+`;
+
+const SPARK_A = `mcpx 1
+
+[canvas]
+width = 4
+height = 4
+
+[palette]
+. = transparent
+S = #FFFFFFFF
+
+[layer base]
+visible = true
+opacity = 1
+
+[grid]
+.SS.
+SSSS
+SSSS
+.SS.
+`;
+
+const SPARK_B = `mcpx 1
+
+[canvas]
+width = 4
+height = 4
+
+[palette]
+. = transparent
+S = #FF8800FF
+
+[layer base]
+visible = true
+opacity = 1
+
+[grid]
+SSSS
+SSSS
+SSSS
+SSSS
 `;
 
 function fontSpec(
@@ -956,6 +1000,277 @@ TTTTTTTT
 				assert.ok(
 					await bytesAt(onDisk(projectDir, "docs/icons.table.json")),
 					"the table lands at the declared path",
+				);
+			});
+		},
+	},
+	{
+		name: "a particle step writes the definition and both sprites in name order",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeText(
+					projectDir,
+					"recipes/sources/spark/frame_10.mcpx",
+					SPARK_A,
+				);
+				await writeText(
+					projectDir,
+					"recipes/sources/spark/frame_2.mcpx",
+					SPARK_B,
+				);
+				await writeRecipe(projectDir, "particle", {
+					formatVersion: 3,
+					id: "particle",
+					targets: [
+						{
+							id: "spark",
+							steps: [{ type: "particle", frames: "sources/spark" }],
+						},
+					],
+				});
+				await build(projectDir);
+				const frames = await loadParticleFrames(
+					join(projectDir, "recipes", "sources", "spark"),
+				);
+				assert.deepEqual(
+					frames.frames.map((frame) => frame.name),
+					["frame_10.mcpx", "frame_2.mcpx"],
+					"the loader keeps UTF-8 byte order",
+				);
+				const expected = planParticleAsset({
+					namespace: NAMESPACE,
+					id: "spark",
+					frames: frames.frames,
+				});
+				const definition = await bytesAt(
+					onDisk(projectDir, expected.definition.relativePath),
+				);
+				assert.equal(
+					new TextDecoder().decode(definition ?? new Uint8Array()),
+					expected.definition.text,
+				);
+				for (const sprite of expected.textures) {
+					const bytes = await bytesAt(onDisk(projectDir, sprite.relativePath));
+					assert.ok(bytes, `${sprite.relativePath} exists`);
+					assert.equal(
+						sha256(bytes),
+						sha256(sprite.data),
+						`${sprite.relativePath} is the generator's bytes`,
+					);
+				}
+				const lock = parseLockText(
+					await readFile(join(projectDir, "mc-asset.lock.json"), "utf8"),
+				);
+				assert.deepEqual(
+					Object.keys(lock.outputs).sort(),
+					expected.textures
+						.map((texture) => `pack/${texture.relativePath}`)
+						.concat(`pack/${expected.definition.relativePath}`)
+						.sort(),
+				);
+				assert.equal(
+					lock.outputs[`pack/${expected.definition.relativePath}`]?.kind,
+					"particleDefinition",
+				);
+				assert.equal(
+					lock.outputs[`pack/${expected.textures[0]?.relativePath ?? ""}`]
+						?.kind,
+					"particleTexture",
+				);
+
+				const second = await planPackBuild(projectPath(projectDir));
+				assert.ok(
+					second.outputs.every((output) => output.judgement === "own-clean"),
+					"a rerun sees only own-clean outputs",
+				);
+			});
+		},
+	},
+	{
+		name: "a particle texturePrefix reshapes the sprite leaves",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeText(
+					projectDir,
+					"recipes/sources/spark/frame_2.mcpx",
+					SPARK_A,
+				);
+				await writeRecipe(projectDir, "particle", {
+					formatVersion: 3,
+					id: "particle",
+					targets: [
+						{
+							id: "spark",
+							steps: [
+								{
+									type: "particle",
+									frames: "sources/spark",
+									texturePrefix: "dust",
+								},
+							],
+						},
+					],
+				});
+				await build(projectDir);
+				assert.ok(
+					await bytesAt(
+						onDisk(projectDir, "assets/aurelian/textures/particle/dust_0.png"),
+					),
+					"the sprite uses the declared prefix",
+				);
+				assert.equal(
+					await bytesAt(
+						onDisk(projectDir, "assets/aurelian/textures/particle/spark_0.png"),
+					),
+					null,
+					"the default prefix is not used",
+				);
+			});
+		},
+	},
+	{
+		name: "a missing frames directory is a recipe refusal with nothing written",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeRecipe(projectDir, "particle", {
+					formatVersion: 3,
+					id: "particle",
+					targets: [
+						{
+							id: "spark",
+							steps: [{ type: "particle", frames: "sources/missing" }],
+						},
+					],
+				});
+				const refusal = await refusalOf(async () =>
+					planPackBuild(projectPath(projectDir)),
+				);
+				assert.equal(refusal.code, "RECIPE_SOURCE_MISSING");
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+				);
+			});
+		},
+	},
+	{
+		name: "a frames directory with no frames is a recipe refusal",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeText(
+					projectDir,
+					"recipes/sources/spark/README.txt",
+					"not a frame\n",
+				);
+				await writeRecipe(projectDir, "particle", {
+					formatVersion: 3,
+					id: "particle",
+					targets: [
+						{
+							id: "spark",
+							steps: [{ type: "particle", frames: "sources/spark" }],
+						},
+					],
+				});
+				const refusal = await refusalOf(async () =>
+					planPackBuild(projectPath(projectDir)),
+				);
+				assert.equal(refusal.code, "RECIPE_INVALID");
+				assert.equal(refusal.details?.cause, "INVALID_ANIMATION_FRAME");
+			});
+		},
+	},
+	{
+		name: "changing a particle frame file forces the definition and sprites to rewrite",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeText(
+					projectDir,
+					"recipes/sources/spark/frame_2.mcpx",
+					SPARK_A,
+				);
+				await writeRecipe(projectDir, "particle", {
+					formatVersion: 3,
+					id: "particle",
+					targets: [
+						{
+							id: "spark",
+							steps: [{ type: "particle", frames: "sources/spark" }],
+						},
+					],
+				});
+				await build(projectDir);
+				await writeText(
+					projectDir,
+					"recipes/sources/spark/frame_2.mcpx",
+					SPARK_B,
+				);
+				const executed = await build(projectDir);
+				assert.deepEqual([...executed.completed].sort(), [
+					"pack/assets/aurelian/particles/spark.json",
+					"pack/assets/aurelian/textures/particle/spark_0.png",
+				]);
+			});
+		},
+	},
+	{
+		name: "an invalid particle id is a recipe refusal with nothing written",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeText(
+					projectDir,
+					"recipes/sources/spark/frame_2.mcpx",
+					SPARK_A,
+				);
+				await writeRecipe(projectDir, "particle", {
+					formatVersion: 3,
+					id: "particle",
+					targets: [
+						{
+							id: "Spark",
+							steps: [{ type: "particle", frames: "sources/spark" }],
+						},
+					],
+				});
+				const refusal = await refusalOf(async () =>
+					planPackBuild(projectPath(projectDir)),
+				);
+				assert.equal(refusal.code, "RECIPE_INVALID");
+				assert.equal(
+					await bytesAt(join(projectDir, "mc-asset.lock.json")),
+					null,
+				);
+			});
+		},
+	},
+	{
+		name: "a single frame file makes a one-frame particle",
+		async run() {
+			await withProject(async (projectDir) => {
+				await writeText(projectDir, "recipes/sources/spark.mcpx", SPARK_A);
+				await writeRecipe(projectDir, "particle", {
+					formatVersion: 3,
+					id: "particle",
+					targets: [
+						{
+							id: "spark",
+							steps: [{ type: "particle", frames: "sources/spark.mcpx" }],
+						},
+					],
+				});
+				await build(projectDir);
+				assert.equal(
+					new TextDecoder().decode(
+						(await bytesAt(
+							onDisk(projectDir, "assets/aurelian/particles/spark.json"),
+						)) ?? new Uint8Array(),
+					),
+					`{
+  "textures": [
+    "aurelian:spark_0"
+  ]
+}
+`,
 				);
 			});
 		},

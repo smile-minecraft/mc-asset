@@ -11,7 +11,7 @@
 
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { addLayer, createCanvas, replaceLayerPixels } from "../core/canvas.ts";
 import { McAssetError } from "../core/errors.ts";
 import {
@@ -33,6 +33,8 @@ import {
 import { decodeImage } from "../io/decode.ts";
 import { encodePng } from "../io/png.ts";
 import { parseMcpx, serializeMcpx } from "../mcpx/index.ts";
+import { planParticleAsset } from "../particle/index.ts";
+import { loadParticleFrames } from "../particle/load.ts";
 import { isJsonObject, isRelativeProjectPath } from "./document.ts";
 import type { RecipeStep } from "./recipe.ts";
 
@@ -41,6 +43,7 @@ export const GENERATED_STEP_TYPES: ReadonlySet<string> = new Set([
 	"entityTemplate",
 	"equipment",
 	"font",
+	"particle",
 ]);
 
 /** Lock kinds a generator-backed step writes. */
@@ -51,7 +54,9 @@ export type GeneratedOutputKind =
 	| "equipmentTexture"
 	| "fontDefinition"
 	| "fontAtlas"
-	| "fontTable";
+	| "fontTable"
+	| "particleDefinition"
+	| "particleTexture";
 
 /** The file extension each generated family writes. */
 const EXTENSION_BY_KIND: Readonly<
@@ -64,6 +69,8 @@ const EXTENSION_BY_KIND: Readonly<
 	fontDefinition: ".json",
 	fontAtlas: ".png",
 	fontTable: ".json",
+	particleDefinition: ".json",
+	particleTexture: ".png",
 };
 
 /** One file a step produces, with the bytes fixed before any write. */
@@ -147,6 +154,14 @@ const FONT_FIELDS: ReadonlySet<string> = new Set([
 	"type",
 	"spec",
 	"table",
+	"override",
+]);
+
+const PARTICLE_FIELDS: ReadonlySet<string> = new Set([
+	"type",
+	"id",
+	"frames",
+	"texturePrefix",
 	"override",
 ]);
 
@@ -274,6 +289,10 @@ const GENERATOR_VERSION_CODES: ReadonlySet<string> = new Set([
 	"EQUIPMENT_VERSION_UNSUPPORTED",
 ]);
 
+const PASSTHROUGH_CODES: ReadonlySet<string> = new Set([
+	"RESOURCE_LIMIT_EXCEEDED",
+]);
+
 function translateGeneratorFailure(
 	error: unknown,
 	context: GeneratedStepContext,
@@ -281,17 +300,21 @@ function translateGeneratorFailure(
 	if (error instanceof McAssetError) {
 		const details = isJsonObject(error.details) ? error.details : {};
 		const unsupportedVersion = GENERATOR_VERSION_CODES.has(error.code);
-		throw new McAssetError(
-			unsupportedVersion ? "RECIPE_VERSION_UNSUPPORTED" : "RECIPE_INVALID",
-			error.message,
-			{
-				...details,
-				targetId: context.targetId,
-				stepType: context.step.type,
-				stepIndex: context.stepIndex,
-				cause: error.code,
-			},
-		);
+		const passthrough = PASSTHROUGH_CODES.has(error.code);
+		const code = passthrough
+			? error.code
+			: unsupportedVersion
+				? "RECIPE_VERSION_UNSUPPORTED"
+				: error.code === "FILESYSTEM_ERROR"
+					? "RECIPE_SOURCE_MISSING"
+					: "RECIPE_INVALID";
+		throw new McAssetError(code, error.message, {
+			...details,
+			targetId: context.targetId,
+			stepType: context.step.type,
+			stepIndex: context.stepIndex,
+			cause: error.code,
+		});
 	}
 	throw error;
 }
@@ -725,6 +748,79 @@ async function planFontStep(
 	return { outputs, inputs };
 }
 
+async function planParticleStep(
+	context: GeneratedStepContext,
+): Promise<GeneratedStepPlan> {
+	const step = context.step;
+	assertStepFields(step, PARTICLE_FIELDS, context);
+	parseOverride(step.override, context);
+	const declared = step.frames;
+	if (typeof declared !== "string" || declared.trim() === "") {
+		stepFailure(
+			context,
+			"frames",
+			`particle step field 'frames' must be a frames directory or a single .mcpx/.png file for target '${context.targetId}'.`,
+		);
+	}
+	const id =
+		step.id === undefined
+			? context.targetId
+			: typeof step.id === "string" && step.id.trim() !== ""
+				? step.id
+				: stepFailure(
+						context,
+						"id",
+						`particle step field 'id' must be a non-empty string for target '${context.targetId}'.`,
+					);
+	if (
+		step.texturePrefix !== undefined &&
+		(typeof step.texturePrefix !== "string" || step.texturePrefix.trim() === "")
+	) {
+		stepFailure(
+			context,
+			"texturePrefix",
+			`particle step field 'texturePrefix' must be a non-empty string for target '${context.targetId}'.`,
+		);
+	}
+	const fullPath = resolve(context.recipeDir, declared);
+	let loaded: Awaited<ReturnType<typeof loadParticleFrames>>;
+	try {
+		loaded = await loadParticleFrames(fullPath);
+	} catch (error) {
+		translateGeneratorFailure(error, context);
+	}
+	let plan: ReturnType<typeof planParticleAsset>;
+	try {
+		plan = planParticleAsset({
+			namespace: context.namespace,
+			id,
+			...(step.texturePrefix === undefined
+				? {}
+				: { texturePrefix: step.texturePrefix }),
+			frames: loaded.frames,
+		});
+	} catch (error) {
+		translateGeneratorFailure(error, context);
+	}
+	const inputs: GeneratedInput[] = loaded.inputFiles.map((file) => ({
+		ref: `particle-frame:${basename(file)}`,
+		sha256: sha256Hex(new Uint8Array(readFileSync(file))),
+	}));
+	const outputs: GeneratedOutput[] = [
+		generatedOutput(
+			plan.definition.relativePath,
+			"particleDefinition",
+			TEXT_ENCODER.encode(plan.definition.text),
+		),
+	];
+	for (const texture of plan.textures) {
+		outputs.push(
+			generatedOutput(texture.relativePath, "particleTexture", texture.data),
+		);
+	}
+	return { outputs, inputs };
+}
+
 /** Plan one generator-backed step; every refusal happens before a write. */
 export async function planGeneratedStep(
 	context: GeneratedStepContext,
@@ -737,6 +833,9 @@ export async function planGeneratedStep(
 	}
 	if (context.step.type === "font") {
 		return planFontStep(context);
+	}
+	if (context.step.type === "particle") {
+		return planParticleStep(context);
 	}
 	throw new McAssetError(
 		"RECIPE_INVALID",

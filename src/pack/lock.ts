@@ -29,6 +29,8 @@ export const LOCK_ENTRY_KINDS = [
 	"fontDefinition",
 	"fontAtlas",
 	"fontTable",
+	"particleDefinition",
+	"particleTexture",
 ] as const;
 
 /** One output family a lock entry can name. */
