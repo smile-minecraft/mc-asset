@@ -1,13 +1,13 @@
 import { z } from "zod";
 
 /**
- * Frozen MCP tool surface: twenty-seven tools for agent authoring — the
+ * Frozen MCP tool surface: twenty-eight tools for agent authoring — the
  * intake and inspection pair, raster transforms, palette and quantization,
  * the deterministic pixelize pipeline, procedural generation, tiling and
  * preview, animation sheets, single-asset and whole-pack validation, model
  * and `.mcmeta` authoring, style presets and palette export, resource-pack
- * project authoring, and PNG comparison. `MCP_TOOL_NAMES` below is the
- * registry this count is checked against.
+ * project authoring, particle definition generation, and PNG comparison.
+ * `MCP_TOOL_NAMES` below is the registry this count is checked against.
  * The product document once listed `edit_asset` for the batch-edit slot, and
  * §90 wins, so the frozen name is `apply_asset_operations`. The input
  * shapes below are the frozen contract; handler behavior lives in
@@ -42,6 +42,7 @@ export const MCP_TOOL_NAMES = [
 	"compare_assets",
 	"style_asset",
 	"pack_asset",
+	"particle_asset",
 ] as const;
 
 export type McpToolName = (typeof MCP_TOOL_NAMES)[number];
@@ -637,17 +638,53 @@ export const mcmetaAssetInput = {
 	mkdir: z.boolean().optional().describe("Create missing parent directories."),
 };
 
+export const particleAssetInput = {
+	inputPath: z
+		.string()
+		.min(1)
+		.describe(
+			"Frames directory holding .png / .mcpx frames, or one .png / .mcpx frame file. Read only.",
+		),
+	outputDir: z
+		.string()
+		.min(1)
+		.describe(
+			"Resource pack root; the definition lands under assets/<namespace>/particles/ and sprites under assets/<namespace>/textures/particle/.",
+		),
+	namespace: z
+		.string()
+		.min(1)
+		.describe("Asset namespace shared by the definition and its sprites."),
+	id: z.string().min(1).describe("Particle definition id (one path segment)."),
+	texturePrefix: z
+		.string()
+		.min(1)
+		.optional()
+		.describe("Sprite name prefix; defaults to the particle id."),
+	force: z
+		.boolean()
+		.optional()
+		.describe(
+			"Replace existing output files; without it an occupied path refuses the batch.",
+		),
+	mkdir: z.boolean().optional().describe("Create missing parent directories."),
+};
+
 export const NEW_MCP_TOOL_NAMES = ["optimize_asset", "model_asset"] as const;
 export type OptimizeAssetInput = z.infer<
 	z.ZodObject<typeof optimizeAssetInput>
 >;
 export type McmetaAssetInput = z.infer<z.ZodObject<typeof mcmetaAssetInput>>;
 export type ModelAssetInput = z.infer<z.ZodObject<typeof modelAssetInput>>;
+export type ParticleAssetInput = z.infer<
+	z.ZodObject<typeof particleAssetInput>
+>;
 
 export const TOOL_INPUT_SCHEMAS = {
 	optimize_asset: optimizeAssetInput,
 	model_asset: modelAssetInput,
 	mcmeta_asset: mcmetaAssetInput,
+	particle_asset: particleAssetInput,
 	compare_assets: compareAssetsInput,
 	analyze_asset: {
 		path: z.string().min(1).describe("Raster image path (PNG, JPEG, WebP)."),

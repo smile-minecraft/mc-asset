@@ -29,6 +29,7 @@ import { type ModelCliOptions, type ModelMode, runModel } from "./cmd-model.ts";
 import { runOptimize } from "./cmd-optimize.ts";
 import { type PackOptions, runPack } from "./cmd-pack.ts";
 import { type PaletteOptions, runPalette } from "./cmd-palette.ts";
+import { type ParticleCliOptions, runParticle } from "./cmd-particle.ts";
 import {
 	type PixelizeCommandOptions,
 	runPixelizeCommand,
@@ -1681,6 +1682,33 @@ export function buildProgram(streams: OutputStreams = realStreams()): Command {
 				},
 			);
 	}
+	program
+		.command("particle <frames>")
+		.description(
+			"Generate a particle definition and its frame textures from a directory of PNG/.mcpx frames or one frame file.",
+		)
+		.option("--id <id>", "Particle definition id (required).")
+		.option("--namespace <namespace>", "Asset namespace (required).")
+		.option(
+			"--output-dir <dir>",
+			"Resource pack root receiving assets/ (required).",
+		)
+		.option(
+			"--texture-prefix <prefix>",
+			"Sprite name prefix (default: the particle id).",
+		)
+		.option("--force", "Replace existing output files.")
+		.option("--mkdir", "Create missing output directories.")
+		.action(
+			async (frames: string, options: ParticleCliOptions, current: Command) => {
+				process.exitCode = await runParticle(
+					frames,
+					options,
+					current.optsWithGlobals().json === true,
+					streams,
+				);
+			},
+		);
 	const model = program.command("model");
 	for (const mode of [
 		"inspect",

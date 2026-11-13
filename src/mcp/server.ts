@@ -19,6 +19,7 @@ import {
 	handleOptimizeAsset,
 	handlePackAsset,
 	handlePaletteAsset,
+	handleParticleAsset,
 	handlePixelizeAsset,
 	handlePreviewAsset,
 	handleQuantizeAsset,
@@ -267,6 +268,14 @@ export function createMcpServer(): McpServer {
 			inputSchema: TOOL_INPUT_SCHEMAS.pack_asset,
 		},
 		handlePackAsset,
+	);
+	server.registerTool(
+		"particle_asset",
+		{
+			description: toolDescription("particle_asset"),
+			inputSchema: TOOL_INPUT_SCHEMAS.particle_asset,
+		},
+		handleParticleAsset,
 	);
 	return server;
 }
