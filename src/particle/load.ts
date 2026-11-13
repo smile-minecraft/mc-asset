@@ -22,6 +22,8 @@ export interface ParticleWarning {
 export interface LoadedParticleFrames {
 	readonly inputPath: string;
 	readonly inputKind: "directory" | "file";
+	/** Path of every frame file that was read; never writable, even with force. */
+	readonly inputFiles: readonly string[];
 	/** Byte-ordered frames. */
 	readonly frames: readonly ParticleFrame[];
 	readonly warnings: readonly ParticleWarning[];
@@ -117,12 +119,15 @@ async function loadDirectory(inputPath: string): Promise<LoadedParticleFrames> {
 		);
 	}
 	const frames: ParticleFrame[] = [];
+	const inputFiles: string[] = [];
 	for (const name of names) {
-		const decoded = await decodeFrame(join(inputPath, name), name);
+		const framePath = join(inputPath, name);
+		const decoded = await decodeFrame(framePath, name);
 		frames.push(decoded.frame);
+		inputFiles.push(framePath);
 		warnings.push(...decoded.warnings);
 	}
-	return { inputPath, inputKind: "directory", frames, warnings };
+	return { inputPath, inputKind: "directory", inputFiles, frames, warnings };
 }
 
 /**
@@ -167,6 +172,7 @@ export async function loadParticleFrames(
 	return {
 		inputPath,
 		inputKind: "file",
+		inputFiles: [inputPath],
 		frames: [decoded.frame],
 		warnings: decoded.warnings,
 	};

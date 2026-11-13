@@ -111,8 +111,9 @@ export async function generateParticleAsset(
 	});
 	payloads.set(definitionPath, plan.definition.text);
 	const planned = await planOutputTargets(targets, {
-		inputs: [request.inputPath],
+		inputs: [request.inputPath, ...loaded.inputFiles],
 		mkdir: request.mkdir,
+		allowedRoot: request.outputDir,
 	});
 	await writePlannedTargets(planned, payloads, { mkdir: request.mkdir });
 	const textureFiles = plan.textures.map((texture) => texture.relativePath);

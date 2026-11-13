@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+	mkdir,
+	mkdtemp,
+	readFile,
+	rm,
+	symlink,
+	writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ensureMcpxText } from "../../src/cli/artifacts.ts";
 import type { OutputStreams } from "../../src/cli/channels.ts";
+import { generateParticleAsset } from "../../src/cli/cmd-particle.ts";
 import { runCli } from "../../src/cli/program.ts";
 import {
 	addLayer,
@@ -782,6 +790,248 @@ export const PARTICLE_CASES: readonly ParticleCase[] = [
 					force: true,
 				});
 				assert.equal(forced.isError, undefined);
+			});
+		},
+	},
+	{
+		name: "a frames directory inside the pack refuses to overwrite its own frames, via CLI and MCP",
+		async run() {
+			await withTempDir(async (dir) => {
+				const packDir = join(dir, "pack");
+				const framesDir = join(
+					packDir,
+					"assets",
+					"demo",
+					"textures",
+					"particle",
+				);
+				await mkdir(framesDir, { recursive: true });
+				await writeFrame(framesDir, "spark_1.png", solidCanvas(8, 8, RED));
+				await writeFrame(framesDir, "spark_2.png", solidCanvas(8, 8, GREEN));
+				const before1 = new Uint8Array(
+					await readFile(join(framesDir, "spark_1.png")),
+				);
+				const before2 = new Uint8Array(
+					await readFile(join(framesDir, "spark_2.png")),
+				);
+
+				const cli = await runParticleCli([
+					"particle",
+					framesDir,
+					"--id",
+					"spark",
+					"--namespace",
+					"demo",
+					"--output-dir",
+					packDir,
+					"--force",
+					"--mkdir",
+					"--json",
+				]);
+				assert.equal(cli.code, 2, stdoutText(cli));
+				const cliFailure = JSON.parse(stdoutText(cli)) as {
+					error: { code: string };
+				};
+				assert.equal(cliFailure.error.code, "ARGUMENT_CONFLICT");
+
+				const mcp = await handleParticleAsset({
+					inputPath: framesDir,
+					outputDir: packDir,
+					namespace: "demo",
+					id: "spark",
+					mkdir: true,
+					force: true,
+				});
+				assert.equal(mcp.isError, true);
+				const mcpFailure = JSON.parse(mcpText(mcp)) as { code: string };
+				assert.equal(mcpFailure.code, "ARGUMENT_CONFLICT");
+
+				await assert.rejects(
+					generateParticleAsset({
+						inputPath: framesDir,
+						outputDir: packDir,
+						namespace: "demo",
+						id: "spark",
+						mkdir: true,
+						force: true,
+					}),
+					(error: unknown) => {
+						assert.ok(error instanceof McAssetError);
+						assert.equal(error.code, "ARGUMENT_CONFLICT");
+						return true;
+					},
+				);
+
+				assert.deepEqual(
+					new Uint8Array(await readFile(join(framesDir, "spark_1.png"))),
+					before1,
+				);
+				assert.deepEqual(
+					new Uint8Array(await readFile(join(framesDir, "spark_2.png"))),
+					before2,
+				);
+				assert.equal(existsSync(join(framesDir, "spark_0.png")), false);
+				assert.equal(
+					existsSync(join(packDir, "assets/demo/particles/spark.json")),
+					false,
+				);
+			});
+		},
+	},
+	{
+		name: "a namespace symlink cannot escape the output directory",
+		async run() {
+			await withTempDir(async (dir) => {
+				const outside = join(dir, "outside");
+				await mkdir(join(outside, "particles"), { recursive: true });
+				await mkdir(join(outside, "textures", "particle"), { recursive: true });
+				await writeFile(
+					join(outside, "particles", "spark.json"),
+					"sentinel-definition",
+				);
+				await writeFile(
+					join(outside, "textures", "particle", "spark_0.png"),
+					"sentinel-sprite",
+				);
+
+				const packDir = join(dir, "pack");
+				await mkdir(join(packDir, "assets"), { recursive: true });
+				await symlink(outside, join(packDir, "assets", "demo"));
+
+				const framesDir = join(dir, "frames");
+				await writeFrames(framesDir, ["frame_0.png"]);
+
+				const result = await runParticleCli([
+					"particle",
+					framesDir,
+					"--id",
+					"spark",
+					"--namespace",
+					"demo",
+					"--output-dir",
+					packDir,
+					"--force",
+					"--mkdir",
+					"--json",
+				]);
+				assert.notEqual(result.code, 0, stdoutText(result));
+				const failure = JSON.parse(stdoutText(result)) as {
+					error: { code: string; details?: { reason?: string } };
+				};
+				assert.equal(failure.error.code, "INVALID_ARGUMENT");
+				assert.equal(failure.error.details?.reason, "outside-allowed-root");
+				assert.equal(
+					await readText(join(outside, "particles", "spark.json")),
+					"sentinel-definition",
+				);
+				assert.equal(
+					await readFile(
+						join(outside, "textures", "particle", "spark_0.png"),
+						"utf8",
+					),
+					"sentinel-sprite",
+				);
+			});
+		},
+	},
+	{
+		name: "dot segments are refused as namespace, id, and texture prefix, and nothing is written",
+		async run() {
+			assertCode(
+				() =>
+					planParticleAsset({
+						namespace: ".",
+						id: "spark",
+						frames: [{ name: "a.png", canvas: solidCanvas(1, 1, RED) }],
+					}),
+				"INVALID_ARGUMENT",
+			);
+			assertCode(
+				() =>
+					planParticleAsset({
+						namespace: "..",
+						id: "spark",
+						frames: [{ name: "a.png", canvas: solidCanvas(1, 1, RED) }],
+					}),
+				"INVALID_ARGUMENT",
+			);
+			assertCode(
+				() =>
+					planParticleAsset({
+						namespace: "demo",
+						id: ".",
+						frames: [{ name: "a.png", canvas: solidCanvas(1, 1, RED) }],
+					}),
+				"INVALID_ARGUMENT",
+			);
+			assertCode(
+				() =>
+					planParticleAsset({
+						namespace: "demo",
+						id: "..",
+						frames: [{ name: "a.png", canvas: solidCanvas(1, 1, RED) }],
+					}),
+				"INVALID_ARGUMENT",
+			);
+			assertCode(
+				() =>
+					planParticleAsset({
+						namespace: "demo",
+						id: "spark",
+						texturePrefix: ".",
+						frames: [{ name: "a.png", canvas: solidCanvas(1, 1, RED) }],
+					}),
+				"INVALID_ARGUMENT",
+			);
+			assertCode(
+				() =>
+					planParticleAsset({
+						namespace: "demo",
+						id: "spark",
+						texturePrefix: "..",
+						frames: [{ name: "a.png", canvas: solidCanvas(1, 1, RED) }],
+					}),
+				"INVALID_ARGUMENT",
+			);
+
+			await withTempDir(async (dir) => {
+				const framesDir = join(dir, "frames");
+				await writeFrames(framesDir, ["frame_0.png"]);
+				const attempts = [
+					{ flag: "--namespace", value: ".." },
+					{ flag: "--namespace", value: "." },
+					{ flag: "--id", value: ".." },
+					{ flag: "--id", value: "." },
+					{ flag: "--texture-prefix", value: ".." },
+					{ flag: "--texture-prefix", value: "." },
+				] as const;
+				for (const attempt of attempts) {
+					const outputDir = join(
+						dir,
+						`pack-${attempt.flag.slice(2)}-${attempt.value === "." ? "dot" : "dotdot"}`,
+					);
+					const result = await runParticleCli([
+						"particle",
+						framesDir,
+						"--id",
+						attempt.flag === "--id" ? attempt.value : "spark",
+						"--namespace",
+						attempt.flag === "--namespace" ? attempt.value : "demo",
+						...(attempt.flag === "--texture-prefix"
+							? ["--texture-prefix", attempt.value]
+							: []),
+						"--output-dir",
+						outputDir,
+						"--mkdir",
+						"--json",
+					]);
+					assert.equal(result.code, 2, stdoutText(result));
+					const failure = JSON.parse(stdoutText(result)) as {
+						error: { code: string };
+					};
+					assert.equal(failure.error.code, "INVALID_ARGUMENT");
+					assert.equal(existsSync(outputDir), false);
+				}
 			});
 		},
 	},

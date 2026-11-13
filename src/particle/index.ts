@@ -99,7 +99,7 @@ export function compareFrameNames(left: string, right: string): number {
 
 /** Validate a namespace and return it unchanged. */
 export function validateParticleNamespace(value: string): string {
-	if (!NAMESPACE_PATTERN.test(value)) {
+	if (value === "." || value === ".." || !NAMESPACE_PATTERN.test(value)) {
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
 			`Invalid particle namespace "${value}"; expected [a-z0-9_.-].`,
@@ -111,7 +111,7 @@ export function validateParticleNamespace(value: string): string {
 
 /** Validate the particle id (one path segment) and return it unchanged. */
 export function validateParticleId(value: string): string {
-	if (!SEGMENT_PATTERN.test(value)) {
+	if (value === "." || value === ".." || !SEGMENT_PATTERN.test(value)) {
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
 			`Invalid particle id "${value}"; expected one lowercase segment [a-z0-9._-].`,
@@ -127,7 +127,7 @@ export function resolveTexturePrefix(
 	id: string,
 ): string {
 	const value = prefix === undefined || prefix === "" ? id : prefix;
-	if (!SEGMENT_PATTERN.test(value)) {
+	if (value === "." || value === ".." || !SEGMENT_PATTERN.test(value)) {
 		throw new McAssetError(
 			"INVALID_ARGUMENT",
 			`Invalid texture prefix "${value}"; expected one lowercase segment [a-z0-9._-].`,
