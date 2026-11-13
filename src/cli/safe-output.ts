@@ -72,6 +72,37 @@ export async function canonicalKey(path: string): Promise<string> {
 	}
 }
 
+/**
+ * Alias comparison with symlink resolution, preserving the case the
+ * filesystem reports: realpath of the nearest existing ancestor plus the
+ * remaining segments, NFC-normalized only. Unlike canonicalKey it never
+ * folds case, so the allowed-root boundary stays correct on volumes that
+ * distinguish it. A symlink segment that resolves to a missing target is a
+ * dangling symlink: it is refused here instead of being walked through.
+ */
+export async function canonicalRealpath(path: string): Promise<string> {
+	const absolute = resolve(path);
+	let current = absolute;
+	const rest: string[] = [];
+	for (;;) {
+		try {
+			return join(await realpath(current), ...rest).normalize("NFC");
+		} catch {
+			if ((await lstatOrUndefined(current))?.isSymbolicLink() === true) {
+				throw new McAssetError(
+					"FILESYSTEM_ERROR",
+					`Path ancestor is a dangling symbolic link: ${current}.`,
+					{ reason: "parent-is-symlink", path: current },
+				);
+			}
+			const parent = dirname(current);
+			if (parent === current) return absolute.normalize("NFC");
+			rest.unshift(basename(current));
+			current = parent;
+		}
+	}
+}
+
 async function statOrUndefined(path: string): Promise<Stats | undefined> {
 	try {
 		return await stat(path);
@@ -161,10 +192,10 @@ async function planTargets(
 			problems[index] === undefined ? canonicalKey(target.path) : undefined,
 		),
 	);
-	const rootKey =
+	const rootPath =
 		options.allowedRoot === undefined
 			? undefined
-			: await canonicalKey(options.allowedRoot);
+			: await canonicalRealpath(options.allowedRoot);
 	const plan: PlannedTarget[] = [];
 	for (const [index, target] of targets.entries()) {
 		const problem = problems[index];
@@ -247,16 +278,19 @@ async function planTargets(
 			}
 		}
 
-		if (rootKey !== undefined && !isInside(rootKey, canonical)) {
-			throw new McAssetError(
-				"INVALID_ARGUMENT",
-				`Output is outside the allowed directory: ${target.path}.`,
-				{
-					reason: "outside-allowed-root",
-					path: target.path,
-					allowedRoot: options.allowedRoot,
-				},
-			);
+		if (rootPath !== undefined) {
+			const targetPath = await canonicalRealpath(target.path);
+			if (!isInside(rootPath, targetPath)) {
+				throw new McAssetError(
+					"INVALID_ARGUMENT",
+					`Output is outside the allowed directory: ${target.path}.`,
+					{
+						reason: "outside-allowed-root",
+						path: target.path,
+						allowedRoot: options.allowedRoot,
+					},
+				);
+			}
 		}
 
 		plan.push({

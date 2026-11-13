@@ -7,7 +7,7 @@ export interface McpToolDefinition {
 }
 
 /**
- * Frozen tool surface: the twenty-seven names in `MCP_TOOL_NAMES`, each with
+ * Frozen tool surface: the twenty-eight names in `MCP_TOOL_NAMES`, each with
  * its final description and input schema. Descriptions state the read/write
  * contract so agents pick batch or grid paths instead of per-pixel calls.
  */
@@ -173,5 +173,11 @@ export const MCP_TOOLS: readonly McpToolDefinition[] = [
 		description:
 			"Create a resource pack project: init writes the project document, the pack root metadata for the pinned release version, a 64x64 placeholder icon, and the assets directory skeleton in one preflighted batch. An occupied target refuses the whole batch and reports every conflicting path; nothing is overwritten. The project document is written once and then read only.",
 		inputSchema: TOOL_INPUT_SCHEMAS.pack_asset,
+	},
+	{
+		name: "particle_asset",
+		description:
+			"Generate a particle definition (assets/<namespace>/particles/<id>.json) and its frame sprites (assets/<namespace>/textures/particle/<prefix>_<n>.png) from a frames directory or one PNG/.mcpx frame. Frames are ordered by UTF-8 file-name bytes, never readdir order; textures[] entries are namespaced paths without .png or the textures/particle/ prefix. Every target is checked before the first write, and an occupied path refuses the whole batch unless force is true. The tool cannot add new particle types; a pack only overrides existing ones.",
+		inputSchema: TOOL_INPUT_SCHEMAS.particle_asset,
 	},
 ];

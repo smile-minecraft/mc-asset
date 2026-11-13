@@ -28,6 +28,7 @@ import {
 	restoreUnselectedPixels,
 	snapshotLayerBytes,
 } from "../cli/canvas-input.ts";
+import { generateParticleAsset } from "../cli/cmd-particle.ts";
 import { resolveStyleFamilyRamps } from "../cli/cmd-recolor.ts";
 import { writeStyleFile, writeStylePalette } from "../cli/cmd-style.ts";
 import { expandVariantName } from "../cli/cmd-variant.ts";
@@ -173,6 +174,7 @@ import { scanPack } from "../validate/pack.ts";
 import type {
 	CompareAssetsInput,
 	McmetaAssetInput,
+	ParticleAssetInput,
 	TOOL_INPUT_SCHEMAS,
 } from "./schema.ts";
 
@@ -3240,6 +3242,31 @@ export async function handlePackAsset(
 			"pack_asset mode must be init, build, catalog, extract, check, or package.",
 			{ mode: args.mode },
 		);
+	} catch (error) {
+		return errorResult(error);
+	}
+}
+
+/**
+ * Particle definitions. One frames directory (or one frame file) in, one
+ * definition plus one sprite per frame out. The shared command path owns the
+ * frame intake, the deterministic byte order, the whole-batch preflight, and
+ * the report shape, so the tool and the CLI write identical files.
+ */
+export async function handleParticleAsset(
+	args: ParticleAssetInput,
+): Promise<McpTextResult> {
+	try {
+		const report = await generateParticleAsset({
+			inputPath: args.inputPath,
+			outputDir: args.outputDir,
+			namespace: args.namespace,
+			id: args.id,
+			texturePrefix: args.texturePrefix,
+			force: args.force === true,
+			mkdir: args.mkdir === true,
+		});
+		return textResult({ ...report });
 	} catch (error) {
 		return errorResult(error);
 	}

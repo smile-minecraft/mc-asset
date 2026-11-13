@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+	access,
 	mkdir,
 	mkdtemp,
 	readdir,
@@ -11,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+	isInside,
 	type OutputTarget,
 	planOutputTargets,
 	writePlannedTargets,
@@ -64,6 +66,17 @@ async function reject(
 			return true;
 		},
 	);
+}
+/** True when `dir` keeps `case-probe` and `CASE-PROBE` apart. */
+async function isCaseSensitiveDir(dir: string): Promise<boolean> {
+	const probe = join(dir, "case-probe");
+	await writeFile(probe, "x");
+	try {
+		await access(join(dir, "CASE-PROBE"));
+		return false;
+	} catch {
+		return true;
+	}
 }
 for (const path of ["", "bad\0.json", "bad.png"])
 	add(`invalid path ${JSON.stringify(path)}`, async () =>
@@ -151,6 +164,18 @@ add("outside allowed root", async (root) => {
 		pack,
 	);
 });
+add("isInside keeps the filesystem case on the boundary", async () => {
+	assert.equal(
+		isInside("/tmp/packcli", "/tmp/PACKCLI/particles/spark.json"),
+		false,
+	);
+	assert.equal(
+		isInside("/tmp/packcli", "/tmp/packcli/particles/spark.json"),
+		true,
+	);
+	assert.equal(isInside("/tmp/packcli", "/tmp/packcli"), true);
+	assert.equal(isInside("/tmp/packcli", "/tmp/packcli-other/a.json"), false);
+});
 add("ancestor symlink escape", async (root) => {
 	const pack = join(root, "pack");
 	const outside = join(root, "outside");
@@ -166,6 +191,54 @@ add("ancestor symlink escape", async (root) => {
 		pack,
 	);
 });
+add(
+	"case-distinct external directory behind a symlink is outside the allowed root",
+	async (root) => {
+		if (!(await isCaseSensitiveDir(root))) return;
+		const packcli = join(root, "packcli");
+		const PACKCLI = join(root, "PACKCLI");
+		await mkdir(join(packcli, "assets"), { recursive: true });
+		await mkdir(join(PACKCLI, "particles"), { recursive: true });
+		await writeFile(
+			join(PACKCLI, "particles", "spark.json"),
+			"sentinel-definition",
+		);
+		await symlink(PACKCLI, join(packcli, "assets", "demo"));
+		await reject(
+			[
+				target(
+					join(packcli, "assets", "demo", "particles", "spark.json"),
+					true,
+				),
+			],
+			[],
+			"INVALID_ARGUMENT",
+			"outside-allowed-root",
+			false,
+			packcli,
+		);
+		assert.equal(
+			await readFile(join(PACKCLI, "particles", "spark.json"), "utf8"),
+			"sentinel-definition",
+		);
+	},
+);
+add(
+	"dangling symlink ancestor is refused before the allowed root check",
+	async (root) => {
+		const packcli = join(root, "packcli");
+		await mkdir(packcli);
+		await symlink(join(root, "missing-outside"), join(packcli, "link"));
+		await reject(
+			[target(join(packcli, "link", "sub", "a.json"), true)],
+			[],
+			"FILESYSTEM_ERROR",
+			"parent-is-symlink",
+			true,
+			packcli,
+		);
+	},
+);
 add("all targets preflight without creating parents", async (root) => {
 	const old = join(root, "old.json");
 	await writeFile(old, "old");
