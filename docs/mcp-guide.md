@@ -13,7 +13,7 @@
 
 `mc-asset mcp` starts a stdio MCP server: stdout carries only MCP JSON-RPC,
 diagnostics go to stderr, and the process ends when stdin closes. The frozen
-surface — twenty-seven tool names, their inputs, and the read/write contract — lives
+surface — 31 tool names, their inputs, and the read/write contract — lives
 in `docs/mcp-surface.md`; the input fields are frozen in `src/mcp/schema.ts`.
 This guide covers registration, one capture per tool (image bytes are
 abbreviated where noted, never verbatim), the error model, and the limits.
@@ -110,12 +110,7 @@ Then fully restart the client. MCP servers load at startup, so a config change
 without a restart proves nothing. To roll back, remove the entry (or restore
 the config backup) and restart again.
 
-The captures below were taken with the MCP client SDK from a demo working
-directory; every path in them is relative to that directory, except the
-`inspect_asset` structure capture, which names the repo fixture
-`tests/cli/fixtures/sword.mcpx` directly. The seven
-original captures come from the installed build and the later additions from
-the local source server — the same server code runs either way.
+The captures below use the MCP client SDK. Earlier examples use a demo working directory; newer examples name repository fixtures or the temporary paths used for their captures. The original captures came from the installed build and later additions from a local source server.
 
 ## Tools
 
@@ -130,6 +125,8 @@ the local source server — the same server code runs either way.
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
 | [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | [`mcmeta_asset`](#mcmeta_asset) |
 | [`compare_assets`](#compare_assets) | [`style_asset`](#style_asset) | [`pack_asset`](#pack_asset) |
+| [`entity_asset`](#entity_asset) | [`equipment_asset`](#equipment_asset) | [`font_asset`](#font_asset) |
+| [`particle_asset`](#particle_asset) | | |
 
 ### analyze_asset
 
@@ -139,14 +136,13 @@ optionally, `profile`, `minecraftVersion`, or `resourcePackVersion`.
 Call:
 
 ```json
-{"path":"px-8x8.png"}
+{"path":"tests/cli/fixtures/px-8x8.png"}
 ```
 
-Result (verbatim; the `dominantColors` array is truncated after the first of
-8 entries — each entry carries `count` 1 and `ratio` "0.0156"):
+The first object from the result's `dominantColors` array is shown below; the other entries are omitted:
 
-```text
-{"dimensions":{"width":8,"height":8},"totalPixels":64,"colorCount":64,"alpha":{"predictedClassification":"translucent","opaquePixels":62,"transparentPixels":1,"partialAlphaPixels":1,"partialAlphaValues":[128],"opaqueRatio":"0.9688","transparentRatio":"0.0156","partialAlphaRatio":"0.0156","predictedNote":"predicted classification from PNG bytes only; not the final in-game render result."},"dominantColors":[{"hex":"#03ED20FF","r":3,"g":237,"b":32,"a":255,"count":1,"ratio":"0.0156"} … 7 more entries, each count 1 / ratio "0.0156" …]}
+```json
+{"hex":"#03ED20FF","r":3,"g":237,"b":32,"a":255,"count":1,"ratio":"0.0156"}
 ```
 
 The classification is predicted from PNG bytes only, never the in-game render
@@ -267,22 +263,22 @@ while `snapFamilies` is true. It accepts the same optional `selection`. The
 full per-type table lives in the “Batch Operations Specification” section of
 `docs/cli-surface.md`.
 
-Feedback example — one changed pixel with a summary (abbreviated, not
-verbatim; image data omitted):
+Feedback example — one changed pixel with a summary (the image data is omitted):
 
 Call:
 
 ```json
-{"sourcePath":"sword.mcpx","operations":[{"type":"setPixel","layerId":"base","x":0,"y":0,"color":"#FF0000FF"}],"feedback":{"image":"changed","diff":"summary"}}
+{"sourcePath":"tests/cli/fixtures/sword.mcpx","operations":[{"type":"setPixel","layerId":"base","x":0,"y":0,"color":"#FF0000FF"}],"feedback":{"image":"changed","diff":"summary"}}
 ```
 
 Result: the text block carries `applied: 1, failed: 0`, one raw and one
 composited changed pixel, and `outsideSelectionUnchanged: true`; the image
-arrives as a second `type: "image"`, `mimeType: "image/png"` block:
+arrives as a second `type: "image"`, `mimeType: "image/png"` block.
 
-```text
-{"applied":1,"failed":0,"operations":[{"index":0,"status":"applied"}],"warnings":[],"feedback":{"image":"changed","imageIncluded":true,"diff":{"raw":{"changedPixels":1 …},"composited":{"changedPixels":1 …},"structural":…,"outsideSelectionUnchanged":true}},"mcpxText":"mcpx 1\n… (truncated) …"}
-[second block: {"type":"image","mimeType":"image/png","data":"… (omitted) …"}]
+The following is the `feedback` object from the text block; the rest of the text block and the image data are omitted:
+
+```json
+{"image":"changed","imageIncluded":true,"diff":{"raw":{"changedPixels":1,"bounds":{"x":0,"y":0,"width":1,"height":1}},"composited":{"changedPixels":1,"bounds":{"x":0,"y":0,"width":1,"height":1}},"structural":{"added":[],"removed":[],"modified":[]},"outsideSelectionUnchanged":true}}
 ```
 
 ### recolor_asset
@@ -634,6 +630,8 @@ Result (verbatim):
 {"command":"validate-pack","path":"clean-pack","target":"resource-pack 75.0","verdict":"pass","findings":[{"code":"PACK_COVERAGE_SKIPPED","level":"warning","message":"atlas \"items\" for sprite \"minecraft:item/sword\" in \"assets/minecraft/models/item/sword.json\" cannot be completed without the vanilla resource tree; coverage recorded as skipped.","path":"assets/minecraft/models/item/sword.json"}],"coverage":{"status":"partial","skipped":[{"kind":"atlas-source","reason":"vanilla-not-provided","target":"items","detail":"sprite \"minecraft:item/sword\" needs the vanilla atlas sources"}]},"version":{"resourcePackVersion":"75.0"}}
 ```
 
+The scan also checks references in equipment, particle, font, sound, post-effect and waypoint-style documents. Unsupported or unresolved checks are recorded in coverage.
+
 ### inspect_asset
 
 Read-only inspection over an `.mcpx` source or a raster image — a raster
@@ -698,6 +696,62 @@ The `candidates` list shows every encoding that was tried and why the others
 did not apply. In the compute phase a batch is all or nothing: if any input
 fails, nothing is written and the error lists `processed` and `notProcessed`.
 
+### entity_asset
+
+Inspect a builtin layout, produce a template, validate a texture, or render a diagnostic preview. Game-client appearance has not been verified.
+
+```json
+{"mode":"inspect","layout":"player_slim"}
+```
+
+The `layout` object from the MCP text result is shown below; the separate `parts` array is omitted:
+
+```json
+{"id":"player_slim","texture":{"width":64,"height":64},"partCount":12,"faceCount":72,"mappedPixels":3136,"totalPixels":4096,"unmappedPixels":960}
+```
+
+### equipment_asset
+
+Generate an equipment definition for a target pack format. `template: false` returns only the definition; only humanoid, humanoid_leggings and wings have verified template layouts.
+
+```json
+{"namespace":"demo","id":"ruby","layers":[{"type":"humanoid"}],"resourcePackVersion":"75","template":false}
+```
+
+MCP text result (verbatim):
+
+```text
+{"command":"equipment","id":"ruby","namespace":"demo","packFormat":"75.0","definitionDirectory":"equipment","definition":"assets/demo/equipment/ruby.json","layers":{"humanoid":[{"texture":"demo:ruby"}]},"textures":[],"files":["assets/demo/equipment/ruby.json"],"definitionText":"{\n  \"layers\": {\n    \"humanoid\": [\n      {\n        \"texture\": \"demo:ruby\"\n      }\n    ]\n  }\n}\n","version":{"resourcePackVersion":"75.0"}}
+```
+
+### font_asset
+
+Build bitmap font atlases and an icon table from `spec` or `specPath`. This call uses the repository fixture and writes the atlas to the specified temporary path.
+
+```json
+{"specPath":"tests/pack/fixtures/demo-pack/recipes/sources/icons.font.json","atlasPath":"/tmp/mc-asset-docs/font-atlas.png"}
+```
+
+MCP text result (the original response contains the U+E000 character; it is escaped here for readability):
+
+```text
+{"command":"font","font":"aurelian:icons","icons":1,"atlases":[{"texture":"aurelian:font/icons.png","height":8,"ascent":7,"columns":1,"rows":1,"icons":1,"atlasWidth":4,"atlasHeight":8,"atlas":"/tmp/mc-asset-docs/font-atlas.png"}],"warnings":[],"definitionText":"{\n  \"providers\": [\n    {\n      \"ascent\": 7,\n      \"chars\": [\n        \"\\uE000\"\n      ],\n      \"file\": \"aurelian:font/icons.png\",\n      \"height\": 8,\n      \"type\": \"bitmap\"\n    }\n  ]\n}\n","tableText":"{\n  \"font\": \"aurelian:icons\",\n  \"icons\": [\n    {\n      \"character\": \"\\uE000\",\n      \"codePoint\": 57344,\n      \"name\": \"gem\"\n    }\n  ]\n}\n"}
+```
+
+### particle_asset
+
+Build a particle definition and ordered frame textures in an explicit pack directory. Resource packs override existing particle types; they cannot add new types.
+
+```json
+{"inputPath":"tests/pack/fixtures/demo-pack/recipes/sources/spark","outputDir":"/tmp/mc-asset-docs/particle-pack","namespace":"demo","id":"spark","mkdir":true}
+```
+
+MCP text result (verbatim):
+
+```text
+{"command":"particle","id":"spark","namespace":"demo","outputDir":"/tmp/mc-asset-docs/particle-pack","input":"tests/pack/fixtures/demo-pack/recipes/sources/spark","inputKind":"directory","frameCount":2,"frames":[{"input":"frame_10.mcpx","texture":"demo:spark_0","width":4,"height":4},{"input":"frame_2.mcpx","texture":"demo:spark_1","width":4,"height":4}],"definition":"assets/demo/particles/spark.json","textureFiles":["assets/demo/textures/particle/spark_0.png","assets/demo/textures/particle/spark_1.png"],"files":["assets/demo/textures/particle/spark_0.png","assets/demo/textures/particle/spark_1.png","assets/demo/particles/spark.json"],"warnings":[]}
+```
+
 ### model_asset
 
 Inspects, validates, creates, edits, or exports a Java block/item model JSON
@@ -735,27 +789,31 @@ Result (actual local MCP text-block response; the pack held the referenced textu
 (`MODEL_UNSUPPORTED_VERSION` otherwise). Without a vanilla tree, `minecraft`
 references are recorded as skipped coverage instead of being resolved.
 
-Call (preview that model as a diagnostic three-view PNG):
+The following capture uses the repository fixture and selects a display slot:
 
 ```json
-{"mode":"preview","inputPath":"pack/assets/mypack/models/block/ruby.json","packPath":"pack","size":64,"resourcePackVersion":"75"}
+{"mode":"preview","inputPath":"tests/model/fixtures/stable-model.json","display":"gui","lighting":true,"tint":"#80FF80"}
 ```
 
-Result (actual local MCP text-block response; the pack held no texture, so the
-faces render as the fixed checkerboard and coverage is `partial`):
+MCP text result (the image block is omitted):
 
 ```text
-{"command":"model","mode":"preview","path":"assets/mypack/models/block/ruby.json","size":64,"version":{"packFormat":"75.0","rules":"verified","rulesReason":"verified-release"},"image":{"width":192,"height":64},"panels":[{"name":"front","x":0,"y":0,"width":64,"height":64},{"name":"right","x":64,"y":0,"width":64,"height":64},{"name":"top","x":128,"y":0,"width":64,"height":64}],"range":{"min":[0,0,0],"max":[16,16,16],"pixelsPerUnit":3},"coverage":{"status":"partial","skipped":[{"kind":"texture","reason":"missing","target":"mypack:block/ruby"}]},"warnings":[{"code":"MODEL_PREVIEW_TEXTURE_MISSING","level":"warning","message":"Texture mypack:block/ruby could not be resolved (missing).","target":"mypack:block/ruby"}],"unapplied":["display","lighting"]}
+{"command":"model","mode":"preview","path":"tests/model/fixtures/stable-model.json","size":64,"version":{"rules":"undetermined","rulesReason":"version-not-determined"},"image":{"width":64,"height":64},"panels":[{"name":"display","x":0,"y":0,"width":64,"height":64}],"range":{"min":[-7.75,-8,-8],"max":[7.75,8,8],"pixelsPerUnit":2},"coverage":{"status":"partial","skipped":[{"kind":"texture","reason":"unresolved","target":"#all"}]},"warnings":[{"code":"MODEL_PREVIEW_TEXTURE_UNRESOLVED","level":"warning","message":"Texture #all could not be resolved (unresolved).","target":"#all"},{"code":"MODEL_PREVIEW_TINT_UNUSED","level":"warning","message":"Tint colours were given but no face declares tintindex.","target":"tintindex"}],"unapplied":["ambient-occlusion","world-lightmap","shadows","perspective-projection","camera-rig","left-hand-mirroring","display-slot-missing","flat-item-lighting-variation","gui-item-shader-lighting"],"display":{"slot":"gui","rotation":[0,0,0],"translation":[0,0,0],"scale":[1,1,1],"applied":false,"clamped":false},"lighting":{"mode":"flat","guiLight":"front"},"tint":{"color":"#80ff80","appliedFaces":0,"uncoloredFaces":0}}
 ```
 
-Without `outputPngPath` the PNG returns as a standard image block next to
-that report. With `outputPngPath` the file is written and only the report
-returns as text. The preview image output path field is named `outputPngPath`, matching the other PNG-output tools; the model's `.json` output still uses the existing `outputPath`. The three panels are always `front` (north face), `right`
-(east face), and `top` (up face, north at the top); each panel is `size`
-pixels square. Only axis-aligned cuboids with exact 1/256 coordinates draw;
-`size` accepts 64, 128, or 256 (default 64). This is a diagnostic view:
-`display` transforms and game lighting are not applied, and nothing in a
-game client verified the appearance.
+A per-index tint call uses `tints` instead of `tint`:
+
+```json
+{"mode":"preview","inputPath":"tests/model/fixtures/stable-model.json","view":"isometric","lighting":true,"tints":{"0":"#FF0000","1":"#00FF00"}}
+```
+
+MCP text result (the image block is omitted):
+
+```text
+{"command":"model","mode":"preview","path":"tests/model/fixtures/stable-model.json","size":64,"version":{"rules":"undetermined","rulesReason":"version-not-determined"},"image":{"width":64,"height":64},"panels":[{"name":"isometric","x":0,"y":0,"width":64,"height":64}],"range":{"min":[0.25,0,0],"max":[15.75,16,16],"pixelsPerUnit":0.875},"coverage":{"status":"partial","skipped":[{"kind":"texture","reason":"unresolved","target":"#all"}]},"warnings":[{"code":"MODEL_PREVIEW_TEXTURE_UNRESOLVED","level":"warning","message":"Texture #all could not be resolved (unresolved).","target":"#all"},{"code":"MODEL_PREVIEW_TINT_UNUSED","level":"warning","message":"Tint colours were given but no face declares tintindex.","target":"tintindex"}],"unapplied":["display","ambient-occlusion","world-lightmap","shadows","perspective-projection","flat-item-lighting-variation","gui-item-shader-lighting"],"view":{"kind":"isometric","direction":"south-east"},"lighting":{"mode":"flat","guiLight":"front"},"tint":{"tints":{"0":"#ff0000","1":"#00ff00"},"appliedFaces":0,"uncoloredFaces":0}}
+```
+
+`display` selects a slot and cannot be combined with `view`; `view: "isometric"` selects a single panel, with `viewDirection` for the camera. `lighting` applies fixed shading selected by `gui_light`. `tint` colors every face with `tintindex`; `tints` maps individual indices to colors. Without `outputPngPath` the PNG returns as an image block. This capture warns that the texture was unresolved and no face declared a tint index. The preview omits world lighting, ambient occlusion, shadows and game poses; appearance in a game client is unverified.
 
 ### style_asset
 
@@ -838,11 +896,7 @@ One preflighted batch writes `mc-asset.pack.json`, `pack/pack.mcmeta`,
 a 64x64 `pack/pack.png` placeholder icon, and the resource pack
 directories (`recipes/` plus `pack/assets/aurelian/...`, with `items/`
 from resource pack format 46.0 on). The result reports the pinned
-format and every path it created:
-
-```json
-{"mode":"init","projectDir":"/abs/packs/aurelian-forge","minecraftVersion":"1.21.9","packFormat":"69.0","resourcePackVersion":"69.0","files":["mc-asset.pack.json","pack/pack.mcmeta","pack/pack.png"],"directories":["pack","pack/assets","pack/assets/aurelian","pack/assets/aurelian/items","pack/assets/aurelian/models","pack/assets/aurelian/models/item","pack/assets/aurelian/textures","pack/assets/aurelian/textures/block","pack/assets/aurelian/textures/item","recipes"]}
-```
+format and every path it created.
 
 `--resource-pack-version` equivalent (`resourcePackVersion`) overrides the
 format the release version maps to while the release version stays in the
@@ -853,11 +907,7 @@ single legacy major. The generated document is checked in memory against
 the `validate-pack` root metadata rules before it is written.
 
 Nothing is overwritten. A path that already exists refuses the whole
-batch:
-
-```json
-{"code":"PACK_INIT_CONFLICT","message":"pack init found 2 paths it would create.","details":{"path":"/abs/packs/aurelian-forge","minecraftVersion":"1.21.9","conflicts":["pack","pack/pack.mcmeta"]}}
-```
+batch with `PACK_INIT_CONFLICT`.
 
 A symbolic link, in the project directory or anywhere below it, is
 `FILESYSTEM_ERROR` and never written through, and an unknown release
@@ -871,7 +921,7 @@ field, `PACK_PROJECT_NOT_FOUND`, `PACK_PROJECT_UNSUPPORTED_VERSION`).
 Call:
 
 ```json
-{"mode":"build","projectPath":"packs/aurelian-forge/mc-asset.pack.json","dryRun":true}
+{"mode":"build","projectPath":"tests/pack/fixtures/demo-pack/mc-asset.pack.json","dryRun":true}
 ```
 
 Build execution runs in three stages:
@@ -883,17 +933,15 @@ Build execution runs in three stages:
    - `foreign`: not in lock but file exists on disk (conflict).
 3. *Write*: Performs safe-output preflights across all targets; if all pass, files are written atomically and `mc-asset.lock.json` is updated atomically.
 
-If any planned output is `own-modified` or `foreign`, the entire batch is refused with `PACK_BUILD_CONFLICT` (code 4) listing all conflicts in `details.conflicts`, writing nothing and leaving the lockfile untouched:
+If any planned output is `own-modified` or `foreign`, the entire batch is refused with `PACK_BUILD_CONFLICT` (code 4) listing all conflicts in `details.conflicts`, writing nothing and leaving the lockfile untouched.
+
+The first entry in the `outputs` array returned by the dry-run call is shown below; the remaining entries are omitted:
 
 ```json
-{"code":"PACK_BUILD_CONFLICT","message":"pack build found conflicting outputs.","details":{"recipeId":"tool-matrix","conflicts":[{"path":"pack/assets/aurelian/textures/item/iron_sword.png","reason":"foreign"}]}}
+{"path":"pack/assets/aurelian/textures/item/aurelian_blade.png","judgement":"new","targetId":"aurelian_blade","recipeId":"aurelian-demo"}
 ```
 
-Result:
-
-```json
-{"mode":"build","recipeId":"tool-matrix","outputs":35,"completed":[],"dryRun":true}
-```
+Recipes can also generate block models and blockstates, entity templates, equipment, font atlases and particles. The `outputs` array records each planned path and its classification.
 
 When run without `dryRun`, `completed` lists every path written, and `mc-asset.lock.json` records output hashes to guarantee idempotent subsequent runs.
 
@@ -922,6 +970,16 @@ Absolute paths, `..` segments, and encrypted entries are `PACK_ARCHIVE_INVALID`,
 ```
 
 Findings group by code with counts; the fix list orders error codes first, then by descending count, then by code byte order. The verdict fails when pack validation fails or any texture hits the color budget error, otherwise warnings stay warnings.
+
+`check` also checks the existence of generated outputs recorded in the lock. Recorded generated textures are excluded from hand-painted style checks and unreferenced-texture findings. After building a copy of the demo project in a temporary directory, this call returned:
+
+```json
+{"mode":"check","projectPath":"/tmp/mc-asset-docs/demo-pack/mc-asset.pack.json"}
+```
+
+```text
+{"mode":"check","verdict":"pass","groups":[],"fixList":[],"textureCount":9}
+```
 
 `package` writes the built pack directory as a reproducible zip:
 
@@ -968,10 +1026,7 @@ File-rule failures to expect:
 
 - **No per-pixel tool.** There is no `set_pixel`; pixel work goes through the
   ASCII Grid, the batch operations array, or the inline `.mcpx` text.
-- **Explicit paths only, no overwrite, no mkdir.** An existing target is
-  `OUTPUT_EXISTS` and a missing parent is `FILESYSTEM_ERROR`. Pick a new
-  path, or create the directory yourself — MCP passes no `--force` and no
-  `--mkdir`.
+- **Output paths and overwrite rules depend on the tool.** Many tools refuse existing targets and missing parent directories. Tools whose schemas expose `force` or `mkdir`, including particle, equipment and font, can replace targets or create parents when explicitly requested.
 - **Omitted output paths embed the artifact.** Without an output path the
   result carries `pngBase64` (PNG) or `mcpxText` (`.mcpx`) instead of writing
   a file. This is decided per artifact: giving only `outputPngPath` writes the
