@@ -13,7 +13,7 @@ function readFormula(): string {
 }
 
 const EXPECTED_FORMULA_SHA256 =
-	"33b97633b1df6919a0c12bcec294955429d7de3f37d598cdd7dfc9e278248bef";
+	"cb9baaa86c5c362508beadcf794672d92612a4dca423f2fbb78a7a49df186d63";
 
 function extractFormulaSha256(text: string): string | null {
 	const match = text.match(/^\s*sha256\s+"([0-9a-f]{64})"/m);
@@ -33,9 +33,9 @@ describe("homebrew formula (static contract, no build required)", () => {
 		);
 		assert.ok(
 			text.includes(
-				"https://github.com/smile-minecraft/mc-asset/releases/download/v0.5.0/mc-asset-0.5.0.tar.gz",
+				"https://github.com/smile-minecraft/mc-asset/releases/download/v0.6.0/mc-asset-0.6.0.tar.gz",
 			),
-			"formula url must pin the v0.5.0 tag tarball",
+			"formula url must pin the v0.6.0 tag tarball",
 		);
 		assert.match(
 			text,
@@ -52,12 +52,12 @@ describe("homebrew formula (static contract, no build required)", () => {
 		);
 	});
 
-	it("formula pins the published v0.5.0 asset digest, no pending marker", () => {
+	it("formula pins the published v0.6.0 asset digest, no pending marker", () => {
 		const text = readFormula();
 		assert.strictEqual(
 			extractFormulaSha256(text),
 			EXPECTED_FORMULA_SHA256,
-			"formula sha256 field must equal the published v0.5.0 asset digest",
+			"formula sha256 field must equal the published v0.6.0 asset digest",
 		);
 		assert.ok(
 			!text.includes("PENDING_TAG_RECHECK"),
