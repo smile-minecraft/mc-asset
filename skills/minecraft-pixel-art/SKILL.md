@@ -1,6 +1,6 @@
 ---
 name: minecraft-pixel-art
-description: Draw textures that look like vanilla Minecraft Java Edition art — 16×16 items, tiling blocks, GUI sprites, and animated textures. Use whenever you author, redraw, or review Minecraft-style pixel art (a .grid, .mcpx, or PNG for a resource pack, a mod, or a showcase image), choose a palette or color ramp for it, or judge whether a sprite "looks like Minecraft". Pairs with the mc-asset skill, which covers the tool that renders and checks the result.
+description: Draw textures that look like vanilla Minecraft Java Edition art — items, tiling blocks, GUI sprites, animated textures, entity skins, and armor. Use whenever you author, redraw, or review Minecraft-style pixel art (a .grid, .mcpx, or PNG for a resource pack, a mod, or a showcase image), choose a palette or color ramp for it, or judge whether a sprite "looks like Minecraft". Pairs with the mc-asset skill, which covers the tool that renders and checks the result.
 ---
 
 # Minecraft Pixel Art
@@ -28,7 +28,7 @@ texture pixel for pixel: the style is shared, the artwork is Mojang's.
 | Picking colors, building a ramp, material palettes | `references/palettes.md` |
 | GUI panels, slots, buttons, nine-slice sprites | `references/gui.md` |
 | Animated textures (`.mcmeta` animation strips) | `references/animation.md` |
-| Entity (mob) textures on a box-UV template | `references/entities.md` |
+| Entity skins and armor: box UV, mirrored parts, overlays, previews | `references/entities.md` |
 | Reviewing a sprite, or it "looks off" | `references/anti-patterns.md` |
 
 Always read `references/anti-patterns.md` before you sign off on any texture.

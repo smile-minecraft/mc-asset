@@ -440,13 +440,35 @@ mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
 
 ![Java 方塊模型的三視圖預覽](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/model-preview.png)
 
-`--output` 與 `--stdout` 必須二選一。報告包含面板名稱與座標、輸入範圍、`coverage` 與 `warnings`。找不到貼圖時會畫成固定棋盤格並發出警告；元素旋轉、非 1/256 座標、半透明面與無法解析的貼圖會列為 `partial`。`display` 變換與遊戲內光照不會套用，這張圖是結構診斷視圖，不是遊戲畫面。
+`--output` 與 `--stdout` 必須二選一。報告包含面板名稱與座標、輸入範圍、`coverage` 與 `warnings`。找不到貼圖時會畫成固定棋盤格並發出警告；元素旋轉、非 1/256 座標、半透明面與無法解析的貼圖會列為 `partial`。預設的三視圖不套用 `display` 變換與光照，這張圖供結構檢查使用。
 
 ---
 
+### 建置範例資源包並檢查成果
+
+在專案目錄執行以下指令，先把範例複製到新的暫存目錄。範例配方會產生方塊模型與方塊狀態、組合式物品定義、實體模板、裝備、點陣字型與粒子影格。配方的 `formatVersion: 2` 支援方塊和遞迴物品定義步驟；`formatVersion: 3` 再加入實體、裝備、字型與粒子步驟。欄位寫法請看[範例配方](tests/pack/fixtures/demo-pack/recipes/demo.recipe.json)和[資源包流程](skills/mc-asset/references/pack-workflow.md)。
+
+```sh
+DEMO_DIR=$(mktemp -d)
+cp -R tests/pack/fixtures/demo-pack "$DEMO_DIR/demo-pack"
+mc-asset pack build --project "$DEMO_DIR/demo-pack/mc-asset.pack.json"
+PACK="$DEMO_DIR/demo-pack/pack"
+MODEL="$PACK/assets/aurelian/models/block/aurelian_block.json"
+TEXTURE="$PACK/assets/aurelian/textures/block/aurelian_block.png"
+mc-asset model preview "$MODEL" --pack "$PACK" --view isometric --lighting --output "$DEMO_DIR/isometric.png"
+mc-asset model preview "$MODEL" --pack "$PACK" --display gui --output "$DEMO_DIR/gui.png"
+mc-asset entity preview "$PACK/assets/aurelian/textures/entity/aurelian_hero.png" --layout player_wide --output "$DEMO_DIR/entity.png"
+mc-asset entity validate "$PACK/assets/aurelian/textures/entity/aurelian_hero.png" --layout player_wide
+mc-asset model export-bbmodel "$MODEL" --texture "all=$TEXTURE" --output "$DEMO_DIR/block.bbmodel"
+mc-asset model import-bbmodel "$DEMO_DIR/block.bbmodel" --output "$DEMO_DIR/block.json" --textures "$DEMO_DIR/imported" --mkdir
+mc-asset validate-pack "$PACK"
+```
+
+模型預覽供檢查用；等角視圖和顯示姿勢要分開執行。實體預覽會產生四個視角。Blockbench 互換範例涵蓋這個方塊模型的單一長方體和內嵌貼圖，其他功能可能有支援限制。整包驗證會回報涵蓋範圍與警告，包括無法解析的參照和未解讀的資源類型；請依報告檢查，並在遊戲中測試。
+
 ## MCP 伺服器
 
-`mc-asset mcp` 會啟動一個 stdio MCP 伺服器，底層和 CLI 共用同一個核心，因此 AI 助手呼叫工具和在終端機執行指令會得到相同結果。伺服器共提供 27 個工具。
+`mc-asset mcp` 會啟動一個 stdio MCP 伺服器，底層和 CLI 共用同一個核心，因此 AI 助手呼叫工具和在終端機執行指令會得到相同結果。伺服器共提供 31 個工具，清單如下。
 
 ### 提供的 MCP 工具
 
@@ -475,7 +497,11 @@ mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
 | `validate_pack_asset` | 唯讀掃描整個資源包：命名空間、模型、貼圖、圖集與目標版本。 |
 | `inspect_asset` | 唯讀 `structure`（圖層、區域、顏色用量、重疊）或 `view`（合成 PNG 圖塊加摘要資訊）；輸入為 `inputPath`。 |
 | `optimize_asset` | 無損壓縮 PNG（若無更小編碼則保留原檔）；支援單檔、多檔、目錄掃描（`inputDir`、`recursive`，上限 4096 檔）與 `dryRun`。 |
-| `model_asset` | Java 方塊／物品模型 JSON：`inspect`、`validate`、`create`、`apply`、`export`（含物品定義與 blockstate），以及 `preview`（產生三視圖診斷 PNG）。 |
+| `model_asset` | 查看、驗證、建立、編輯、匯出與預覽 Java 模型，也能匯入和匯出 Blockbench 專案。 |
+| `entity_asset` | 查看配置、產生模板、驗證貼圖與預覽四個視角。 |
+| `equipment_asset` | 產生裝備定義與支援的貼圖模板。 |
+| `font_asset` | 建立點陣字型圖集、定義與字元對照表。 |
+| `particle_asset` | 建立粒子定義與影格貼圖。 |
 | `compare_assets` | 比對兩張同尺寸 PNG；回報原始 RGBA 與可見差異像素數、差異範圍框，並可輸出診斷標記圖。 |
 | `style_asset` | 風格預設、自訂風格撰寫、調色盤匯出、風格檢查與家族稽核。 |
 | `pack_asset` | 資源包專案管理：建立骨架（`init`）、配方批次建置（`build`）、貼圖盤點（`catalog`）、素材抽出（`extract`）、排序修正清單（`check`）與可重現 zip 打包（`package`）。 |
@@ -575,7 +601,11 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | **壓縮與模型** | `optimize <input...>` 或 `--input-dir <dir>` | 無損壓縮 PNG（若無更小編碼則保留原檔；支援 `--output`、`--output-dir`、`--stdout`、`--dry-run`、`--mode`、`--ancillary`、`--recursive`）。 |
 | | `model inspect\|validate <file>` | 唯讀檢查 Java 方塊／物品模型 JSON（結構、UV、旋轉、display、貼圖參照）。 |
 | | `model create\|apply\|export` | 建立、修改或匯出 Java 模型（長方體 `elements`）及其物品定義與 blockstate。 |
-| | `model preview <file>` | 繪製三視圖診斷 PNG（`front`、`right`、`top` 面板，`--size 64\|128\|256`，`--output` 或 `--stdout`）。 |
+| | `model preview <file>` | 產生三視圖、等角視圖或顯示姿勢的診斷 PNG，並回報未支援的內容。 |
+| | `model import-bbmodel\|export-bbmodel` | 與 Blockbench 專案互換支援的模型資料和貼圖。 |
+| **實體與資源** | `entity inspect\|template\|validate\|preview` | 查看 box-UV 配置、製作模板、驗證貼圖並預覽四個視角。 |
+| | `equipment <id>` | 產生裝備定義與支援的模板。 |
+| | `font <spec>` / `particle <frames>` | 建立點陣字型或粒子定義與貼圖。 |
 | **AI 助手介面** | `mcp` | 啟動 stdio MCP 伺服器。 |
 
 ### 產生動畫與 GUI 設定（`mcmeta`）

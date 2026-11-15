@@ -119,6 +119,57 @@ grids or base assets into final textures, models, and item definitions.
 > For example, `recipes/tools.recipe.json` resolves `"path": "sources/sword.grid"`
 > to `recipes/sources/sword.grid`.
 
+### Choose a recipe format
+
+Recipe `formatVersion` is separate from the target resource-pack format in the
+project. Use `formatVersion: 2` for `blockModel` and `blockstate`, and for the
+recursive `itemDefinition` grammar such as `composite` and tinted model nodes.
+First generate the texture, then define its block model and blockstate; for an
+item, generate the referenced models before building the item definition. Model
+references can also point to outputs planned elsewhere in the same build.
+
+Use `formatVersion: 3` for `entityTemplate`, `equipment`, `font`, and
+`particle` steps as well as the earlier steps. `entityTemplate` takes a layout
+and output path; `equipment` takes an id and layer types; `font` reads a font
+spec relative to the recipe; `particle` reads a frame path relative to the
+recipe. Generator targets can omit `source` and `output` when their steps define
+the outputs. These are step fragments to put in a target's `steps` array;
+replace paths and identifiers for your project:
+
+```json
+{ "type": "blockModel", "item": "stone", "parent": "cube_all", "textures": { "all": "{namespace}:block/stone" } }
+```
+
+```json
+{ "type": "blockstate", "block": "stone", "variants": { "": { "model": "{namespace}:block/stone" } } }
+```
+
+```json
+{ "type": "itemDefinition", "item": "blade", "definition": { "type": "composite", "models": [{ "type": "model", "model": "{namespace}:item/blade" }, { "type": "model", "model": "{namespace}:item/blade_overlay" }] } }
+```
+
+```json
+{ "type": "entityTemplate", "layout": "player_wide", "output": "assets/{namespace}/textures/entity/hero.png" }
+```
+
+```json
+{ "type": "equipment", "id": "gear", "layers": ["humanoid", "humanoid_leggings"] }
+```
+
+```json
+{ "type": "font", "spec": "sources/icons.font.json" }
+```
+
+```json
+{ "type": "particle", "frames": "sources/spark" }
+```
+
+For a complete working recipe with all four generators, a block, and a
+composite item, see `tests/pack/fixtures/demo-pack/recipes/demo.recipe.json`
+in the repository. Build a copy of the fixture to keep generated files out of
+the checkout. Check the generated outputs and run `validate-pack` or `pack check`
+after building; a coverage report may identify resources it could not inspect.
+
 ### Important Step Rules
 
 1. **Family Recolor Semantics (`type: "recolor", family: "..."`)**:
