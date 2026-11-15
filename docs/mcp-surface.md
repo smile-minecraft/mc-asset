@@ -24,6 +24,8 @@ is no `set_pixel` tool on purpose.
 
 ## Tools
 
+The server registers 31 tools.
+
 | Tool | Reads | Writes | Result |
 |---|---|---|---|
 | `analyze_asset` | Raster image (PNG, JPEG, WebP) | Nothing | Read-only report: dimensions, palette, predicted alpha classification (never effective), pixel-art characteristics, recommendations |
@@ -48,11 +50,15 @@ is no `set_pixel` tool on purpose.
 | `validate_pack_asset` | Resource pack root, plus optional vanilla tree and dependency roots | Nothing | Read-only verdict with findings and a coverage object |
 | `inspect_asset` | Editable `.mcpx` source or raster image (raster reads as a single base layer), one `mode` (`structure` / `view`), view-only `crop` and `scale` | Nothing | Read-only report (structure), or composited PNG image block plus metadata (view) |
 | `optimize_asset` | PNG files (1 to 256 explicit paths) or a directory (`inputDir`, up to 4096 PNGs, optional `recursive`) | Optional explicit PNG output path (single explicit input), or an existing output directory | Per-file report (source and result size, mode, candidates, chunks, warnings) plus totals; PNG bytes embedded for one input without an output |
-| `model_asset` | Java block/item model JSON, one `mode` (`inspect` / `validate` / `create` / `apply` / `export` / `preview`), optional pack, vanilla, and dependency roots | Optional explicit `.json` paths (model, item definition, blockstate), or an explicit `.png` path (`preview`) | Read-only report (`inspect`, `validate`), the model document and generated bindings (`create`, `apply`, `export`), or a diagnostic three-view PNG (`preview`) |
+| `model_asset` | Java block/item model JSON, one `mode` (`inspect` / `validate` / `create` / `apply` / `export` / `preview` / `import-bbmodel` / `export-bbmodel`), optional pack, vanilla, and dependency roots | Optional explicit `.json` paths (model, item definition, blockstate), or an explicit `.png` path (`preview`) | Read-only report (`inspect`, `validate`), the model document and generated bindings (`create`, `apply`, `export`), diagnostic PNG (`preview`), or Blockbench conversion artifacts |
 | `mcmeta_asset` | PNG sprite sheet (`animation`) or design sprite (`gui`), mode-specific parameters, version fields | Optional explicit `.mcmeta` output path (`force`, `mkdir`) | Generated `.mcmeta` text and metadata summary (writes file only with `outputPath`) |
 | `compare_assets` | Two same-size PNGs, `image` (`none` / `diff`), `scale` (1–16) | Optional explicit PNG output path (`force`, `mkdir`; only with `image: "diff"`) | Comparison report (dimensions, raw and visible difference counts, bounds) plus optional standard PNG image block (writes file only with `outputPath`) |
 | `style_asset` | Style presets and `.style.json` sources, raster images (`lint` one, `audit` many), one `mode` (`list` / `show` / `export-palette` / `create` / `lint` / `audit`) | Optional explicit `.mcpx` path (`export-palette`) or `.style.json` path (`create`) | Preset list, resolved style, palette `.mcpx` text or file, the written style document, a style report, or a family audit |
-| `pack_asset` | Resource pack projects: one `mode` (`init` / `build` / `catalog` / `extract` / `check` / `package`), project directory, project path, vanilla tree, or client jar | The new project directory (`init`), generated textures, item definitions, and lockfile (`build`), read-only listings (`catalog` / `check`), copied files (`extract`), or a reproducible zip (`package`) | Report of the created project skeleton (`init`), build plan, output classification counts, and write report (`build`), texture listing with families (`catalog`), extraction counts (`extract`), fix list (`check`), or delivery report (`package`) |
+| `pack_asset` | Resource pack projects: one `mode` (`init` / `build` / `catalog` / `extract` / `check` / `package`), project directory, project path, vanilla tree, or client jar | The new project directory (`init`), generated textures, item definitions, and lockfile (`build`), read-only listings (`catalog` / `check`), copied files (`extract`), or a reproducible zip (`package`) | Report of the created project skeleton (`init`), build plan, output classifications, and write report (`build`), texture listing with families (`catalog`), extraction counts (`extract`), fix list (`check`), or delivery report (`package`) |
+| `entity_asset` | Builtin or custom entity layout and optional texture | Explicit template or preview paths | Layout inspection, texture validation, or diagnostic images |
+| `equipment_asset` | Namespace, id, layers and target version | Optional resource pack directory | Equipment definition and optional templates |
+| `font_asset` | Font spec and icon images | Optional definition, atlas and table paths | Font definition, atlas and icon table |
+| `particle_asset` | Frame directory or PNG / `.mcpx` frame | Required resource pack directory | Particle definition and frame textures |
 
 ## Input semantics
 
@@ -160,7 +166,7 @@ is no `set_pixel` tool on purpose.
   ship; the zip root is `pack.mcmeta`; entries sort by UTF-8 byte order with
   fixed timestamps. The result reports the output path, file count, and byte
   total.
-- `pack_asset` in `build` mode executes recipe-driven asset builds for a resource pack project (§10.2). It requires `projectPath` (pointing to `mc-asset.pack.json`), and accepts optional `recipe` (a single recipe file; omitted reads every `*.recipe.json` in `recipeDir` in byte-sorted order) and optional `dryRun` (boolean). It executes the three-stage build: memory-only parse and planning, output classification against `mc-asset.lock.json` and disk state (`new`, `own-clean`, `own-modified`, `foreign`), and atomic writes followed by updating `mc-asset.lock.json`. If any planned output is `own-modified` or `foreign`, the call is refused with `PACK_BUILD_CONFLICT` and `details.conflicts`, writing nothing. Lockfile errors raise `PACK_LOCK_INVALID` or `PACK_LOCK_UNSUPPORTED_VERSION`, recipe errors raise `RECIPE_INVALID`, `RECIPE_UNSUPPORTED_VERSION`, `RECIPE_OUTPUT_CONFLICT`, `RECIPE_VERSION_UNSUPPORTED`, or `RECIPE_SOURCE_MISSING`. Build errors also raise `PACK_LOCK_INVALID` / `PACK_LOCK_UNSUPPORTED_VERSION` (lockfile), and `model` / `itemDefinition` steps generate model (`models/item/<item>.json`) and item definition (`items/<item>.json`) documents following the templates in §5.4 with `kind: model` / `kind: itemDefinition` lock entries; item definitions require resource-pack format 46.0 or higher, missing models raise `PACK_BROKEN_REFERENCE`, and a `minecraft` namespace without `override: true` is `RECIPE_INVALID`. With `dryRun: true`, planning and classification run without writing files or updating the lockfile. The result reports `mode: "build"`, `recipeId`, `outputs` count, `completed` list, and `dryRun`.
+- `pack_asset` in `build` mode executes recipe-driven asset builds for a resource pack project (§10.2). It requires `projectPath` (pointing to `mc-asset.pack.json`), and accepts optional `recipe` (a single recipe file; omitted reads every `*.recipe.json` in `recipeDir` in byte-sorted order) and optional `dryRun` (boolean). It executes the three-stage build: memory-only parse and planning, output classification against `mc-asset.lock.json` and disk state (`new`, `own-clean`, `own-modified`, `foreign`), and atomic writes followed by updating `mc-asset.lock.json`. If any planned output is `own-modified` or `foreign`, the call is refused with `PACK_BUILD_CONFLICT` and `details.conflicts`, writing nothing. Lockfile errors raise `PACK_LOCK_INVALID` or `PACK_LOCK_UNSUPPORTED_VERSION`, recipe errors raise `RECIPE_INVALID`, `RECIPE_UNSUPPORTED_VERSION`, `RECIPE_OUTPUT_CONFLICT`, `RECIPE_VERSION_UNSUPPORTED`, or `RECIPE_SOURCE_MISSING`. Build errors also raise `PACK_LOCK_INVALID` / `PACK_LOCK_UNSUPPORTED_VERSION` (lockfile), and `model` / `itemDefinition` steps generate model (`models/item/<item>.json`) and item definition (`items/<item>.json`) documents following the templates in §5.4 with `kind: model` / `kind: itemDefinition` lock entries; item definitions require resource-pack format 46.0 or higher, missing models raise `PACK_BROKEN_REFERENCE`, and a `minecraft` namespace without `override: true` is `RECIPE_INVALID`. With `dryRun: true`, planning and classification run without writing files or updating the lockfile. The result reports `mode: "build"`, `recipeId`, `outputs` array of planned paths and classifications, `completed` list, and `dryRun`.
 - `apply_asset_operations` takes an array of operation objects, each
   with a `type` (the Core batch vocabulary: the nine pixel operations
   `setPixel`, `clearPixel`, `drawLine`, `drawRect`, `fillRect`,
@@ -237,20 +243,10 @@ is no `set_pixel` tool on purpose.
   `outputPath`, `itemOutputPath`, and `blockstateOutputPath`. A field the
   mode does not accept is `INVALID_ARGUMENT` naming the field and the mode.
   Model support covers cuboid `elements` only.
-- `model_asset` in `preview` mode renders a fixed diagnostic image with
-  `size` (64, 128, or 256; default 64) and an optional `outputPngPath`.
-  The PNG holds three square panels side by side (`front` = north face seen
-  from the north, `right` = east face seen from the east, `top` = up face
-  seen from above with north at the top). Without `outputPngPath` nothing is
-  written and the image returns as a standard image block; with
-  `outputPngPath` the file is written and only the report returns as text.
-  The same first-release limits as the CLI apply (axis-aligned cuboids,
-  exact 1/256 coordinates, existing UVs with 0/90/180/270 face rotation,
-  fixed checkerboard for missing textures, partial coverage for element
-  rotation, translucent faces, and unresolvable textures; `display` and
-  game lighting are not applied).
-- `validate_pack_asset` takes an optional `vanillaPath` and an optional
-  ordered `dependencyPaths` (earlier entries win).
+- `model_asset` preview defaults to three panels; `view: "isometric"` selects one panel and `viewDirection` sets its camera. `display` instead selects a display slot and cannot be combined with `view`. `lighting: true` applies fixed face shading based on `gui_light`; `tint` colors every face with `tintindex`, while `tints` maps individual indices to colors; `tint` and `tints` cannot be combined. `size` is 64, 128 or 256. Without `outputPngPath`, the PNG is an image block; otherwise it is written to that path. Missing textures and unsupported features are reported as partial coverage. Ambient occlusion, world lighting, shadows and game poses are not reproduced; game-client appearance is unverified.
+- `validate_pack_asset` takes an optional `vanillaPath` and ordered `dependencyPaths` (earlier entries win). Its reference checks include equipment, particle, font, sound, post-effect and waypoint-style resources as well as models and blockstates. Unsupported or unresolved checks are reported in coverage.
+- Recipe builds also generate block models and blockstates, entity templates, equipment, fonts and particles. `check` verifies generated outputs recorded in the lock; locked generated textures are excluded from hand-painted style and unreferenced-texture findings.
+- `entity_asset` supports `inspect`, `template`, `validate` and `preview`; the preview is diagnostic and has not been verified in a game client. `equipment_asset` requires a target version; only humanoid, humanoid_leggings and wings have verified template layouts, and `template: false` emits a definition alone. `font_asset` accepts exactly one of `spec` and `specPath`. `particle_asset` writes a definition and frames to `outputDir`, and overrides existing particle types rather than adding new ones. These tools allow `force` and `mkdir` where their schemas expose them.
 - `transform_asset` / `animate_asset` accept `nearest` / `box` /
   `pixel-aware` for `resizeMode`.
 - When an output path is omitted, the artifact is embedded in the tool

@@ -2,7 +2,7 @@
 
 > mc-asset is a pixel-native 2D asset engine and deterministic CLI/MCP toolchain for Minecraft Java Edition resource packs. It turns raster references, hand-authored ASCII grids, and editable `.mcpx` sources into byte-reproducible PNG textures, animation sheets, palette reports, and validated resource packs — for human creators and AI coding agents.
 
-This file collects, in one place, what an agent needs to use the tool: install, registration, the twenty-seven MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest.
+This file collects, in one place, what an agent needs to use the tool: install, registration, the 31 MCP tools, the batch-operation shape, the error model, and the limits. The public docs under `docs/` remain authoritative; this is a convenience digest.
 
 ## When to use it
 
@@ -68,7 +68,7 @@ check the client's own documentation when unsure. The guide at
 `docs/mcp-guide.md` carries per-client examples (Claude Code, Claude Desktop,
 Cursor, VS Code, Cline, OpenCode).
 
-## The twenty-seven MCP tools
+## The 31 MCP tools
 
 | Tool | What it does | Required inputs |
 |---|---|---|
@@ -76,8 +76,8 @@ Cursor, VS Code, Cline, OpenCode).
 | `pixelize_asset` | Runs a reference raster through the deterministic pixelize pipeline; returns PNG bytes and/or `.mcpx`. | `inputPath`, `size` |
 | `render_pixel_asset` | Renders an ASCII Grid into PNG and/or `.mcpx`, with an optional post-parse batch. | exactly one of `gridPath` / `gridText` |
 | `apply_asset_operations` | Applies a batch of pixel/layer/region operations to an `.mcpx` source in one call. | `sourcePath`, `operations` |
-| `recolor_asset` | Recolors an `.mcpx` source or a flat PNG with one builtin material ramp (optionally scoped to a `region`); a PNG has no palette roles, so its pixels map by integer luminance bands. | `sourcePath`, `material` |
-| `create_variants` | Fans one `.mcpx` source or flat PNG out into one PNG plus one `.mcpx` per material under `outputDir`, each from the pristine source. | `sourcePath`, `materials`, `outputDir` |
+| `recolor_asset` | Recolors an `.mcpx` source or flat PNG with one material or palette family, optionally scoped to a region or selection. | `sourcePath`, exactly one of `material` or `family` |
+| `create_variants` | Creates PNG and `.mcpx` variants from one pristine source for the requested materials and/or families. | `sourcePath`, at least one of `materials` or `families`, `outputDir` |
 | `validate_asset` | Read-only verdict over a PNG and an optional `.mcmeta`; `fail` is a normal result. | `path` |
 | `import_asset` | Decodes a raster (PNG/JPEG/WebP) into the canvas, with an optional batch. | `inputPath` |
 | `build_asset` | Builds an `.mcpx` source into PNG bytes and/or re-serialized source. | `sourcePath` |
@@ -90,15 +90,19 @@ Cursor, VS Code, Cline, OpenCode).
 | `tile_asset` | Seam, edge-repetition, and brightness analysis, with an optional tiled preview PNG. | `inputPath` |
 | `generate_asset` | Deterministic procedural texture from pattern, size, palette, and seed. | `pattern`, `size`, `palette`, `seed` |
 | `preview_asset` | `ascii` / `palette-map` reports, `scale` / `nine-slice` guide PNGs, or `contact-sheet` pages. | `mode` (+ mode fields) |
-| `animate_asset` | Animation sheets: `pack`, `unpack`, `reorder`, `resize`, `validate`, `preview`. | `mode` + that mode's input path (`layout` for `pack` / `unpack` / `preview`) |
+| `animate_asset` | Animation sheets: `pack`, `sweep`, `unpack`, `reorder`, `resize`, `validate`, `preview`. | `mode` + that mode's input path (`layout` for `pack` / `unpack` / `preview`) |
 | `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, dependency/vanilla resolution, version targeting, with a coverage object in the report. | `packPath` |
 | `inspect_asset` | Read-only `structure` (layers with bounds/area/visibility/raw RGBA color usage, regions with identity/bounds/area only, overlaps) or `view` (composited PNG image block plus six-key metadata). | `inputPath`, `mode` (`structure` / `view`; view-only `crop` and `scale`) |
 | `optimize_asset` | Lossless PNG re-encoding into the smallest exact encoding (or the source kept), with a per-file report; `dryRun`, explicit `outputPath` / `outputDir`, or directory `inputDir` (up to 4096 PNGs, `recursive`). | `inputPaths` or `inputDir` |
-| `model_asset` | Java block/item model JSON (cuboid `elements` only): `inspect`, `validate`, `create`, `apply`, `export`, `preview` (fixed diagnostic three-view PNG). Reports structure and reference validity, not rendered appearance. | `mode` (+ the mode's fields) |
+| `model_asset` | Java block/item model JSON (cuboid `elements` only): `inspect`, `validate`, `create`, `apply`, `export`, `preview` (diagnostic three-view, isometric or display-slot PNG), `import-bbmodel`, `export-bbmodel`. Reports structure and reference validity, not rendered appearance. | `mode` (+ the mode's fields) |
 | `mcmeta_asset` | Generates `.mcmeta` animation or GUI scaling document from PNG dimensions; optional `outputPath` (`force`, `mkdir`). Without `outputPath` returns `mcmetaText`. | `mode` (`animation` / `gui`), `inputPath` |
 | `compare_assets` | Compares two same-size PNGs: raw RGBA and visible differences, bounds, and optional diagnostic PNG (`image: "diff"`, `scale`, optional `outputPath`). | `beforePath`, `afterPath` |
 | `style_asset` | Style presets (`list`/`show`), palette export (`export-palette`), document authoring (`create`), style check (`lint`), and silhouette/palette family comparison (`audit`). | `mode` (+ mode fields) |
-| `pack_asset` | Complete pack project authoring: scaffolding (`init`), recipe batch builds (`build`), texture cataloging (`catalog`), asset extraction (`extract`), prioritized fix lists (`check`), and deterministic zip delivery (`package`). | `mode` (+ mode fields) |
+| `pack_asset` | Pack project scaffolding, recipe builds, catalog, extraction, checks and zip delivery. | `mode` (+ mode fields) |
+| `entity_asset` | Inspect layouts, create templates, validate textures or render diagnostic previews. | `mode` |
+| `equipment_asset` | Generate equipment definitions and optional templates. | `namespace`, `id`, `layers`, target version |
+| `font_asset` | Build bitmap atlases, font definition and icon table. | Exactly one of `spec` or `specPath` |
+| `particle_asset` | Generate a particle definition and ordered frame textures. | `inputPath`, `outputDir`, `namespace`, `id` |
 
 `inspect_asset` takes `inputPath` (an `.mcpx` source or a raster image; raster reads as a single base layer) plus `mode`. `structure` takes no `crop` or `scale`. `view` accepts an optional `crop` selection expression and an optional integer `scale` 1–16 (default 1, nearest). The view returns the composited PNG as a standard image block (`type: "image"`, `mimeType: "image/png"`) plus metadata, with no duplicate `pngBase64` in the text block. Outputs wider than the 1024px edge are `RESOURCE_LIMIT_EXCEEDED` with a crop hint. The small-image auto-scale (a pre-scale long edge below 128 scales up toward 128, capped at 16) applies to `apply_asset_operations` feedback images only, never to inspect view.
 
@@ -106,7 +110,7 @@ Required-input notes that the schema alone does not show: `pixelize_asset`
 raises `INVALID_ARGUMENT` when `size` is omitted, and `animate_asset` requires
 `layout` for `pack`, `unpack`, and `preview`. `transform_asset` cannot combine
 a `selection` with a geometry operation (`ARGUMENT_CONFLICT`), and
-`optimize_asset` takes 1 to 256 explicit PNG paths or a directory (`inputDir`, up to 4096 PNGs, `recursive`, preserving relative directory structure) and never rewrites them; in directory mode, budgets (256 MiB source, 16,777,216 pixels) and non-overlapping directory checks are enforced; several explicit inputs or directory mode need `outputDir` or `dryRun`, and a forced `mode` that cannot hold the pixels exactly is `OPTIMIZE_MODE_NOT_EXACT`. `model_asset` rejects fields its `mode` does not accept with `INVALID_ARGUMENT`, and `export` with `binding.item` needs a version of pack format 46.0 or later; `preview` renders a fixed diagnostic three-view PNG (`size` 64/128/256, optional `outputPngPath`; without a path the image returns as an image block) with partial coverage for unsupported content. Neither tool accepts `force` or `mkdir`; an existing output is `OUTPUT_EXISTS`. Neither verifies appearance: no game client renders the result.
+`optimize_asset` takes 1 to 256 explicit PNG paths or a directory (`inputDir`, up to 4096 PNGs, `recursive`, preserving relative directory structure) and never rewrites them; in directory mode, budgets (256 MiB source, 16,777,216 pixels) and non-overlapping directory checks are enforced; several explicit inputs or directory mode need `outputDir` or `dryRun`, and a forced `mode` that cannot hold the pixels exactly is `OPTIMIZE_MODE_NOT_EXACT`. `model_asset` rejects fields its `mode` does not accept with `INVALID_ARGUMENT`, and `export` with `binding.item` needs a version of pack format 46.0 or later; `preview` renders diagnostic three-view, isometric or display-slot images (`size` 64/128/256, optional `outputPngPath`; without a path the image returns as an image block). `lighting` applies fixed face shading, `tint` colors faces with a tint index, and `tints` maps indices to colors. Unsupported content yields partial coverage; world lighting, ambient occlusion, shadows and game poses are omitted. Neither tool accepts `force` or `mkdir`; an existing output is `OUTPUT_EXISTS`. Neither verifies appearance: no game client renders the result.
 `mcmeta_asset` accepts `mode` (`animation` or `gui`) and PNG `inputPath`, with mode-specific geometry and optional version gates; without `outputPath` it returns `mcmetaText`. `compare_assets` compares two same-size PNGs and reports raw/visible differences and bounds; `outputPath` requires `image: "diff"`. Both tools enforce safe-output preflights and never rewrite sources.
 `material_asset` requires `name` only for `show`. `inspect_asset` `structure`
 refuses `crop`/`scale` with `INVALID_ARGUMENT`; an empty view crop is
@@ -199,10 +203,9 @@ bad asset is still a normal result.
 
 - **Explicit output paths only.** Producing tools never invent filenames;
   read-only tools never write.
-- **No overwrite.** An existing explicit target is `OUTPUT_EXISTS`.
-- **No directory creation.** A missing parent directory is `FILESYSTEM_ERROR`.
-  The MCP surface exposes no `--force` / `--mkdir`; pick a new path or create
-  the directory yourself.
+- **Output rules vary by tool.** Many tools refuse existing targets and missing parents. Tools with `force` or `mkdir` fields, including font, equipment and particle, can replace outputs or create directories when explicitly requested.
+- **Generated resources.** Equipment requires a target version; verified template layouts cover humanoid, humanoid_leggings and wings. Resource packs can override existing particle types, not add new ones. Entity and model previews have not been verified in a game client.
+- **Pack coverage.** Validation checks equipment, particle, font, sound, post-effect and waypoint-style references as well as models and blockstates; skipped checks appear in coverage. Recipe builds support block, entity, equipment, font and particle outputs. `check` verifies lock-recorded outputs and excludes recorded generated textures from hand-painted style and unreferenced-texture findings.
 - **Omitted outputs are embedded.** Without an output path, the result carries
   `pngBase64` (PNG) or `mcpxText` (`.mcpx`) instead of writing a file. This is
   decided per artifact.

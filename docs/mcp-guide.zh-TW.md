@@ -11,7 +11,7 @@
 
 ---
 
-`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（二十七個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。
+`mc-asset mcp` 會啟動 stdio MCP 伺服器：stdout 只輸出 MCP JSON-RPC，診斷訊息走 stderr，stdin 關閉時行程結束。已凍結的介面（31 個工具名稱、各自的輸入，以及讀寫契約）記載於 `docs/mcp-surface.zh-TW.md`，輸入欄位則凍結在 `src/mcp/schema.ts`。本指南涵蓋註冊方式、每個工具一份擷取（圖片位元組在有註明處截短顯示，不作原樣引用）、錯誤模型與限制。
 
 伺服器直接掛在 Core 上，所以每個工具都跑與 CLI 指令相同的引擎。像素層級的創作，透過 ASCII Grid 文件、批次操作陣列，或內嵌回傳的可編輯 `.mcpx` 來源來完成；刻意不提供 `set_pixel` 工具。
 
@@ -96,7 +96,7 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 然後完整重新啟動用戶端。MCP 伺服器在啟動時載入，設定改了卻沒重啟，什麼都證明不了。要回復時，移除該項目（或還原設定備份）並再重啟一次。
 
-以下擷取透過 MCP 用戶端 SDK 在一個示範工作目錄中執行，其中所有路徑都相對於該目錄，只有 `inspect_asset` 的結構擷取直接指向 repo 內的 fixture `tests/cli/fixtures/sword.mcpx`。原有七個工具的擷取取自已安裝的版本，後續新增的工具則取自本地源碼伺服器——兩者執行的是同一份伺服器程式碼。
+以下結果透過 MCP 用戶端 SDK 擷取。較早的範例使用示範工作目錄；較新的範例指向專案測試資料或擷取時的暫存路徑。原有範例取自已安裝的版本，後續範例取自本機原始碼伺服器。
 
 ## 工具
 
@@ -111,6 +111,8 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | [`animate_asset`](#animate_asset) | [`validate_pack_asset`](#validate_pack_asset) | [`inspect_asset`](#inspect_asset) |
 | [`optimize_asset`](#optimize_asset) | [`model_asset`](#model_asset) | [`mcmeta_asset`](#mcmeta_asset) |
 | [`compare_assets`](#compare_assets) | [`style_asset`](#style_asset) | [`pack_asset`](#pack_asset) |
+| [`entity_asset`](#entity_asset) | [`equipment_asset`](#equipment_asset) | [`font_asset`](#font_asset) |
+| [`particle_asset`](#particle_asset) | | |
 
 ### analyze_asset
 
@@ -119,13 +121,13 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 呼叫：
 
 ```json
-{"path":"px-8x8.png"}
+{"path":"tests/cli/fixtures/px-8x8.png"}
 ```
 
-結果（原樣；`dominantColors` 陣列在 8 個項目中只留第一個，其餘每項都是 `count` 1、`ratio` "0.0156"）：
+以下是結果中 `dominantColors` 陣列的第一個物件，其餘項目已省略：
 
-```text
-{"dimensions":{"width":8,"height":8},"totalPixels":64,"colorCount":64,"alpha":{"predictedClassification":"translucent","opaquePixels":62,"transparentPixels":1,"partialAlphaPixels":1,"partialAlphaValues":[128],"opaqueRatio":"0.9688","transparentRatio":"0.0156","partialAlphaRatio":"0.0156","predictedNote":"predicted classification from PNG bytes only; not the final in-game render result."},"dominantColors":[{"hex":"#03ED20FF","r":3,"g":237,"b":32,"a":255,"count":1,"ratio":"0.0156"} … 7 more entries, each count 1 / ratio "0.0156" …]}
+```json
+{"hex":"#03ED20FF","r":3,"g":237,"b":32,"a":255,"count":1,"ratio":"0.0156"}
 ```
 
 分類只依 PNG 位元組預測，從不代表遊戲內的實際渲染結果，這與 CLI 的提醒相同。
@@ -194,19 +196,20 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 `outline` 是第二十六種操作：它替單一 `layerId` 上非全透明的像素畫外框，可畫在本體邊緣（`inside`，預設）或貼著本體的空像素（`outside`），共五種模式——`tinted` 在整數 HSL 空間調暗相鄰本體色、`selective` 只畫背光面（光源在左上）、`uniform` 用必填的 `#RRGGBB` 色彩填滿、`black` 填滿不透明純黑、`strip` 把既有外框換成相鄰內部色而不改變本體大小。`color` 只屬於 `uniform`；`family` 指定十二個內建家族之一，在 `snapFamilies` 為 true 時把推導色對齊內建原版色階。它接受同樣的選用 `selection`；完整的逐型參數表在 `docs/cli-surface.zh-TW.md` 的批次操作規格節。
 
-附圖範例——一個變動像素加摘要（截短顯示，非原樣引用；圖片資料省略）：
+附圖範例：一個變動像素加摘要，圖片資料已省略。
 
 呼叫：
 
 ```json
-{"sourcePath":"sword.mcpx","operations":[{"type":"setPixel","layerId":"base","x":0,"y":0,"color":"#FF0000FF"}],"feedback":{"image":"changed","diff":"summary"}}
+{"sourcePath":"tests/cli/fixtures/sword.mcpx","operations":[{"type":"setPixel","layerId":"base","x":0,"y":0,"color":"#FF0000FF"}],"feedback":{"image":"changed","diff":"summary"}}
 ```
 
-結果：文字塊帶 `applied: 1, failed: 0`，raw 與合成各一個變動像素，`outsideSelectionUnchanged: true`；圖片以第二個 `type: "image"`、`mimeType: "image/png"` 塊送達：
+結果：文字塊帶 `applied: 1, failed: 0`，raw 與合成各一個變動像素，`outsideSelectionUnchanged: true`；圖片以第二個 `type: "image"`、`mimeType: "image/png"` 塊送達。
 
-```text
-{"applied":1,"failed":0,"operations":[{"index":0,"status":"applied"}],"warnings":[],"feedback":{"image":"changed","imageIncluded":true,"diff":{"raw":{"changedPixels":1 …},"composited":{"changedPixels":1 …},"structural":…,"outsideSelectionUnchanged":true}},"mcpxText":"mcpx 1\n… (truncated) …"}
-[second block: {"type":"image","mimeType":"image/png","data":"… (omitted) …"}]
+以下是文字區塊的 `feedback` 物件；其餘文字與圖片資料已省略：
+
+```json
+{"image":"changed","imageIncluded":true,"diff":{"raw":{"changedPixels":1,"bounds":{"x":0,"y":0,"width":1,"height":1}},"composited":{"changedPixels":1,"bounds":{"x":0,"y":0,"width":1,"height":1}},"structural":{"added":[],"removed":[],"modified":[]},"outsideSelectionUnchanged":true}}
 ```
 
 ### recolor_asset
@@ -475,6 +478,8 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 {"command":"validate-pack","path":"clean-pack","target":"resource-pack 75.0","verdict":"pass","findings":[{"code":"PACK_COVERAGE_SKIPPED","level":"warning","message":"atlas \"items\" for sprite \"minecraft:item/sword\" in \"assets/minecraft/models/item/sword.json\" cannot be completed without the vanilla resource tree; coverage recorded as skipped.","path":"assets/minecraft/models/item/sword.json"}],"coverage":{"status":"partial","skipped":[{"kind":"atlas-source","reason":"vanilla-not-provided","target":"items","detail":"sprite \"minecraft:item/sword\" needs the vanilla atlas sources"}]},"version":{"resourcePackVersion":"75.0"}}
 ```
 
+整包掃描也檢查裝備、粒子、字型、音效、後處理與路徑點樣式文件中的引用。無法完成的檢查會記入 coverage。
+
 ### inspect_asset
 
 針對 `.mcpx` 來源或點陣圖的唯讀檢查——點陣圖會讀成單一 base 圖層——絕不寫入。呼叫帶 `inputPath` 加 `mode`（`structure`／`view`）；`crop` 與 `scale` 只有 `view` 能用，`structure` 帶任一個都是 `INVALID_ARGUMENT`。
@@ -511,6 +516,62 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 `candidates` 列出每一種嘗試過的編碼，以及其他編碼為什麼不適用。批次在計算階段是全有或全無：任何一個輸入失敗就不寫任何檔案，錯誤會列出 `processed` 與 `notProcessed`。
 
+### entity_asset
+
+用 `inspect` 讀取內建配置，也可以建立範本、驗證貼圖或產生診斷預覽。預覽在遊戲用戶端的外觀尚未驗證。
+
+```json
+{"mode":"inspect","layout":"player_slim"}
+```
+
+以下是 MCP 文字結果的 `layout` 物件，另一個 `parts` 陣列已省略：
+
+```json
+{"id":"player_slim","texture":{"width":64,"height":64},"partCount":12,"faceCount":72,"mappedPixels":3136,"totalPixels":4096,"unmappedPixels":960}
+```
+
+### equipment_asset
+
+指定資源包格式與圖層來產生裝備定義。`template: false` 只回傳定義；只有 humanoid、humanoid_leggings、wings 有經確認的範本配置。
+
+```json
+{"namespace":"demo","id":"ruby","layers":[{"type":"humanoid"}],"resourcePackVersion":"75","template":false}
+```
+
+MCP 文字結果（逐字）：
+
+```text
+{"command":"equipment","id":"ruby","namespace":"demo","packFormat":"75.0","definitionDirectory":"equipment","definition":"assets/demo/equipment/ruby.json","layers":{"humanoid":[{"texture":"demo:ruby"}]},"textures":[],"files":["assets/demo/equipment/ruby.json"],"definitionText":"{\n  \"layers\": {\n    \"humanoid\": [\n      {\n        \"texture\": \"demo:ruby\"\n      }\n    ]\n  }\n}\n","version":{"resourcePackVersion":"75.0"}}
+```
+
+### font_asset
+
+用 `spec` 或 `specPath` 指定字型規格，產生圖集和圖示字元表。這個呼叫讀取專案測試資料，並將圖集寫入指定的暫存路徑。
+
+```json
+{"specPath":"tests/pack/fixtures/demo-pack/recipes/sources/icons.font.json","atlasPath":"/tmp/mc-asset-docs/font-atlas.png"}
+```
+
+MCP 文字結果（原始回應包含 U+E000 字元，此處為了方便閱讀而轉義）：
+
+```text
+{"command":"font","font":"aurelian:icons","icons":1,"atlases":[{"texture":"aurelian:font/icons.png","height":8,"ascent":7,"columns":1,"rows":1,"icons":1,"atlasWidth":4,"atlasHeight":8,"atlas":"/tmp/mc-asset-docs/font-atlas.png"}],"warnings":[],"definitionText":"{\n  \"providers\": [\n    {\n      \"ascent\": 7,\n      \"chars\": [\n        \"\\uE000\"\n      ],\n      \"file\": \"aurelian:font/icons.png\",\n      \"height\": 8,\n      \"type\": \"bitmap\"\n    }\n  ]\n}\n","tableText":"{\n  \"font\": \"aurelian:icons\",\n  \"icons\": [\n    {\n      \"character\": \"\\uE000\",\n      \"codePoint\": 57344,\n      \"name\": \"gem\"\n    }\n  ]\n}\n"}
+```
+
+### particle_asset
+
+指定資源包目錄後，工具會依檔名字元組順序產生影格與粒子定義。資源包只能覆寫既有粒子種類。
+
+```json
+{"inputPath":"tests/pack/fixtures/demo-pack/recipes/sources/spark","outputDir":"/tmp/mc-asset-docs/particle-pack","namespace":"demo","id":"spark","mkdir":true}
+```
+
+MCP 文字結果（逐字）：
+
+```text
+{"command":"particle","id":"spark","namespace":"demo","outputDir":"/tmp/mc-asset-docs/particle-pack","input":"tests/pack/fixtures/demo-pack/recipes/sources/spark","inputKind":"directory","frameCount":2,"frames":[{"input":"frame_10.mcpx","texture":"demo:spark_0","width":4,"height":4},{"input":"frame_2.mcpx","texture":"demo:spark_1","width":4,"height":4}],"definition":"assets/demo/particles/spark.json","textureFiles":["assets/demo/textures/particle/spark_0.png","assets/demo/textures/particle/spark_1.png"],"files":["assets/demo/textures/particle/spark_0.png","assets/demo/textures/particle/spark_1.png","assets/demo/particles/spark.json"],"warnings":[]}
+```
+
 ### model_asset
 
 檢查、驗證、建立、編輯或匯出 Java 方塊／物品模型 JSON（只支援長方體 `elements`）。`inspect` 與 `validate` 唯讀；`create`、`apply`、`export` 只寫入明確指定的新路徑，`export` 還能依 `binding` 產生物品定義與 blockstate。它回報的是結構與引用是否有效，不是渲染後的外觀。
@@ -541,19 +602,31 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 
 `apply` 接收型別化的 `operations`，全部套用成功或一個都不套用。`export` 使用 `binding.item` 時需要明確的版本，且資源包格式在 46.0 以上（否則回報 `MODEL_UNSUPPORTED_VERSION`）。沒有提供原版資源樹時，`minecraft` 命名空間的引用會記為略過的 coverage，而不是被解析。
 
-呼叫（把該模型預覽為診斷三視圖 PNG）：
+以下實際呼叫使用專案測試模型，選擇展示位置、固定光照與顏色：
 
 ```json
-{"mode":"preview","inputPath":"pack/assets/mypack/models/block/ruby.json","packPath":"pack","size":64,"resourcePackVersion":"75"}
+{"mode":"preview","inputPath":"tests/model/fixtures/stable-model.json","display":"gui","lighting":true,"tint":"#80FF80"}
 ```
 
-結果（本機 MCP 文字區塊的實際回應；資源包內沒有該貼圖，所以各面以固定棋盤格呈現，coverage 為 `partial`）：
+MCP 文字結果（省略圖片區塊）：
 
 ```text
-{"command":"model","mode":"preview","path":"assets/mypack/models/block/ruby.json","size":64,"version":{"packFormat":"75.0","rules":"verified","rulesReason":"verified-release"},"image":{"width":192,"height":64},"panels":[{"name":"front","x":0,"y":0,"width":64,"height":64},{"name":"right","x":64,"y":0,"width":64,"height":64},{"name":"top","x":128,"y":0,"width":64,"height":64}],"range":{"min":[0,0,0],"max":[16,16,16],"pixelsPerUnit":3},"coverage":{"status":"partial","skipped":[{"kind":"texture","reason":"missing","target":"mypack:block/ruby"}]},"warnings":[{"code":"MODEL_PREVIEW_TEXTURE_MISSING","level":"warning","message":"Texture mypack:block/ruby could not be resolved (missing).","target":"mypack:block/ruby"}],"unapplied":["display","lighting"]}
+{"command":"model","mode":"preview","path":"tests/model/fixtures/stable-model.json","size":64,"version":{"rules":"undetermined","rulesReason":"version-not-determined"},"image":{"width":64,"height":64},"panels":[{"name":"display","x":0,"y":0,"width":64,"height":64}],"range":{"min":[-7.75,-8,-8],"max":[7.75,8,8],"pixelsPerUnit":2},"coverage":{"status":"partial","skipped":[{"kind":"texture","reason":"unresolved","target":"#all"}]},"warnings":[{"code":"MODEL_PREVIEW_TEXTURE_UNRESOLVED","level":"warning","message":"Texture #all could not be resolved (unresolved).","target":"#all"},{"code":"MODEL_PREVIEW_TINT_UNUSED","level":"warning","message":"Tint colours were given but no face declares tintindex.","target":"tintindex"}],"unapplied":["ambient-occlusion","world-lightmap","shadows","perspective-projection","camera-rig","left-hand-mirroring","display-slot-missing","flat-item-lighting-variation","gui-item-shader-lighting"],"display":{"slot":"gui","rotation":[0,0,0],"translation":[0,0,0],"scale":[1,1,1],"applied":false,"clamped":false},"lighting":{"mode":"flat","guiLight":"front"},"tint":{"color":"#80ff80","appliedFaces":0,"uncoloredFaces":0}}
 ```
 
-沒有 `outputPngPath` 時，PNG 以標準圖片塊附在該報告旁回傳。有 `outputPngPath` 時寫出檔案，文字部分只回傳報告。預覽圖輸出路徑欄位名為 `outputPngPath`，與其他會輸出 PNG 的工具一致；模型的 `.json` 輸出仍用既有的 `outputPath`。三個面板固定是 `front`（北面）、右側（東面）與 `top`（上面，北方在上）；每個面板邊長為 `size`。只畫軸對齊的長方體且座標為精確 1/256 倍數；`size` 只接受 64、128 或 256（預設 64）。這是診斷視圖：`display` 變換與遊戲光照不會套用，遊戲用戶端也沒有驗證過外觀。
+改用 `tints` 可分別指定索引顏色：
+
+```json
+{"mode":"preview","inputPath":"tests/model/fixtures/stable-model.json","view":"isometric","lighting":true,"tints":{"0":"#FF0000","1":"#00FF00"}}
+```
+
+MCP 文字結果（省略圖片區塊）：
+
+```text
+{"command":"model","mode":"preview","path":"tests/model/fixtures/stable-model.json","size":64,"version":{"rules":"undetermined","rulesReason":"version-not-determined"},"image":{"width":64,"height":64},"panels":[{"name":"isometric","x":0,"y":0,"width":64,"height":64}],"range":{"min":[0.25,0,0],"max":[15.75,16,16],"pixelsPerUnit":0.875},"coverage":{"status":"partial","skipped":[{"kind":"texture","reason":"unresolved","target":"#all"}]},"warnings":[{"code":"MODEL_PREVIEW_TEXTURE_UNRESOLVED","level":"warning","message":"Texture #all could not be resolved (unresolved).","target":"#all"},{"code":"MODEL_PREVIEW_TINT_UNUSED","level":"warning","message":"Tint colours were given but no face declares tintindex.","target":"tintindex"}],"unapplied":["display","ambient-occlusion","world-lightmap","shadows","perspective-projection","flat-item-lighting-variation","gui-item-shader-lighting"],"view":{"kind":"isometric","direction":"south-east"},"lighting":{"mode":"flat","guiLight":"front"},"tint":{"tints":{"0":"#ff0000","1":"#00ff00"},"appliedFaces":0,"uncoloredFaces":0}}
+```
+
+`display` 選擇展示位置，不能與 `view` 並用；`view: "isometric"` 會畫單一面板，方向由 `viewDirection` 指定。`lighting` 依 `gui_light` 套用固定明暗；`tint` 為所有帶 `tintindex` 的面上色，`tints` 則按索引指定顏色。沒有 `outputPngPath` 時以圖片區塊回傳。本次回應指出貼圖無法解析，且沒有面宣告 tint 索引。預覽未包含世界光照、環境遮蔽、陰影與遊戲姿勢；遊戲用戶端外觀未驗證。
 
 ## 失敗時如何回傳
 
@@ -582,9 +655,9 @@ isError: true
 ## 限制與缺口
 
 - **沒有逐像素工具。** 不存在 `set_pixel`；像素工作要透過 ASCII Grid、批次操作陣列或內嵌的 `.mcpx` 文字來做。
-- **只接受明確路徑，不覆寫，不建目錄。** 目標已存在是 `OUTPUT_EXISTS`，缺少上層目錄是 `FILESYSTEM_ERROR`。MCP 不接受 `--force` 與 `--mkdir`，請改用新路徑，或自行建立目錄。
+- **輸出路徑與覆寫規則依工具而定。** 許多工具拒絕已存在的目標與缺少上層目錄的路徑。提供 `force` 或 `mkdir` 欄位的工具（包括粒子、裝備與字型）則可依明確要求覆寫或建立目錄。
 - **省略輸出路徑會內嵌成品。** 沒有輸出路徑時，結果會帶 `pngBase64`（PNG）或 `mcpxText`（`.mcpx`），而不寫入檔案。這是逐個成品決定的：只給 `outputPngPath` 會寫出 PNG，並仍在結果中內嵌 `.mcpx` 文字。
-- **與 CLI 完全對等。** 二十五個工具涵蓋素材輸入與來源建置、空間變換、調色盤與減色、確定性像素化管線、程序化生成、磁磚與預覽、動畫 sprite sheet，以及單一素材與整個資源包的驗證（含依賴／原版解析與 GUI 精靈圖縮放）；版本目標設定透過 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 傳入。
+- **與 CLI 完全對等。** 工具涵蓋素材輸入與來源建置、空間變換、調色盤與減色、確定性像素化管線、程序化生成、磁磚與預覽、動畫 sprite sheet，以及單一素材與整個資源包的驗證（含依賴／原版解析與 GUI 精靈圖縮放）；版本目標設定透過 `analyze_asset`、`validate_asset`、`validate_pack_asset` 的 `minecraftVersion`／`resourcePackVersion` 傳入。
 - **檢視與附圖都是圖片塊，不另存副本。** `inspect_asset` 的 `view` 與 `apply_asset_operations` 的附圖都不會再以 `pngBase64` 重複一份 PNG；位元組走標準的 `type: "image"`、`mimeType: "image/png"` 塊。檢視縮放預設 1；長邊自動放大（縮放前不到 128 才往 128 放，上限 16）只適用於附圖。超過 1024px 邊長一律是 `RESOURCE_LIMIT_EXCEEDED`，不會默默縮圖。
 - **模型只檢查結構與引用，不檢查外觀。** `model_asset` 與 `validate_pack_asset` 驗證 JSON 結構、UV 與旋轉範圍、display 變換，以及被引用的模型與材質是否存在。沒有任何 Minecraft 用戶端渲染過模型，所以模型在遊戲裡的外觀與行為都未驗證。只支援長方體 `elements`。`preview` 模式的 `model_asset` 是診斷視圖，不是遊戲渲染器。
 - **`optimize_asset` 以像素比對確認無損。** 結果解碼後的像素與來源相同，位元組則不同。結果在遊戲用戶端裡的外觀未經檢查。
@@ -686,19 +759,11 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 {"mode":"init","projectDir":"packs/aurelian-forge","namespace":"aurelian","minecraftVersion":"1.21.9","style":"soft"}
 ```
 
-一次預檢後整批寫出 `mc-asset.pack.json`、`pack/pack.mcmeta`、64x64 的 `pack/pack.png` 佔位圖示，以及資源包目錄（`recipes/` 加上 `pack/assets/aurelian/...`，資源包格式 46.0 起還有 `items/`）。結果會回報固定的格式號與建立的每個路徑：
-
-```json
-{"mode":"init","projectDir":"/abs/packs/aurelian-forge","minecraftVersion":"1.21.9","packFormat":"69.0","resourcePackVersion":"69.0","files":["mc-asset.pack.json","pack/pack.mcmeta","pack/pack.png"],"directories":["pack","pack/assets","pack/assets/aurelian","pack/assets/aurelian/items","pack/assets/aurelian/models","pack/assets/aurelian/models/item","pack/assets/aurelian/textures","pack/assets/aurelian/textures/block","pack/assets/aurelian/textures/item","recipes"]}
-```
+一次預檢後整批寫出 `mc-asset.pack.json`、`pack/pack.mcmeta`、64x64 的 `pack/pack.png` 佔位圖示，以及資源包目錄（`recipes/` 加上 `pack/assets/aurelian/...`，資源包格式 46.0 起還有 `items/`）。結果會回報固定的格式號與建立的每個路徑。
 
 `resourcePackVersion` 覆寫發布版本對應的資源包格式，但發布版本本身仍留在專案檔裡。根 metadata 依目標版本選擇寫法：資源包格式 65.0 起宣告該目標的 `min_format` 與 `max_format` 且不寫舊式 `pack_format`，更早的版本只寫單一舊式格式號。產生的文件寫入前會先在記憶體內套用與 `validate-pack` 相同的根 metadata 規則檢查。
 
-不會覆寫任何東西。已經存在的路徑會讓整批拒絕：
-
-```json
-{"code":"PACK_INIT_CONFLICT","message":"pack init found 2 paths it would create.","details":{"path":"/abs/packs/aurelian-forge","minecraftVersion":"1.21.9","conflicts":["pack","pack/pack.mcmeta"]}}
-```
+不會覆寫任何東西。已經存在的路徑會讓整批以 `PACK_INIT_CONFLICT` 拒絕。
 
 專案目錄本身或其下任何位置是符號連結時是 `FILESYSTEM_ERROR`，而且永遠不會寫穿；未知發布版本或非法命名空間是 `INVALID_ARGUMENT`。此工具沒有 `force` 也沒有 `mkdir`；它寫出的專案檔由後續指令以嚴格模式讀取（`PACK_PROJECT_INVALID` 帶欄位路徑、`PACK_PROJECT_NOT_FOUND`、`PACK_PROJECT_UNSUPPORTED_VERSION`）。
 
@@ -707,7 +772,7 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 呼叫：
 
 ```json
-{"mode":"build","projectPath":"packs/aurelian-forge/mc-asset.pack.json","dryRun":true}
+{"mode":"build","projectPath":"tests/pack/fixtures/demo-pack/mc-asset.pack.json","dryRun":true}
 ```
 
 建置採三段式執行：
@@ -719,17 +784,15 @@ mc-asset compare before.png after.png --stdout --json > diff.png
    - `foreign`：未記錄但磁碟已有檔案（外部檔案衝突）。
 3. *寫入*：先對全部目標進行 safe-output 預檢；全部通過才原子寫入各檔案，最後再原子更新 `mc-asset.lock.json`。
 
-若有任何產物屬於 `own-modified` 或 `foreign`，整批以 `PACK_BUILD_CONFLICT`（code 4）拒絕，在 `details.conflicts` 完整列出衝突路徑，一個位元組都不寫且 lock 檔保持原樣：
+若有任何產物屬於 `own-modified` 或 `foreign`，整批以 `PACK_BUILD_CONFLICT`（code 4）拒絕，在 `details.conflicts` 完整列出衝突路徑，一個位元組都不寫且 lock 檔保持原樣。
+
+以下是預演結果的 `outputs` 陣列第一項，其餘項目已省略：
 
 ```json
-{"code":"PACK_BUILD_CONFLICT","message":"pack build found conflicting outputs.","details":{"recipeId":"tool-matrix","conflicts":[{"path":"pack/assets/aurelian/textures/item/iron_sword.png","reason":"foreign"}]}}
+{"path":"pack/assets/aurelian/textures/item/aurelian_blade.png","judgement":"new","targetId":"aurelian_blade","recipeId":"aurelian-demo"}
 ```
 
-結果：
-
-```json
-{"mode":"build","recipeId":"tool-matrix","outputs":35,"completed":[],"dryRun":true}
-```
+配方也能產生方塊模型、blockstate、實體範本、裝備、字型圖集與粒子。`outputs` 陣列逐項回報預定路徑及分類。
 
 未帶 `dryRun` 時，`completed` 會列出實際寫出的每個路徑，並在 `mc-asset.lock.json` 記錄輸出雜湊，確保後續重跑冪等且不重複寫入。
 
@@ -758,6 +821,18 @@ mc-asset compare before.png after.png --stdout --json > diff.png
 ```
 
 發現項目依代碼計數分組；修正清單由 error 排在最前，其次依出現次數降序、代碼位元組序排序。整包驗證失敗或有色彩預算超額時判定為 fail，其餘 warning 維持原樣。
+
+`check` 也會檢查 lock 紀錄的產物是否存在。記錄在 lock 的產生貼圖不套用手繪風格與未引用貼圖的檢查。先在暫存目錄建置示範專案的副本，再呼叫：
+
+```json
+{"mode":"check","projectPath":"/tmp/mc-asset-docs/demo-pack/mc-asset.pack.json"}
+```
+
+實際結果：
+
+```text
+{"mode":"check","verdict":"pass","groups":[],"fixList":[],"textureCount":9}
+```
 
 `package` 將已建置的資源包目錄打包為可重現的 zip 檔：
 
