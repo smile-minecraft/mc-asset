@@ -434,7 +434,9 @@ mc-asset validate-pack ./pack --resource-pack-version 75
 
 `model apply` takes `--operations` and applies all of them or none; `model export` places the model and, with `--binding`, writes an item definition and a blockstate next to it. The checks cover structure and reference validity. No Minecraft client renders the result, so appearance and in-game behavior are not verified.
 
-`model preview` renders a fixed diagnostic image from cuboid `elements`: three square panels side by side (`front` = north face, `right` = east face, `top` = up face with north at the top), each `--size` pixels (64, 128, or 256; default 64):
+`model preview` renders a diagnostic image from cuboid `elements`. By default it shows three views: `front` from the north, `right` from the east, and `top` from above with north at the top. Use `--view isometric` for an isometric view and `--view-direction` to select its camera direction. Use `--display` to simulate a game display pose: `gui`, `firstperson_righthand`, `thirdperson_righthand`, `head`, `ground`, or `fixed`. `--display` cannot be combined with `--view` or `--view-direction`. The optional `--lighting` applies fixed per-face shading factors selected by `gui_light`. Use `--tint` for one color on faces with `tintindex`, or `--tints` to map individual indices to colors; these options cannot be combined.
+
+The following command produces the default three-view preview:
 
 ```sh
 mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
@@ -443,7 +445,13 @@ mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
 
 ![three-view diagnostic preview of a stepped shrine block model](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/model-preview.png)
 
-Exactly one of `--output` or `--stdout` is required. The report carries panel names and coordinates, the input range, `coverage`, and `warnings`. A missing texture renders as a fixed checkerboard with a warning; element rotation, non-1/256 coordinates, translucent faces, and unresolvable textures are listed as `partial` coverage. In the default three-view mode, `display` transforms and lighting are not applied; the result is a diagnostic view.
+![Isometric view of the shrine model](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/isometric.png)
+
+![Four display poses of the shrine model](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/display.png)
+
+*The same shrine model in an isometric view and four display poses.*
+
+Exactly one of `--output` or `--stdout` is required. The report carries panel names and coordinates, the input range, `coverage`, and `warnings`. A missing texture renders as a fixed checkerboard with a warning; element rotation, non-1/256 coordinates, translucent faces, and unresolvable textures are listed as `partial` coverage. The default three-view preview does not apply a `display` transform; lighting is applied when requested. These are diagnostic views, and their appearance has not been verified in the Minecraft client.
 
 ---
 
@@ -479,6 +487,14 @@ single cuboid and embedded texture; other Blockbench features can have limits.
 `validate-pack` reports its coverage and warnings, including references it cannot
 resolve or resource types it does not interpret. Review those findings and test
 assets in the game.
+
+![Four-view preview of an entity texture](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/entity.png)
+
+*An entity texture previewed from four angles.*
+
+![Bitmap font icon atlas](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/font-icons.png)
+
+*A bitmap font icon atlas.*
 
 ## MCP Server
 

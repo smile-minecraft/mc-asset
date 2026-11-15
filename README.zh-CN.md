@@ -431,7 +431,9 @@ mc-asset validate-pack ./pack --resource-pack-version 75
 
 `model apply` 接收 `--operations`，整批应用成功或全部不应用；`model export` 会输出模型文件，加上 `--binding` 时还会在对应路径一并写出物品定义与 blockstate。检查范围是 JSON 结构与贴图引用是否有效，不会启动 Minecraft 客户端，因此不涵盖游戏内的实际打光与动态行为。
 
-`model preview` 从长方体 `elements` 绘制固定的诊断图：三个正方形面板横向排列（`front` 是北面、`right` 是东面、`top` 是顶面且北方朝上），每个面板边长为 `--size`（64、128 或 256，默认 64）：
+`model preview` 根据长方体 `elements` 生成诊断图。默认三视图展示北面（`front`）、东面（`right`）和顶面（`top`，北方朝上）。指定 `--view isometric` 可查看等轴测视图，用 `--view-direction` 选择观察方向。`--display` 模拟游戏中的显示姿势，可选 `gui`、`firstperson_righthand`、`thirdperson_righthand`、`head`、`ground` 或 `fixed`；它不能与 `--view` 或 `--view-direction` 同时使用。`--lighting` 按 `gui_light` 应用固定的面光照系数。对于带 `tintindex` 的面，`--tint` 使用同一种颜色，`--tints` 按索引分别指定颜色；这两个选项不能同时使用。
+
+下面的命令生成默认三视图：
 
 ```sh
 mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
@@ -440,7 +442,13 @@ mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
 
 ![Java 方块模型的三视图预览](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/model-preview.png)
 
-`--output` 与 `--stdout` 必须二选一。报告包含面板名称与坐标、输入范围、`coverage` 与 `warnings`。找不到贴图时会画成固定棋盘格并发出警告；元素旋转、非 1/256 坐标、半透明面与无法解析的贴图会列为 `partial`。默认三视图不应用 `display` 变换和光照，这张图用于检查结构。
+![神殿模型的等轴测视图](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/isometric.png)
+
+![神殿模型的四种显示姿势](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/display.png)
+
+*同一座神殿模型的等轴测视图和四种显示姿势。*
+
+`--output` 与 `--stdout` 必须二选一。报告包含面板名称与坐标、输入范围、`coverage` 与 `warnings`。找不到贴图时会画成固定棋盘格并发出警告；元素旋转、非 1/256 坐标、半透明面与无法解析的贴图会列为 `partial`。默认三视图不应用 `display` 变换；指定光照选项时才会应用光照。这些图用于检查，尚未验证 Minecraft 客户端中的外观。
 
 ---
 
@@ -465,6 +473,14 @@ mc-asset validate-pack "$PACK"
 ```
 
 等轴测视图和显示姿势分别运行，实体预览则给出四个视角。这些预览用于检查资源。示例中的 Blockbench 互换只验证了一个长方体及其内嵌贴图；其他功能可能受到限制。整包验证报告会列出覆盖范围和警告，例如无法解析的引用或尚未解读的资源类型。根据报告检查后，还需在游戏中查看效果。
+
+![实体贴图的四视角预览](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/entity.png)
+
+*实体贴图的四视角预览。*
+
+![位图字体图标图集](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/font-icons.png)
+
+*位图字体图标图集。*
 
 ## MCP 服务器
 

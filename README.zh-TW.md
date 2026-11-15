@@ -431,7 +431,9 @@ mc-asset validate-pack ./pack --resource-pack-version 75
 
 `model apply` 接收 `--operations`，整批套用成功或全部不套用；`model export` 會輸出模型檔，加上 `--binding` 時還會在對應路徑一併寫出物品定義與 blockstate。檢查範圍是 JSON 結構與貼圖參照是否有效，不會啟動 Minecraft 用戶端，因此不涵蓋遊戲內的實際打光與動態行為。
 
-`model preview` 從長方體 `elements` 繪製固定的診斷圖：三個正方形面板橫向排列（`front` 是北面、`right` 是東面、`top` 是頂面且北方朝上），每個面板邊長為 `--size`（64、128 或 256，預設 64）：
+`model preview` 根據長方體 `elements` 產生診斷圖。預設三視圖分別從北面（`front`）、東面（`right`）和上方（`top`，北方朝上）查看模型。使用 `--view isometric` 可產生等角視圖，搭配 `--view-direction` 選擇觀看方向。`--display` 可模擬遊戲中的顯示姿勢，選項有 `gui`、`firstperson_righthand`、`thirdperson_righthand`、`head`、`ground` 和 `fixed`；它不能與 `--view` 或 `--view-direction` 併用。`--lighting` 依 `gui_light` 套用固定的面光照係數。`--tint` 為有 `tintindex` 的面套用同一種顏色，`--tints` 則依索引指定顏色，兩者不能併用。
+
+以下指令產生預設三視圖：
 
 ```sh
 mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
@@ -440,7 +442,13 @@ mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
 
 ![Java 方塊模型的三視圖預覽](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/model-preview.png)
 
-`--output` 與 `--stdout` 必須二選一。報告包含面板名稱與座標、輸入範圍、`coverage` 與 `warnings`。找不到貼圖時會畫成固定棋盤格並發出警告；元素旋轉、非 1/256 座標、半透明面與無法解析的貼圖會列為 `partial`。預設的三視圖不套用 `display` 變換與光照，這張圖供結構檢查使用。
+![神殿模型的等角視圖](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/isometric.png)
+
+![神殿模型的四種顯示姿勢](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/display.png)
+
+*同一座神殿模型的等角視圖與四種顯示姿勢。*
+
+`--output` 與 `--stdout` 必須二選一。報告包含面板名稱與座標、輸入範圍、`coverage` 與 `warnings`。找不到貼圖時會畫成固定棋盤格並發出警告；元素旋轉、非 1/256 座標、半透明面與無法解析的貼圖會列為 `partial`。預設三視圖不套用 `display` 變換；指定光照選項時才會套用光照。這些圖供檢查使用，尚未驗證 Minecraft 用戶端中的外觀。
 
 ---
 
@@ -465,6 +473,14 @@ mc-asset validate-pack "$PACK"
 ```
 
 模型預覽供檢查用；等角視圖和顯示姿勢要分開執行。實體預覽會產生四個視角。Blockbench 互換範例涵蓋這個方塊模型的單一長方體和內嵌貼圖，其他功能可能有支援限制。整包驗證會回報涵蓋範圍與警告，包括無法解析的參照和未解讀的資源類型；請依報告檢查，並在遊戲中測試。
+
+![實體貼圖的四視角預覽](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/entity.png)
+
+*實體貼圖的四視角預覽。*
+
+![點陣字型圖示圖集](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/font-icons.png)
+
+*點陣字型的圖示圖集。*
 
 ## MCP 伺服器
 
