@@ -431,7 +431,9 @@ mc-asset validate-pack ./pack --resource-pack-version 75
 
 `model apply` 接收 `--operations`，整批应用成功或全部不应用；`model export` 会输出模型文件，加上 `--binding` 时还会在对应路径一并写出物品定义与 blockstate。检查范围是 JSON 结构与贴图引用是否有效，不会启动 Minecraft 客户端，因此不涵盖游戏内的实际打光与动态行为。
 
-`model preview` 从长方体 `elements` 绘制固定的诊断图：三个正方形面板横向排列（`front` 是北面、`right` 是东面、`top` 是顶面且北方朝上），每个面板边长为 `--size`（64、128 或 256，默认 64）：
+`model preview` 根据长方体 `elements` 生成诊断图。默认三视图展示北面（`front`）、东面（`right`）和顶面（`top`，北方朝上）。指定 `--view isometric` 可查看等轴测视图，用 `--view-direction` 选择观察方向。`--display` 模拟游戏中的显示姿势，可选 `gui`、`firstperson_righthand`、`thirdperson_righthand`、`head`、`ground` 或 `fixed`；它不能与 `--view` 或 `--view-direction` 同时使用。`--lighting` 按 `gui_light` 应用固定的面光照系数。对于带 `tintindex` 的面，`--tint` 使用同一种颜色，`--tints` 按索引分别指定颜色；这两个选项不能同时使用。
+
+下面的命令生成默认三视图：
 
 ```sh
 mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
@@ -440,13 +442,49 @@ mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
 
 ![Java 方块模型的三视图预览](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/model-preview.png)
 
-`--output` 与 `--stdout` 必须二选一。报告包含面板名称与坐标、输入范围、`coverage` 与 `warnings`。找不到贴图时会画成固定棋盘格并发出警告；元素旋转、非 1/256 坐标、半透明面与无法解析的贴图会列为 `partial`。`display` 变换与游戏内光照不会应用，这张图是结构诊断视图，不是游戏画面。
+![神殿模型的等轴测视图](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/isometric.png)
+
+![神殿模型的四种显示姿势](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/display.png)
+
+*同一座神殿模型的等轴测视图和四种显示姿势。*
+
+`--output` 与 `--stdout` 必须二选一。报告包含面板名称与坐标、输入范围、`coverage` 与 `warnings`。找不到贴图时会画成固定棋盘格并发出警告；元素旋转、非 1/256 坐标、半透明面与无法解析的贴图会列为 `partial`。默认三视图不应用 `display` 变换；指定光照选项时才会应用光照。这些图用于检查，尚未验证 Minecraft 客户端中的外观。
 
 ---
 
+### 用示例资源包检查新功能
+
+在仓库根目录复制示例项目，然后在临时目录构建。配方同时生成方块模型、方块状态、组合物品定义、实体模板、装备、位图字体和粒子帧。配方中的 `formatVersion: 2` 可使用方块及递归物品定义步骤；`formatVersion: 3` 还可生成实体、装备、字体和粒子资源。具体字段见[示例配方](tests/pack/fixtures/demo-pack/recipes/demo.recipe.json)和[资源包工作流](skills/mc-asset/references/pack-workflow.md)。
+
+```sh
+DEMO_DIR=$(mktemp -d)
+cp -R tests/pack/fixtures/demo-pack "$DEMO_DIR/demo-pack"
+mc-asset pack build --project "$DEMO_DIR/demo-pack/mc-asset.pack.json"
+PACK="$DEMO_DIR/demo-pack/pack"
+MODEL="$PACK/assets/aurelian/models/block/aurelian_block.json"
+TEXTURE="$PACK/assets/aurelian/textures/block/aurelian_block.png"
+mc-asset model preview "$MODEL" --pack "$PACK" --view isometric --lighting --output "$DEMO_DIR/isometric.png"
+mc-asset model preview "$MODEL" --pack "$PACK" --display gui --output "$DEMO_DIR/gui.png"
+mc-asset entity preview "$PACK/assets/aurelian/textures/entity/aurelian_hero.png" --layout player_wide --output "$DEMO_DIR/entity.png"
+mc-asset entity validate "$PACK/assets/aurelian/textures/entity/aurelian_hero.png" --layout player_wide
+mc-asset model export-bbmodel "$MODEL" --texture "all=$TEXTURE" --output "$DEMO_DIR/block.bbmodel"
+mc-asset model import-bbmodel "$DEMO_DIR/block.bbmodel" --output "$DEMO_DIR/block.json" --textures "$DEMO_DIR/imported" --mkdir
+mc-asset validate-pack "$PACK"
+```
+
+等轴测视图和显示姿势分别运行，实体预览则给出四个视角。这些预览用于检查资源。示例中的 Blockbench 互换只验证了一个长方体及其内嵌贴图；其他功能可能受到限制。整包验证报告会列出覆盖范围和警告，例如无法解析的引用或尚未解读的资源类型。根据报告检查后，还需在游戏中查看效果。
+
+![实体贴图的四视角预览](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/entity.png)
+
+*实体贴图的四视角预览。*
+
+![位图字体图标图集](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/font-icons.png)
+
+*位图字体图标图集。*
+
 ## MCP 服务器
 
-`mc-asset mcp` 会启动一个 stdio MCP 服务器，底层和 CLI 共用同一个核心，因此 AI 助手调用工具和在终端运行命令会得到相同结果。服务器共提供 27 个工具。
+`mc-asset mcp` 会启动一个 stdio MCP 服务器，底层和 CLI 共用同一个核心，因此 AI 助手调用工具和在终端运行命令会得到相同结果。服务器共提供 31 个工具，列表如下。
 
 ### 提供的 MCP 工具
 
@@ -475,7 +513,11 @@ mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
 | `validate_pack_asset` | 只读扫描整个资源包：命名空间、模型、贴图、图集与目标版本。 |
 | `inspect_asset` | 只读 `structure`（图层、区域、颜色用量、重叠）或 `view`（合成 PNG 图块加摘要信息）；输入为 `inputPath`。 |
 | `optimize_asset` | 无损压缩 PNG（若无更小编码则保留原文件）；支持单文件、多文件、目录扫描（`inputDir`、`recursive`，上限 4096 个文件）与 `dryRun`。 |
-| `model_asset` | Java 方块／物品模型 JSON：`inspect`、`validate`、`create`、`apply`、`export`（含物品定义与 blockstate），以及 `preview`（生成三视图诊断 PNG）。 |
+| `model_asset` | 查看、校验、创建、编辑、导出和预览 Java 模型，支持导入和导出 Blockbench 项目。 |
+| `entity_asset` | 查看布局、生成模板、校验贴图并预览四个视角。 |
+| `equipment_asset` | 生成装备定义及支持的贴图模板。 |
+| `font_asset` | 构建位图字体图集、定义和字符对照表。 |
+| `particle_asset` | 构建粒子定义和帧贴图。 |
 | `compare_assets` | 比对两张同尺寸 PNG；返回原始 RGBA 与可见差异像素数、差异范围框，并可输出诊断标记图。 |
 | `style_asset` | 风格预设、自定义风格编写、调色板导出、风格检查与家族审计。 |
 | `pack_asset` | 资源包项目管理：创建骨架（`init`）、配方批量构建（`build`）、贴图盘点（`catalog`）、素材提取（`extract`）、排序修复列表（`check`）与可重现 zip 打包（`package`）。 |
@@ -575,7 +617,11 @@ claude mcp add mc-asset -- npx -y mc-asset mcp
 | **压缩与模型** | `optimize <input...>` 或 `--input-dir <dir>` | 无损压缩 PNG（若无更小编码则保留原文件；支持 `--output`、`--output-dir`、`--stdout`、`--dry-run`、`--mode`、`--ancillary`、`--recursive`）。 |
 | | `model inspect\|validate <file>` | 只读检查 Java 方块／物品模型 JSON（结构、UV、旋转、display、贴图引用）。 |
 | | `model create\|apply\|export` | 创建、修改或导出 Java 模型（长方体 `elements`）及其物品定义与 blockstate。 |
-| | `model preview <file>` | 绘制三视图诊断 PNG（`front`、`right`、`top` 面板，`--size 64\|128\|256`，`--output` 或 `--stdout`）。 |
+| | `model preview <file>` | 生成三视图、等轴测视图或显示姿势诊断 PNG，并报告不支持的内容。 |
+| | `model import-bbmodel\|export-bbmodel` | 与 Blockbench 项目交换支持的模型数据和贴图。 |
+| **实体与资源** | `entity inspect\|template\|validate\|preview` | 查看 box-UV 布局、制作模板、校验贴图并预览四个视角。 |
+| | `equipment <id>` | 生成装备定义及支持的模板。 |
+| | `font <spec>` / `particle <frames>` | 构建位图字体或粒子定义与贴图。 |
 | **AI 助手接口** | `mcp` | 启动 stdio MCP 服务器。 |
 
 ### 生成动画与 GUI 设置（`mcmeta`）

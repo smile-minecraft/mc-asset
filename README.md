@@ -434,7 +434,9 @@ mc-asset validate-pack ./pack --resource-pack-version 75
 
 `model apply` takes `--operations` and applies all of them or none; `model export` places the model and, with `--binding`, writes an item definition and a blockstate next to it. The checks cover structure and reference validity. No Minecraft client renders the result, so appearance and in-game behavior are not verified.
 
-`model preview` renders a fixed diagnostic image from cuboid `elements`: three square panels side by side (`front` = north face, `right` = east face, `top` = up face with north at the top), each `--size` pixels (64, 128, or 256; default 64):
+`model preview` renders a diagnostic image from cuboid `elements`. By default it shows three views: `front` from the north, `right` from the east, and `top` from above with north at the top. Use `--view isometric` for an isometric view and `--view-direction` to select its camera direction. Use `--display` to simulate a game display pose: `gui`, `firstperson_righthand`, `thirdperson_righthand`, `head`, `ground`, or `fixed`. `--display` cannot be combined with `--view` or `--view-direction`. The optional `--lighting` applies fixed per-face shading factors selected by `gui_light`. Use `--tint` for one color on faces with `tintindex`, or `--tints` to map individual indices to colors; these options cannot be combined.
+
+The following command produces the default three-view preview:
 
 ```sh
 mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
@@ -443,13 +445,60 @@ mc-asset model preview ./pack/assets/mypack/models/block/shrine.json \
 
 ![three-view diagnostic preview of a stepped shrine block model](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/model-preview.png)
 
-Exactly one of `--output` or `--stdout` is required. The report carries panel names and coordinates, the input range, `coverage`, and `warnings`. A missing texture renders as a fixed checkerboard with a warning; element rotation, non-1/256 coordinates, translucent faces, and unresolvable textures are listed as `partial` coverage. `display` transforms and game lighting are not applied: this is a diagnostic view, not a game renderer.
+![Isometric view of the shrine model](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/isometric.png)
+
+![Four display poses of the shrine model](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/display.png)
+
+*The same shrine model in an isometric view and four display poses.*
+
+Exactly one of `--output` or `--stdout` is required. The report carries panel names and coordinates, the input range, `coverage`, and `warnings`. A missing texture renders as a fixed checkerboard with a warning; element rotation, non-1/256 coordinates, translucent faces, and unresolvable textures are listed as `partial` coverage. The default three-view preview does not apply a `display` transform; lighting is applied when requested. These are diagnostic views, and their appearance has not been verified in the Minecraft client.
 
 ---
 
+### Build and inspect a complete example pack
+
+From a repository checkout, copy the sample project to a fresh temporary directory.
+Its recipe combines a block model and blockstate, a composite item definition,
+an entity template, equipment, a bitmap font and particle frames. Recipe
+`formatVersion: 2` adds block and recursive item-definition steps;
+`formatVersion: 3` also supports the entity, equipment, font and particle
+steps. See the [sample recipe](tests/pack/fixtures/demo-pack/recipes/demo.recipe.json)
+and the [pack workflow](skills/mc-asset/references/pack-workflow.md) for details.
+
+```sh
+DEMO_DIR=$(mktemp -d)
+cp -R tests/pack/fixtures/demo-pack "$DEMO_DIR/demo-pack"
+mc-asset pack build --project "$DEMO_DIR/demo-pack/mc-asset.pack.json"
+PACK="$DEMO_DIR/demo-pack/pack"
+MODEL="$PACK/assets/aurelian/models/block/aurelian_block.json"
+TEXTURE="$PACK/assets/aurelian/textures/block/aurelian_block.png"
+mc-asset model preview "$MODEL" --pack "$PACK" --view isometric --lighting --output "$DEMO_DIR/isometric.png"
+mc-asset model preview "$MODEL" --pack "$PACK" --display gui --output "$DEMO_DIR/gui.png"
+mc-asset entity preview "$PACK/assets/aurelian/textures/entity/aurelian_hero.png" --layout player_wide --output "$DEMO_DIR/entity.png"
+mc-asset entity validate "$PACK/assets/aurelian/textures/entity/aurelian_hero.png" --layout player_wide
+mc-asset model export-bbmodel "$MODEL" --texture "all=$TEXTURE" --output "$DEMO_DIR/block.bbmodel"
+mc-asset model import-bbmodel "$DEMO_DIR/block.bbmodel" --output "$DEMO_DIR/block.json" --textures "$DEMO_DIR/imported" --mkdir
+mc-asset validate-pack "$PACK"
+```
+
+The model previews are diagnostic; `--view` and `--display` are separate modes.
+The entity preview has four views. This conversion example covers the sample's
+single cuboid and embedded texture; other Blockbench features can have limits.
+`validate-pack` reports its coverage and warnings, including references it cannot
+resolve or resource types it does not interpret. Review those findings and test
+assets in the game.
+
+![Four-view preview of an entity texture](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/entity.png)
+
+*An entity texture previewed from four angles.*
+
+![Bitmap font icon atlas](https://raw.githubusercontent.com/smile-minecraft/mc-asset/main/docs/assets/showcase/advanced/font-icons.png)
+
+*A bitmap font icon atlas.*
+
 ## MCP Server
 
-`mc-asset mcp` starts a stdio MCP server on the same core as the CLI, so a tool call and the matching command return the same result. It exposes 27 tools.
+`mc-asset mcp` starts a stdio MCP server on the same core as the CLI, so a tool call and the matching command return the same result. It exposes 31 tools, listed below.
 
 ### Exposed MCP Tools
 
@@ -478,7 +527,11 @@ Exactly one of `--output` or `--stdout` is required. The report carries panel na
 | `validate_pack_asset` | Read-only whole-pack scan: namespaces, models, textures, atlases, version targeting. |
 | `inspect_asset` | Read-only `structure` (layers, regions, color usage, overlaps) or `view` (composited PNG image block plus metadata); takes `inputPath`. |
 | `optimize_asset` | Lossless PNG re-encoding into the smallest exact encoding (or the source kept); per-file report, `dryRun`, explicit `outputPath` / `outputDir`, or whole-directory scan (`inputDir`, `recursive`, 4096 PNG limit). |
-| `model_asset` | Java block/item model JSON: `inspect`, `validate`, `create`, `apply`, `export` (with item definition and blockstate bindings), and `preview` (fixed diagnostic three-view PNG via `size` / `outputPngPath`). Reports structure and references, not rendered appearance. |
+| `model_asset` | Inspect, validate, create, edit, export and preview Java models; import and export Blockbench projects. |
+| `entity_asset` | Inspect layouts, generate templates, validate textures, and preview four views. |
+| `equipment_asset` | Generate equipment definitions and supported texture templates. |
+| `font_asset` | Build bitmap font atlases, a definition and a character table. |
+| `particle_asset` | Build particle definitions and frame textures. |
 | `compare_assets` | Compares same-size PNGs; reports raw RGBA and visible differences, bounds, and optional diagnostic diff image. |
 | `style_asset` | Style presets, custom style authoring, palette exports, linting, and texture family audits. |
 | `pack_asset` | Resource pack projects: scaffolding (`init`), recipe batch builds (`build`), texture cataloging (`catalog`), asset extraction (`extract`), whole-pack check with prioritized fixes (`check`), and reproducible zip packaging (`package`). |
@@ -578,7 +631,11 @@ Add to `opencode.json` or `opencode.jsonc`:
 | **Optimization & Models** | `optimize <input...>` or `--input-dir <dir>` | Lossless PNG re-encoding into the smallest exact encoding, or the source bytes kept (`--output`, `--output-dir`, `--stdout`, `--dry-run`, `--mode`, `--ancillary`, `--recursive`). |
 | | `model inspect\|validate <file>` | Read-only report on a Java block/item model JSON (structure, UV, rotation, display, references). |
 | | `model create\|apply\|export` | Builds, edits, or places a Java model (cuboid `elements`) and its item definition and blockstate. |
-| | `model preview <file>` | Fixed diagnostic three-view PNG (`front`, `right`, `top` panels, `--size 64\|128\|256`, `--output` or `--stdout`); partial coverage for unsupported content, never a game render. |
+| | `model preview <file>` | Diagnostic three-view, isometric or display-pose PNG; reports unsupported content. |
+| | `model import-bbmodel\|export-bbmodel` | Convert supported model data and textures to or from Blockbench projects. |
+| **Entity & resources** | `entity inspect\|template\|validate\|preview` | Inspect box-UV layouts, make templates, validate textures and preview four views. |
+| | `equipment <id>` | Generate equipment definitions and supported templates. |
+| | `font <spec>` / `particle <frames>` | Build bitmap fonts or particle definitions and textures. |
 | **Agent Interface** | `mcp` | Starts the stdio MCP server. |
 
 ### Generate animation and GUI metadata (`mcmeta`)

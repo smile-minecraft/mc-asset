@@ -28,7 +28,11 @@ this table is the working summary.
 | `validate <asset>` | `validate_asset` | one texture (+ `--mcmeta`) against a profile |
 | `validate-pack <path>` | `validate_pack_asset` | a whole resource pack |
 | `optimize <input...>` | `optimize_asset` | lossless PNG re-encoding into the smallest exact encoding (or the source kept); `--dry-run` first |
-| `model inspect\|validate\|create\|apply\|export` | `model_asset` (`mode`) | Java block/item model JSON, cuboid `elements` only; structure and references are checked, not appearance |
+| `model inspect\|validate\|create\|apply\|export\|preview\|import-bbmodel\|export-bbmodel` | `model_asset` (`mode`) | Java block/item models, diagnostic previews and Blockbench project conversion |
+| `entity inspect\|template\|validate\|preview` | `entity_asset` (`mode`) | Box-UV layouts, face templates, texture checks and four-view previews |
+| `equipment <id>` | `equipment_asset` | Equipment definition and supported armor or wings texture templates |
+| `font <spec>` | `font_asset` | Bitmap icon atlases, font definition and character table |
+| `particle <frames>` | `particle_asset` | Particle definition and frame textures |
 | `pack init\|build\|catalog\|extract\|check\|package` | `pack_asset` (`mode`) | complete resource pack project authoring, batch recipe builds, cataloging, health check, and zip packaging |
 | `style list\|show\|export-palette\|create\|lint\|audit` | `style_asset` (`mode`) | style presets, custom style authoring, palette export, style checking, and family silhouette audits |
 

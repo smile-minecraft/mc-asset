@@ -22,7 +22,7 @@ To create and ship an entire resource pack project from scratch:
 1. **Initialize**: `mc-asset pack init <dir> --namespace <ns> --minecraft-version <v>`
 2. **Style & Presets**: `mc-asset style list` (`vanilla`, `soft`, `fairy-flat`, `dark-frame`)
 3. **Reference & Catalog**: `mc-asset pack catalog --vanilla <path>`
-4. **Recipes**: `recipes/*.recipe.json` with matrix variables, sweep animations, and item definitions
+4. **Recipes**: `recipes/*.recipe.json` with block and item definitions, entity templates, equipment, fonts, particles, matrix variables, and animations. Choose the recipe `formatVersion` for the steps used.
 5. **Batch Build**: `mc-asset pack build --project <file>` (three-stage safe build with lockfile)
 6. **Check & Audit**: `mc-asset pack check` (ordered fix list) and `mc-asset style audit`
 7. **Contact Sheet**: `mc-asset preview contact-sheet --inputs <paths...> --output <file.png>`
