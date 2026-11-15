@@ -53,6 +53,11 @@ final PNG is passed through `mc-asset optimize`.
 | `gui/button-nine-slice.png` / `gui/button-stretch.png` | 192×64 each | `gui-scale` to 48×16 with and without the mcmeta, ×4 nearest |
 | `model-shrine.json` | Java model spec | Five-cuboid stepped shrine block referencing `bricks`, `planks`, `stone`, and `ore` |
 | `model-preview.png` | 384×128 | Three-view diagnostic PNG (`front`, `right`, `top`, `--size 128`) from `model preview` |
+| `advanced/isometric.png` | 256×256 | Lit isometric view of the shrine |
+| `advanced/display.png` | 512×528 | Four display poses of the shrine |
+| `advanced/entity.png` | 512×140 | Four views of a generated player UV template |
+| `advanced/font-icons.png` | 192×96 | Bitmap font atlas and labeled icons |
+| `advanced/model-display.json`, `advanced/font-icons.json`, `advanced/e000.png` … `e002.png` | Model, font spec, and icons | Inputs for the advanced previews |
 
 ## 1. Pixelize before / after
 
@@ -348,6 +353,101 @@ mc-asset model preview $SCRATCH/pack/assets/mypack/models/block/shrine.json \
   --pack $SCRATCH/pack --size 128 --output $OUT/model-preview.png --resource-pack-version 75
 ```
 
+## 14. Advanced previews
+
+Run these commands from the repository root after installing dependencies. The
+scratch directory holds generated intermediates; the source grids, model, font
+spec, and icon PNGs live in this directory. Run the setup once, followed by the
+four image recipes. Each recipe overwrites its own outputs.
+
+```sh
+OUT=docs/assets/showcase
+SCRATCH=/tmp/showcase
+mkdir -p "$SCRATCH/pack/assets/mypack/textures/block" "$SCRATCH/pack/assets/mypack/models/block"
+cp "$OUT/advanced/model-display.json" "$SCRATCH/pack/assets/mypack/models/block/showcase.json"
+mc-asset render "$OUT/blocks/stone.grid" --output "$SCRATCH/pack/assets/mypack/textures/block/stone.png" --force
+mc-asset render "$OUT/blocks/planks.grid" --output "$SCRATCH/pack/assets/mypack/textures/block/planks.png" --force
+mc-asset render "$OUT/tile-source.grid" --output "$SCRATCH/pack/assets/mypack/textures/block/bricks.png" --force
+mc-asset render "$OUT/anim/frame-3.grid" --output "$SCRATCH/pack/assets/mypack/textures/block/ore.png" --force
+```
+
+### Isometric model
+
+![Isometric shrine preview](advanced/isometric.png)
+
+The shrine uses the same block texture grids as the three-view model. This
+view looks from the north-east with directional shading.
+
+```sh
+mc-asset model preview "$SCRATCH/pack/assets/mypack/models/block/showcase.json" --pack "$SCRATCH/pack" \
+  --view isometric --view-direction north-east --size 256 --lighting --output "$SCRATCH/isometric.png" --force
+mc-asset optimize "$SCRATCH/isometric.png" --output "$OUT/advanced/isometric.png" --force
+```
+
+### Display poses
+
+![Four shrine display poses](advanced/display.png)
+
+The labels `gui`, `hand`, `head`, and `ground` correspond to the `gui`,
+`firstperson_righthand`, `head`, and `ground` transforms in the model. The
+contact sheet makes two pages at double size; nearest-neighbor resizing restores
+the original preview resolution before the pages are stacked.
+
+```sh
+mc-asset model preview "$SCRATCH/pack/assets/mypack/models/block/showcase.json" --pack "$SCRATCH/pack" \
+  --display gui --lighting --size 256 --output "$SCRATCH/gui.png" --force
+mc-asset model preview "$SCRATCH/pack/assets/mypack/models/block/showcase.json" --pack "$SCRATCH/pack" \
+  --display firstperson_righthand --lighting --size 256 --output "$SCRATCH/hand.png" --force
+mc-asset model preview "$SCRATCH/pack/assets/mypack/models/block/showcase.json" --pack "$SCRATCH/pack" \
+  --display head --lighting --size 256 --output "$SCRATCH/head.png" --force
+mc-asset model preview "$SCRATCH/pack/assets/mypack/models/block/showcase.json" --pack "$SCRATCH/pack" \
+  --display ground --lighting --size 256 --output "$SCRATCH/ground.png" --force
+mc-asset preview contact-sheet --inputs "$SCRATCH/gui.png" "$SCRATCH/hand.png" "$SCRATCH/head.png" "$SCRATCH/ground.png" \
+  --columns 2 --output "$SCRATCH/display-page-{page}.png" --force
+mc-asset transform "$SCRATCH/display-page-1.png" --resize 512x264 --resize-mode nearest \
+  --source "$SCRATCH/display-rows/1.mcpx" --force --mkdir
+mc-asset transform "$SCRATCH/display-page-2.png" --resize 512x264 --resize-mode nearest \
+  --source "$SCRATCH/display-rows/2.mcpx" --force --mkdir
+mc-asset animate pack --frames-dir "$SCRATCH/display-rows" --layout vertical --output "$SCRATCH/display.png" --force
+mc-asset optimize "$SCRATCH/display.png" --output "$OUT/advanced/display.png" --force
+```
+
+### Entity texture
+
+![Four views of the player UV template](advanced/entity.png)
+
+The built-in `player_wide` layout generates the face-colored texture and wraps
+it around the model in four labeled views.
+
+```sh
+mc-asset entity template --layout player_wide --output "$SCRATCH/entity-texture.png" --force
+mc-asset entity preview "$SCRATCH/entity-texture.png" --layout player_wide --size 128 --output "$SCRATCH/entity.png" --force
+mc-asset optimize "$SCRATCH/entity.png" --output "$OUT/advanced/entity.png" --force
+```
+
+### Bitmap font icons
+
+![Font atlas and icons labeled by code point](advanced/font-icons.png)
+
+The atlas contains apple, key, and sapphire in that order. The labels on the
+individual icons are their Unicode code points: `e000` is sapphire, `e001` is
+apple, and `e002` is key. The font command also writes the definition and the
+character table to the scratch directory.
+
+```sh
+mc-asset render "$OUT/items/sapphire.grid" --output "$SCRATCH/e000.png" --force
+mc-asset render "$OUT/items/apple.grid" --output "$SCRATCH/e001.png" --force
+mc-asset render "$OUT/items/key.grid" --output "$SCRATCH/e002.png" --force
+mc-asset optimize "$SCRATCH/e000.png" --output "$OUT/advanced/e000.png" --force
+mc-asset optimize "$SCRATCH/e001.png" --output "$OUT/advanced/e001.png" --force
+mc-asset optimize "$SCRATCH/e002.png" --output "$OUT/advanced/e002.png" --force
+mc-asset font "$OUT/advanced/font-icons.json" --output "$SCRATCH/font.json" \
+  --atlas "$SCRATCH/atlas.png" --table "$SCRATCH/table.json" --force
+mc-asset preview contact-sheet --inputs "$SCRATCH/atlas.png" "$OUT/advanced/e000.png" "$OUT/advanced/e001.png" "$OUT/advanced/e002.png" \
+  --columns 2 --output "$SCRATCH/font-icons.png" --force
+mc-asset optimize "$SCRATCH/font-icons.png" --output "$OUT/advanced/font-icons.png" --force
+```
+
 ## Verification (spot checks)
 
 ```sh
@@ -367,7 +467,6 @@ mc-asset analyze $OUT/gui/button.png          # 64x64, 5 colors, cutout
 mc-asset analyze $OUT/model-preview.png       # 384x128, 24 colors, cutout
 ```
 
-Size note: every showcase PNG is losslessly re-encoded with `mc-asset optimize`
-into indexed, grayscale, or compressed RGBA storage, so each file stays between
-97 bytes and 1.1 KB (`mc-asset optimize --input-dir docs/assets/showcase --recursive --dry-run`
-reports `unchanged` for all 32 PNGs).
+The 39 showcase PNGs are `mc-asset optimize` outputs with unchanged decoded pixels;
+`mc-asset optimize --input-dir docs/assets/showcase --recursive --dry-run` reports
+`unchanged` for all 39.

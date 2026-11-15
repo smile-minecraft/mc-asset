@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "namespace": "showcase",
+  "id": "icons",
+  "height": 16,
+  "ascent": 15,
+  "icons": [
+    { "name": "sapphire", "path": "e000.png", "codePoint": 57344 },
+    { "name": "apple", "path": "e001.png", "codePoint": 57345 },
+    { "name": "key", "path": "e002.png", "codePoint": 57346 }
+  ]
+}
