@@ -42,13 +42,20 @@ const GEAR_HUMANOID_REL =
 const GEAR_LEGGINGS_REL =
 	"pack/assets/aurelian/textures/entity/equipment/humanoid_leggings/aurelian_gear.png";
 
-/** Frozen SHA-256 of every project byte, inputs and lock included. */
+/**
+ * Frozen SHA-256 of every project byte, inputs and lock included.
+ * The lock file records the package.json version (as `tool.version` and inside
+ * every `inputHash`), so a version bump must update both constants here.
+ * Recompute by staging the demo project with the bumped version (the lock hash
+ * is the sha256 of `mc-asset.lock.json`; the tree hash is `treeHash()` below),
+ * or by taking the actual values from the failing assertion.
+ */
 const EXPECTED_TREE_SHA256 =
-	"d5c8ebf40dee1ac6c9e1ba2dee6d9fee52b7623ca6c1e7853586d25628080eaa";
+	"0c84b648b46de36d8b2f2139a2cd49b45f8fc5505c8cbd7d3e353755d01fa7fb";
 
-/** Frozen SHA-256 of the lock document. */
+/** Frozen SHA-256 of the lock document. Bumps with the version; see above. */
 const EXPECTED_LOCK_SHA256 =
-	"58eecd757f7385c49b3442d37d7315ecf7fd4bfbc6997592f029bc141f97dc33";
+	"4ec47c4f7c49bf9229835ea4b75a5c95ce9248051275ff1a28f472c289a49a66";
 
 /** Every output the demo recipe plans, by lock kind. */
 const EXPECTED_LOCK_KINDS: Readonly<Record<string, string>> = {
