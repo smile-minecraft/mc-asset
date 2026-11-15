@@ -47,6 +47,17 @@ must run under plain Node as well as under Bun.
 - `src/profiles/` — asset profiles and the Minecraft version facts.
 - `src/validate/` — single-asset and whole-pack validation.
 - `src/analyze/` — read-only metric reports.
+- `src/model/` — model editing, inspection, and export; `geometry/` provides
+  integer-only fixed-point 3D geometry: vectors, rotation matrices, orthographic
+  and isometric projection, and triangle and quad rasterization. `preview/`
+  renders model views with camera selection, lighting, tinting, and display
+  transforms; `bbmodel/` imports and exports Blockbench models.
+- `src/pack/` — resource-pack planning, building, packaging, and inspection.
+- `src/style/` — style definitions, palettes, linting, and texture-family audits.
+- `src/entity/` — entity texture layouts, templates, validation, and previews.
+- `src/equipment/` — equipment asset planning and texture layouts.
+- `src/font/` — font specifications and glyph atlas planning.
+- `src/particle/` — particle asset planning and frame loading.
 - `src/cli/` — the commander program and one module per command.
 - `src/mcp/` — the stdio MCP server: `schema.ts` (frozen inputs),
   `handlers.ts`, `tools.ts`, `server.ts`.
