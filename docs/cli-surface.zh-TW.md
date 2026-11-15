@@ -17,6 +17,8 @@
   - [7. 檢查、驗證與資源包核對](#7-檢查驗證與資源包核對)
   - [8. Model Context Protocol（MCP）伺服器](#8-model-context-protocolmcp伺服器)
   - [9. PNG 最佳化與 Java 模型](#9-png-最佳化與-java-模型)
+  - [10. 實體貼圖、裝備、字型與粒子](#10-實體貼圖裝備字型與粒子)
+  - [配方步驟與驗證範圍](#配方步驟與驗證範圍)
 - [批次操作規格（`--operations`）](#批次操作規格--operations)
 - [狀態碼註冊表](#狀態碼註冊表)
 - [常見錯誤排查指南（Troubleshooting）](#常見錯誤排查指南troubleshooting)
@@ -300,10 +302,10 @@ compare       <before> <after> [--output <path>] [--stdout] [--scale <N>] [--for
 - 版本回顯：人類可讀報告印出 `target: minecraft <v> / resource-pack <f>`、`target: resource-pack <f>` 或 `target: default (engine defaults)`；`--json` 攜帶 `version: { minecraftVersion?, resourcePackVersion? }`，皆為正規化後的 dotted 字串。
 - 無旗標時的解析：不帶版本旗標的 `validate-pack` 會讀取根目錄 `pack.mcmeta`，依序取 `pack.max_format`、`pack.min_format`、舊制 `pack.pack_format`（整數、`[major, minor]` 陣列或 dotted 字串，皆正規化為 `major.minor`）；解析出的目標印為 `pack.mcmeta resource-pack <f>`。`supported_formats` 不參與目標選擇；沒有可用值時只警告一次（`PACK_VERSION_UNDETERMINED`），不套用任何預設。
 - `pack.mcmeta` 結構：`validate-pack` 把解析出的根目錄 `pack.mcmeta` 拿去對遊戲行為。`PACK_MCMETA_INVALID`（錯誤，會讓掃描失敗）處理遊戲拒絕載入的寫法：缺少 `pack` 區段或 `pack.description`、`min_format`／`max_format` 只寫一半、負值或上下顛倒的範圍、與宣告範圍不一致的 `supported_formats`（含 `min_format` 在 65 之後仍保留該欄位）、落在宣告 major 之外的舊制 `pack_format`、字元超出 `[-_a-zA-Z0-9.]` 的 overlay 目錄名，以及違反舊格式規則的 overlay `formats` 欄位（任一條目低於 65 時每條都要寫，無人低於 65 時一律不得寫）。`PACK_MCMETA_SUSPICIOUS`（警告，本身不會讓掃描失敗）處理載入正常但疑似失誤的寫法：pack 根目錄沒有的 overlay 目錄、完全沒寫版本欄位的 overlay 條目、落在宣告範圍外的掃描目標。遊戲接受的值一律不報：超過已知版本的 `max_format`，以及語法不涵蓋的寫法——掃描只報它能證明的缺陷，不能證明的就安靜。
-- overlay 覆蓋率：版本範圍涵蓋掃描目標的 overlay 不解讀，記一筆 `overlay`／`overlay-not-interpreted` skip 加一則 `PACK_COVERAGE_SKIPPED` 警告，契約與其他 skip 相同（coverage 本身不改變 verdict）。宣告了但根目錄沒有的目錄只警告不記 skip；沒有解析出目標時不記任何 skip。
+- overlay 覆蓋率：符合掃描目標版本的 overlay 依宣告順序疊加在基礎資源包上，後面的項目優先；範圍不符的項目不參與掃描。宣告的目錄不存在時只警告。
 - `--vanilla`：呼叫端提供的原版資源樹（pack 根目錄形狀，含 `assets/`）。提供後 `minecraft` 命名空間的參照會在該樹中確認；未提供時回報 `PACK_UNRESOLVED_EXTERNAL` warning 並記入 coverage，不再直接判為缺失。
 - `--dependency`：依賴資源包的根目錄，可重複；第一個優先序最高。
-- coverage：`validate` 與 `validate-pack` 的報告都帶 `coverage: {status, skipped}`；`partial` 表示有檢查因故略過（例如 `vanilla-not-provided`、`unsupported-source-type`、`unsupported-regex`、`unknown-node-type`、`renderer-fields-not-interpreted`、`version-undetermined`、`model-documents-not-loaded`、`resource-type-not-interpreted: <類型>`、`trim-overrides-not-interpreted`、`particle-atlas-customized`、`internal-reference`、`pattern-reference`、`provider-not-interpreted`、`version-not-determined`、`feature-version-unknown`、`feature-not-in-version`、`unexpected-shape`、`overlay-not-interpreted`），每個 skip 都帶 `kind`／`reason`／`target`。每個 skip 也會同時以一則 `PACK_COVERAGE_SKIPPED` 警告回報。coverage 本身不改變狀態碼也不改變 verdict（通過仍為 0、失敗仍為 3）。texture variable 的解析只讀當前包的模型文件；超出該範圍的變數以 `model-documents-not-loaded` coverage 回報，不跨依賴或原版包解析。在 `assets/<命名空間>/` 之下，掃描會讀取 `textures`、`models`、`blockstates`、`items`、`atlases`、`equipment`、`particles`、`font`；`lang` 為惰性，不讀也不損失；其他頂層類型一律未解讀，會讓 coverage 變 `partial`，每個類型一筆 `uninterpreted-resource` skip（`resource-type-not-interpreted: <類型>`）加一則警告。裝備 `layers.<部位型別>[].texture` 解析到 `textures/entity/equipment/<部位型別>/<路徑>.png`（`models/equipment/` 只在 pack format 42.0 視為裝備定義；`equipment/` 在 46.0 之後讀取）；粒子 `textures[]` 解析到 `textures/particle/<路徑>.png`；字型 `bitmap.file` 解析到 `textures/` 之下、`reference.id` 解析到另一個 `font/*.json`（pack format 15.0 之後讀取）、`ttf.file` 解析到 `font/` 之下。在 item 定義不可用的 46.0 以前版本，舊式模型 `overrides[].model` 會解析，缺模型時為 `PACK_BROKEN_REFERENCE` 錯誤；46.0 之後完全不動。限制：包或依賴自帶 `atlases/particles.json` 時粒子缺檔退成 skip，不檢查粒子貼圖；`trim_overrides[].texture` 只記 skip、不解析；字型 `reference` 的 15.0 界線與粒子 `#` 內部參照規則是未經證實的推論；三個型別的最早版本未查證，舊但已知的版本仍可能報錯；惰性清單目前只有 `lang`，含其他未解讀類型的包會看到 `partial`；本工具沒有在遊戲用戶端載入驗證過。
+- coverage：`validate` 與 `validate-pack` 的報告都帶 `coverage: {status, skipped}`；`partial` 表示有檢查因故略過（例如 `vanilla-not-provided`、`unsupported-source-type`、`unsupported-regex`、`unknown-node-type`、`renderer-fields-not-interpreted`、`version-undetermined`、`model-documents-not-loaded`、`resource-type-not-interpreted: <類型>`、`trim-overrides-not-interpreted`、`particle-atlas-customized`、`internal-reference`、`pattern-reference`、`provider-not-interpreted`、`version-not-determined`、`feature-version-unknown`、`feature-not-in-version`、`unexpected-shape`、`gui-atlas-customized`），每個 skip 都帶 `kind`／`reason`／`target`。每個 skip 也會同時以一則 `PACK_COVERAGE_SKIPPED` 警告回報。coverage 本身不改變狀態碼也不改變 verdict（通過仍為 0、失敗仍為 3）。texture variable 的解析只讀當前包的模型文件；超出該範圍的變數以 `model-documents-not-loaded` coverage 回報，不跨依賴或原版包解析。在 `assets/<命名空間>/` 之下，掃描會讀取 `textures`、`models`、`blockstates`、`items`、`atlases`、`equipment`、`particles`、`font`、`post_effect`、`waypoint_style` 和命名空間下的 `sounds.json`；`lang` 與 `sounds` 為惰性類型；其他頂層類型如 `shaders` 未解讀，會讓 coverage 變 `partial`，每個類型一筆 `uninterpreted-resource` skip（`resource-type-not-interpreted: <類型>`）加一則警告。裝備 `layers.<部位型別>[].texture` 解析到 `textures/entity/equipment/<部位型別>/<路徑>.png`（`models/equipment/` 只在 pack format 42.0 視為裝備定義；`equipment/` 在 46.0 之後讀取）；粒子 `textures[]` 解析到 `textures/particle/<路徑>.png`；字型 `bitmap.file` 解析到 `textures/` 之下、`reference.id` 解析到另一個 `font/*.json`（pack format 15.0 之後讀取）、`ttf.file` 解析到 `font/` 之下。在 item 定義不可用的 46.0 以前版本，舊式模型 `overrides[].model` 會解析，缺模型時為 `PACK_BROKEN_REFERENCE` 錯誤；46.0 之後完全不動。限制：包或依賴自帶 `atlases/particles.json` 時粒子缺檔退成 skip，不檢查粒子貼圖；舊格式的 `trim_overrides` 仍會記為 skip；字型 `reference` 的 15.0 界線與粒子 `#` 內部參照規則是未經證實的推論；三個型別的最早版本未查證，舊但已知的版本仍可能報錯；含未解讀類型的資源包會看到 `partial`；本工具沒有在遊戲用戶端載入驗證過。
 - 貼圖引用：模型貼圖 ID 中的點保留為名稱的一部分（`item/foo.v2` 解析到 `textures/item/foo.v2.png`），結尾明確帶 `.png` 的輸入仍相容。字型 `bitmap.file` 是明確檔案路徑，直接使用原值。裝備、粒子與字型的非法資源位置保留 `PACK_WRONG_PATH`、`PACK_NAMESPACE_PROBLEM`、`PACK_INVALID_FILENAME` 或 `PACK_CASE_MISMATCH`，不再改成 `PACK_BROKEN_REFERENCE`；空字串維持 `PACK_BROKEN_REFERENCE`。確定缺檔與形狀不符的 skip 維持原有分類。
 - 系統檔忽略：`assets/` 下的作業系統中繼資料檔案與封存映像（`.DS_Store`、`Thumbs.db`、`desktop.ini`、`._*` AppleDouble 檔案與 `__MACOSX` 目錄）在資源包掃描時直接忽略，不產生任何 finding、不記錄 coverage skip，也不改變 verdict。
 - 未解讀資源目錄：位於 `assets/<命名空間>/<未解讀類型>/` 目錄內的檔案跳過所有逐檔檢查（檔名、JSON 語法、圖檔解碼與錯位檢查皆不再回報）；每個（命名空間，類型）保留一筆 `uninterpreted-resource` coverage skip 與一則 `PACK_COVERAGE_SKIPPED` 警告。直接位於命名空間目錄底下的檔案、`assets/` 根目錄的命名空間層級問題，以及已解讀類型（例如 `models/`）內放錯位置的檔案，皆維持原本的代碼與嚴重性層級回報。
@@ -360,7 +362,7 @@ mc-asset mcp
 | `model create` | 模型描述（`--spec`） | 模型 JSON | 依明確的描述建立模型文件。 |
 | `model apply <file>` | 模型 JSON 加型別化操作（`--operations`） | 模型 JSON | 全部操作成功才寫出新文件，否則一個都不套用。 |
 | `model export <file>` | 模型 JSON，可選 binding（`--binding`） | 模型 JSON、物品定義、blockstate | 把模型放進資源包，並在旁邊產生物品定義與 blockstate。 |
-| `model preview <file>` | Java 方塊／物品模型 JSON | 診斷 PNG（正面、右側、上面） | 從長方體 `elements` 畫出固定的三視圖診斷圖。 |
+| `model preview <file>` | Java 方塊／物品模型 JSON | 診斷 PNG | 繪製三視圖或等角視圖。 |
 
 ```text
 optimize     <input...> (--output <png> | --output-dir <dir> | --stdout | --dry-run)
@@ -382,7 +384,9 @@ model export   <file> [--output <json>] [--binding <file|->] [--item-output <jso
                       [--minecraft-version <v>] [--resource-pack-version <n>] [--json]
 model preview  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
                       [--minecraft-version <v>] [--resource-pack-version <n>]
-                      [--size <64|128|256>] (--output <png> | --stdout) [--force] [--mkdir] [--json]
+                      [--size <64|128|256>] [--view <view>] [--view-direction <direction>]
+                       [--display <slot>] [--lighting] [--tint <color> | --tints <json>]
+                       (--output <png> | --stdout) [--force] [--mkdir] [--json]
 ```
 
 - `optimize` 的輸入：可傳入明確的 PNG 路徑清單（1 至 256 個檔案；不展開萬用字元、不走目錄），或傳入 `--input-dir <dir>`（可選 `--recursive`，最多 4096 個 PNG）。兩者都給會回報 `ARGUMENT_CONFLICT`；都沒給回報 `INVALID_ARGUMENT`。未指定 `--input-dir` 卻給 `--recursive` 回報 `ARGUMENT_CONFLICT`。
@@ -402,9 +406,39 @@ model preview  <file> [--pack <dir>] [--vanilla <dir>] [--dependency <dir>]...
 - `model inspect` 與 `model validate` 唯讀，不接受輸出旗標。`inspect` 一律退出 0；`validate` 在判定為 `fail` 時退出 3。給了 `--pack` 時，`<file>` 必須位於 `<pack>/assets/<命名空間>/models/` 之下；沒給版本旗標時，版本依 `pack.mcmeta` 推定（沒有可用的值就視為版本不明，不套預設）。
 - `model create`／`model apply` 從檔案或 `-`（stdin；每個指令最多一個 `-`）讀 JSON，並且 `--output` 與 `--stdout` 必須恰好一個。它們只檢查文件本身，不接受 `--pack`、`--vanilla`、`--dependency`。模型支援範圍只含長方體 `elements`。
 - `model export` 至少要有 `--output`、`--item-output`、`--blockstate-output` 其中之一。`--item-output` 需要 `binding.item`（反過來也一樣），`--blockstate-output` 需要 `binding.blockstate`。`binding.item` 需要明確的版本且資源包格式在 46.0 以上，否則回報 `MODEL_UNSUPPORTED_VERSION`（退出碼 5）。`--pack` 會加上佈局與邊界檢查。`--force` 不適用於 `--item-output`、`--blockstate-output`，這兩個檔案永遠不會被覆寫。
-- `model preview` 畫出固定的診斷圖：三個正方形面板橫向排列（`front`、右側、`top`），每個面板邊長為 `--size`（64、128 或 256，預設 64），所以 PNG 寬為 `size * 3`、高為 `size`。`front` 是從北方看北面，右側面板是從東方看東面，`top` 是從上方看上面且北方在上。只畫軸對齊的長方體 `elements`、既有 UV 與 0/90/180/270 的面旋轉，使用整數投影加深度緩衝；座標必須是精確的 1/256 倍數。父鏈與貼圖變數沿用既有的解析脈絡。缺失的貼圖以固定棋盤格填滿該矩形並發出警告；元素旋轉、非 1/256 座標、半透明面與無法解析的貼圖會列在 `coverage.skipped`（`partial`），不會默默畫錯。`display` 變換與遊戲光照不會套用。`--output` 與 `--stdout` 必須恰好一個（都沒給是 `OUTPUT_REQUIRED`，兩個都給是 `ARGUMENT_CONFLICT`）；`size` 不是 64/128/256 是 `INVALID_ARGUMENT`。模型與貼圖只會被讀取，不會被改寫。
+- `model preview` 預設畫出 `front`、`right`、`top` 三個面板，`--size` 可選 64、128、256，預設 64。`--view isometric` 改用單張等角視圖；`--view-direction` 可選 `south-east`（預設）、`south-west`、`north-west`、`north-east`，只適用等角視圖。預設 PNG 的寬為 `size * 3`、高為 `size`：正面顯示北面、右側顯示東面、頂面顯示上面且北方在上。父鏈與貼圖變數沿用既有的解析方式。預覽支援元素旋轉與半透明面；缺少貼圖時使用棋盤格並發出警告，略過或裁切的內容會列在報告中。`--output` 與 `--stdout` 必須恰好選一個，否則分別回報 `OUTPUT_REQUIRED` 或 `ARGUMENT_CONFLICT`；不支援的大小回報 `INVALID_ARGUMENT`。模型和貼圖只會被讀取。
+- `--display` 可選 `gui`、`firstperson_righthand`、`thirdperson_righthand`、`head`、`ground`、`fixed`，不能與 `--view` 併用。`--lighting` 套用固定的面光照係數；`--tint <#RRGGBB>` 為有 `tintindex` 的面染色，`--tints <json>` 則依索引指定顏色，兩者不能併用。報告會列出未套用的效果，包括 GUI 著色器光照。遊戲用戶端的外觀與光照尚未驗證。
 - 共用的寫入保護（`optimize` 與 `model`）：第一個位元組寫出之前，所有目標都已檢查完畢。與輸入或其他輸出互為別名、目標是目錄、目標是符號連結（含懸空的，帶 `--force` 也一樣）、直接父目錄是符號連結，以及 `model export` 時位於 `--pack` 之外的路徑，都會被拒絕。已存在的檔案除非 `--force` 適用，否則回報 `OUTPUT_EXISTS`。每個檔案仍以原子改名提交。
 - 報告只驗證結構與引用是否有效。沒有任何東西在遊戲用戶端裡渲染過模型，所以外觀、光照與遊戲內行為都未驗證。`model preview` 是診斷視圖，不是遊戲渲染器。
+
+---
+
+### 10. 實體貼圖、裝備、字型與粒子
+
+```text
+entity inspect [--layout <id|path>]
+entity template [--layout <id|path>] [--output <path>] [--source <path>] [--stdout] [--no-fill] [--force] [--mkdir]
+entity validate <texture> [--layout <id|path>]
+entity preview <texture> [--layout <id|path>] [--size <n>] [--output <path> | --stdout] [--force] [--mkdir]
+equipment <id> --namespace <namespace> --output-dir <dir> --layer <type[=texture]>... [--minecraft-version <v> | --resource-pack-version <v>] [--dyeable <type[=#RRGGBB]>...] [--player-texture <type>...] [--no-template] [--no-fill] [--force] [--mkdir]
+font <spec> --output <path> --table <path> (--atlas <path> | --output-dir <dir>) [--force] [--mkdir]
+particle <frames> --id <id> --namespace <namespace> --output-dir <dir> [--texture-prefix <prefix>] [--force] [--mkdir]
+model import-bbmodel <file> [--minecraft-version <v> | --resource-pack-version <v>] [--output <file> | --stdout] [--textures <dir>] [--force] [--mkdir]
+model export-bbmodel <file> [--output <file> | --stdout] [--texture <key=path>...] [--force] [--mkdir]
+```
+
+- `entity` 預設使用 `player_wide` 佈局，也接受 `steve`、`player_slim`、`alex` 或佈局 JSON 路徑。`inspect` 列出各面的矩形；`template` 輸出彩色 PNG 或可編輯來源，`--no-fill` 使各面透明。`validate` 檢查尺寸並警告各面以外的不透明像素；`preview` 把貼圖包到零件上，輸出四張等角視圖，面板預設大小為 128。遊戲用戶端的外觀尚未驗證。
+- `equipment` 依目標格式輸出裝備定義；`humanoid`、`humanoid_leggings`、`wings` 可產生貼圖範本，其他類型要加 `--no-template`。`--dyeable` 與 `--player-texture` 套用到指定類型。輸出已存在時需要 `--force`，目錄不存在時需要 `--mkdir`。
+- `font` 讀取列有圖示路徑、尺寸與字元的規格，依高度和基線分組。單組可用 `--atlas`，多組用 `--output-dir`；定義和字元對照表另指定路徑。`particle` 接受單一 PNG、`.mcpx` 或影格目錄，依檔名 UTF-8 位元組排序；新增影格可能改變後續編號，舊檔不會刪除，也不會向原版資源樹確認粒子 ID。
+- `model import-bbmodel` 匯入 Java 方塊／物品的立方體專案，內嵌 PNG 寫到 `--textures` 指定的根目錄；`model export-bbmodel` 以可重複的 `--texture` 指定貼圖。壓縮專案與非立方體元素會被拒絕。轉換後的遊戲畫面尚未驗證。
+- 錯誤碼包括 `ENTITY_LAYOUT_INVALID`、`ENTITY_LAYOUT_UNSUPPORTED_VERSION`、`ENTITY_LAYOUT_OVERLAP`、`ENTITY_TEXTURE_SIZE_MISMATCH`、`EQUIPMENT_INVALID`、`EQUIPMENT_VERSION_UNSUPPORTED`、`FONT_INVALID`、`FONT_CODEPOINT_CONFLICT`、`FONT_UNSUPPORTED_VERSION`、`BBMODEL_UNSUPPORTED_FORMAT`、`BBMODEL_UNSUPPORTED_VERSION`、`BBMODEL_INVALID_DOCUMENT`、`BBMODEL_INVALID_TEXTURE`、`BBMODEL_MISSING_TEXTURE`。
+
+### 配方步驟與驗證範圍
+
+- 配方 `formatVersion: 2` 支援 `blockModel`（八種父模型預設或自訂 `modelSpec`）及 `blockstate`（`variants` 或 `multipart`）。方塊模型也會產生物品模型與物品定義，後者需要資源包格式 46.0。鎖檔記錄 `blockModel`、`blockItemModel`、`blockstate`；格式 1 不接受這兩種步驟。格式 2 的物品定義也支援巢狀模型節點，寫入前會檢查參照。
+- 配方 `formatVersion: 3` 可使用 `entityTemplate`、`equipment`、`font`、`particle`。實體佈局和粒子影格可使用相對於配方的路徑；裝備步驟指定類型與選用貼圖、染色設定；字型步驟使用規格檔及選用對照表路徑。字型命名空間必須與專案相同，預設對照表放在專案的 `font/<id>.table.json`，不放進資源包。
+- 生成器的輸入會計入目標雜湊。鎖檔記錄 `entityTemplate`、`entityTemplateSource`、`equipmentDefinition`、`equipmentTexture`、`fontDefinition`、`fontAtlas`、`fontTable`、`particleDefinition`、`particleTexture`；衝突與 `--dry-run` 沿用建置規則。配方仍宣告的鎖定產物若缺失，`pack check` 會回報 `PACK_GENERATED_OUTPUT_MISSING`。建置會移除本次配方不再宣告的鎖檔項目，但不刪檔；無法規劃的其他配方會阻止清理。只有鎖檔記錄的生成貼圖會略過風格與孤兒貼圖檢查。
+- `validate-pack` 解析音效檔或事件、後製效果的著色器與貼圖、路標精靈圖，以及目標格式支援的裝備 `trim_overrides`。自訂 GUI 圖集可能產生 `gui-atlas-customized` 跳過原因；舊格式仍可能出現 `trim-overrides-not-interpreted`。原版樹沒有音效檔時，缺少的原版音效會回報外部參照警告。著色器的 include 規則仍未解讀；資源包尚未在遊戲用戶端載入驗證。
 
 ---
 
